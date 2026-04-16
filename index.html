@@ -79,7 +79,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="GestPro">
-<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/icons/icon-512.png">
 <div class="sidebar" id="sidebar">
     <div class="p-4">
         <h4 class="fw-semibold" style="color: var(--primary);"><i class="bi bi-box-seam me-2"></i> GestPro</h4>
@@ -861,6 +861,11 @@
     } else {
         showAuthPage();
     }
+     if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js')
+      .then(reg => console.log('✅ Service Worker enregistré', reg))
+      .catch(err => console.error('❌ Service Worker échec', err));
+  }
 </script>
 </body>
 </html>
