@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>GestPro | Gestion Professionnelle</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root { --primary: #2c6e9e; --primary-light: #eef3fa; --secondary: #2ecc71; --bg-body: #f6f9fc; --card-bg: #ffffff; --text-main: #1e2a3a; --border-light: #e9ecef; --radius-card: 1.25rem; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: var(--bg-body); font-family: 'Inter', system-ui, sans-serif; color: var(--text-main); overflow-x: hidden; }
+        .sidebar {
+            position: fixed; top: 0; left: 0; height: 100%; width: 270px;
+            background: var(--card-bg); transition: 0.2s; z-index: 1000;
+            box-shadow: 1px 0 12px rgba(0,0,0,0.02); border-right: 1px solid var(--border-light);
+            overflow-y: auto;
+        }
+        .sidebar .nav-link {
+            color: #4a5b6e; padding: 12px 20px; margin: 6px 16px; border-radius: 0.9rem;
+            transition: 0.2s; font-weight: 500; display: flex; align-items: center; gap: 12px;
+        }
+        .sidebar .nav-link i { font-size: 1.2rem; width: 26px; }
+        .sidebar .nav-link:hover, .sidebar .nav-link.active { background: var(--primary-light); color: var(--primary); }
+        .content { margin-left: 270px; padding: 28px 36px; min-height: 100vh; }
+        .navbar-top {
+            background: var(--card-bg); border-radius: 1.2rem; padding: 12px 28px; margin-bottom: 32px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.02); border: 1px solid var(--border-light);
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .stat-card {
+            background: var(--card-bg); border-radius: var(--radius-card); padding: 1.2rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.02); transition: 0.2s;
+            border: 1px solid var(--border-light); border-top: 3px solid var(--primary);
+        }
+        .stat-card:hover { transform: translateY(-3px); box-shadow: 0 8px 24px rgba(0,0,0,0.04); }
+        .stat-card h6 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; color: #5c6e80; margin-bottom: 0.5rem; }
+        .stat-card h2 { font-size: 1.8rem; font-weight: 700; margin: 0; color: var(--primary); }
+        .table-wrapper {
+            background: var(--card-bg); border-radius: 1rem; overflow: auto;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.02); border: 1px solid var(--border-light);
+        }
+        .table thead th { background: #fafcfd; color: var(--primary); font-weight: 600; font-size: 0.8rem; text-transform: uppercase; padding: 14px 16px; }
+        .table tbody td { padding: 12px 16px; vertical-align: middle; border-bottom: 1px solid var(--border-light); font-size: 0.85rem; }
+        .table tbody tr:hover { background-color: #fefefe; }
+        .btn { border-radius: 2rem !important; font-weight: 500; padding: 8px 22px !important; transition: 0.2s; font-size: 0.85rem; }
+        .btn-primary { background: var(--primary); border: none; }
+        .btn-primary:hover { background: #1f5780; transform: translateY(-1px); }
+        input, select, textarea { border-radius: 2rem !important; border: 1px solid #dee2e6 !important; padding: 10px 18px !important; background: white; }
+        input:focus, select:focus, textarea:focus { border-color: var(--primary) !important; box-shadow: 0 0 0 3px rgba(44,110,158,0.1) !important; outline: none; }
+        .badge-status { padding: 4px 12px; border-radius: 2rem; font-size: 0.7rem; font-weight: 600; }
+        .search-product { position: relative; }
+        .search-results, .client-suggestion {
+            position: absolute; top: 100%; left: 0; right: 0; background: white; border-radius: 1rem;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.08); max-height: 260px; overflow-y: auto; z-index: 1000;
+            border: 1px solid var(--border-light);
+        }
+        .cart-item { display: flex; justify-content: space-between; align-items: center; background: #f9fbfd; padding: 10px 16px; margin-bottom: 8px; border-radius: 1rem; flex-wrap: wrap; }
+        .qty-control { display: inline-flex; align-items: center; gap: 10px; background: white; padding: 4px 12px; border-radius: 2rem; }
+        @media (max-width: 768px) {
+            .sidebar { transform: translateX(-100%); }
+            .sidebar.open { transform: translateX(0); }
+            .content { margin-left: 0; }
+            .toggle-sidebar { display: block; }
+        }
+        .toggle-sidebar {
+            display: none; position: fixed; bottom: 24px; right: 24px; z-index: 1100;
+            background: var(--primary); border-radius: 60px; width: 54px; height: 54px;
+            text-align: center; line-height: 54px; color: white; cursor: pointer;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.08); font-size: 1.5rem;
+        }
+        .modal-content { border-radius: 1.5rem !important; border: none; }
+    </style>
+</head>
+<body>
+
+<div class="sidebar" id="sidebar">
+    <div class="p-4">
+        <h4 class="fw-semibold" style="color: var(--primary);"><i class="bi bi-box-seam me-2"></i> GestPro</h4>
+        <hr class="opacity-25">
+    </div>
+    <nav class="nav flex-column">
+        <a class="nav-link" data-page="dashboard"><i class="bi bi-speedometer2"></i> Tableau de bord</a>
+        <a class="nav-link" data-page="products"><i class="bi bi-cubes"></i> Produits</a>
+        <a class="nav-link" data-page="sales"><i class="bi bi-cart-plus"></i> Ventes</a>
+        <a class="nav-link" data-page="proforma"><i class="bi bi-file-text"></i> Factures Proforma</a>
+        <a class="nav-link" data-page="invoices"><i class="bi bi-receipt"></i> Factures clients</a>
+        <a class="nav-link" data-page="clients"><i class="bi bi-people"></i> Clients</a>
+        <a class="nav-link" data-page="cash"><i class="bi bi-cash-stack"></i> Caisse</a>
+        <a class="nav-link" data-page="inventory"><i class="bi bi-clipboard-data"></i> Inventaire</a>
+        <a class="nav-link" data-page="reports"><i class="bi bi-graph-up"></i> Rapports</a>
+        <a class="nav-link" data-page="settings"><i class="bi bi-gear"></i> Paramètres</a>
+        <a class="nav-link" data-page="history"><i class="bi bi-clock-history"></i> Historique</a>
+        <hr class="opacity-25 mx-3">
+        <a class="nav-link" id="logoutBtn"><i class="bi bi-box-arrow-right"></i> Déconnexion</a>
+    </nav>
+</div>
+<div class="toggle-sidebar" id="toggleSidebar"><i class="bi bi-list"></i></div>
+
+<div class="content" id="mainContent">
+    <div class="navbar-top">
+        <h3 id="pageTitle" class="mb-0 fw-semibold">Tableau de bord</h3>
+        <div><span id="userName" class="fw-bold me-2"></span><i class="bi bi-person-circle fs-5"></i></div>
+    </div>
+    <div id="pageContainer">Chargement...</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    let token = localStorage.getItem('token');
+    let currentUser = null;
+    let allProducts = [];
+
+    async function apiCall(endpoint, method = 'GET', body = null) {
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        const res = await fetch(`/api${endpoint}`, { method, headers, body: body ? JSON.stringify(body) : undefined });
+        if (res.status === 401) { logout(); throw new Error('Session expirée'); }
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Erreur');
+        return data;
+    }
+
+    function showAuthPage() {
+        document.getElementById('mainContent').innerHTML = `
+            <div class="row justify-content-center mt-5">
+                <div class="col-md-5">
+                    <div class="card shadow-lg border-0 p-4" style="border-radius: 48px;">
+                        <h3 class="text-center mb-4"><i class="bi bi-box-seam"></i> GestPro</h3>
+                        <div class="tab-content mt-3">
+                            <div class="tab-pane active">
+                                <input type="email" id="loginEmail" class="form-control mb-2" placeholder="Email">
+                                <input type="password" id="loginPassword" class="form-control mb-2" placeholder="Mot de passe">
+                                <button class="btn btn-primary w-100" onclick="login()">Connexion</button>
+                            </div>
+                        </div>
+                        <div id="authMsg" class="text-danger small mt-3 text-center"></div>
+                    </div>
+                </div>
+            </div>`;
+    }
+
+   window.login = async () => {
+    const email = document.getElementById('loginEmail').value;
+    const password = document.getElementById('loginPassword').value;
+    try {
+        const res = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        token = data.token;
+        currentUser = data.user;
+        localStorage.setItem('token', token);
+        localStorage.setItem('user', JSON.stringify(currentUser));
+        // Recharger la page pour afficher l'application
+        window.location.reload();
+    } catch(err) {
+        document.getElementById('authMsg').innerText = err.message;
+    }
+};
+
+    function logout() {
+        token = null; localStorage.clear(); currentUser = null;
+        showAuthPage();
+    }
+    document.getElementById('logoutBtn')?.addEventListener('click', logout);
+    document.getElementById('toggleSidebar')?.addEventListener('click', () => document.getElementById('sidebar').classList.toggle('open'));
+
+    function showApp() {
+        const userNameSpan = document.getElementById('userName');
+        if (userNameSpan) userNameSpan.innerText = currentUser?.name || '';
+        loadPage('dashboard');
+        document.querySelectorAll('.sidebar .nav-link[data-page]').forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                loadPage(link.getAttribute('data-page'));
+            });
+        });
+    }
+
+    async function loadPage(page) {
+        const titles = {
+            dashboard: 'Tableau de bord', products: 'Produits', sales: 'Ventes',
+            proforma: 'Factures Proforma', invoices: 'Factures clients', clients: 'Clients',
+            cash: 'Caisse', inventory: 'Inventaire', reports: 'Rapports',
+            settings: 'Paramètres', history: 'Historique'
+        };
+        document.getElementById('pageTitle').innerText = titles[page] || page;
+        if (page === 'dashboard') await renderDashboard();
+        else if (page === 'products') await renderProducts();
+        else if (page === 'sales') await renderSales();
+        else if (page === 'proforma') await renderProforma();
+        else if (page === 'invoices') await renderInvoices();
+        else if (page === 'clients') await renderClients();
+        else if (page === 'cash') await renderCash();
+        else if (page === 'inventory') await renderInventory();
+        else if (page === 'reports') await renderReports();
+        else if (page === 'settings') await renderSettings();
+        else if (page === 'history') await renderHistory();
+    }
+
+    // DASHBOARD
+    async function renderDashboard() {
+        const data = await apiCall('/reports/dashboard');
+        const lowStockLink = `<a href="#" onclick="loadPage('products'); setTimeout(() => document.getElementById('lowStockFilter')?.click(), 500);" class="text-decoration-none">Voir les produits en stock faible</a>`;
+        const html = `
+            <div class="row g-4">
+                <div class="col-md-3"><div class="stat-card"><h6>Produits</h6><h2>${data.totalProducts}</h2><small class="text-muted">dont ${data.lowStock} stock faible</small><br><small>${lowStockLink}</small></div></div>
+                <div class="col-md-3"><div class="stat-card"><h6>Valeur stock</h6><h2>${parseFloat(data.inventoryValue).toFixed(0)} FCFA</h2></div></div>
+                <div class="col-md-3"><div class="stat-card"><h6>Ventes aujourd'hui</h6><h2>${parseFloat(data.todaySales).toFixed(0)} FCFA</h2></div></div>
+                <div class="col-md-3"><div class="stat-card"><h6>Ventes mois</h6><h2>${parseFloat(data.monthSales).toFixed(0)} FCFA</h2></div></div>
+            </div>
+            <div class="row mt-4">
+                <div class="col-md-6"><div class="card p-3 border-0 shadow-sm rounded-4"><h5>Top 5 produits</h5><canvas id="topProductsChart" height="200"></canvas></div></div>
+                <div class="col-md-6"><div class="card p-3 border-0 shadow-sm rounded-4"><h5>Dernières ventes</h5><div class="table-wrapper"><table class="table"><thead><tr><th>#</th><th>Client</th><th>Total</th><th>Date</th></tr></thead><tbody>${data.recentSales.map(s => `<tr><td>#${s.id}</td><td>${s.client_name||'-'}</td><td>${s.final_amount} FCFA</td><td>${new Date(s.sale_date).toLocaleDateString()}</td></tr>`).join('')}</tbody></table></div></div></div>
+            </div>`;
+        document.getElementById('pageContainer').innerHTML = html;
+        const ctx = document.getElementById('topProductsChart')?.getContext('2d');
+        if (ctx && data.topProducts.length) new Chart(ctx, { type: 'bar', data: { labels: data.topProducts.map(p=>p.name), datasets: [{ label: 'Quantité vendue', data: data.topProducts.map(p=>p.qte), backgroundColor: '#2ecc71' }] } });
+    }
+
+    // PRODUITS
+    async function renderProducts() {
+        const cats = await apiCall('/categories');
+        const supps = await apiCall('/suppliers');
+        const html = `
+            <div class="row mb-3">
+                <div class="col-md-4">
+                    <input type="text" id="searchProduct" class="form-control" placeholder="Rechercher par nom, SKU ou code barre...">
+                </div>
+                <div class="col-md-2">
+                    <button class="btn btn-outline-secondary" onclick="searchProducts()">Rechercher</button>
+                </div>
+                <div class="col-md-2">
+                    <button class="btn btn-outline-warning" id="lowStockFilter" onclick="searchProducts(true)">Stock faible</button>
+                </div>
+                <div class="col-md-4 text-end">
+                    <button class="btn btn-primary" onclick="showProductModal()">+ Nouveau produit</button>
+                </div>
+            </div>
+            <div class="table-wrapper"><table class="table align-middle"><thead><tr><th>Code barre</th><th>SKU</th><th>Nom</th><th>Catégorie</th><th>Stock</th><th>Prix vente</th><th>Actions</th></tr></thead><tbody id="productsTable"></tbody></table></div>
+            <div class="modal fade" id="productModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5>Produit</h5><button class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body">
+            <input type="hidden" id="prodId">
+            <input type="text" id="prodBarcode" class="form-control mb-2" placeholder="Code barre">
+            <input type="text" id="prodSku" class="form-control mb-2" placeholder="SKU*">
+            <input type="text" id="prodName" class="form-control mb-2" placeholder="Nom*">
+            <input type="text" id="prodCategoryName" class="form-control mb-2" placeholder="Catégorie (nouvelle ou existante)">
+            <select id="prodCategorySelect" class="form-control mb-2"><option value="">Sélectionner catégorie existante</option>${cats.map(c=>`<option value="${c.id}">${c.name}</option>`)}</select>
+            <select id="prodSupplier" class="form-control mb-2"><option value="">Aucun fournisseur</option>${supps.map(s=>`<option value="${s.id}">${s.name}</option>`)}</select>
+            <input type="number" id="prodQuantity" class="form-control mb-2" placeholder="Quantité">
+            <input type="text" id="prodUnit" class="form-control mb-2" placeholder="Unité" value="pièce">
+            <input type="number" id="prodReorder" class="form-control mb-2" placeholder="Seuil réapprovisionnement">
+            <input type="number" step="0.01" id="prodSellPrice" class="form-control mb-2" placeholder="Prix vente (FCFA)">
+            <input type="number" step="0.01" id="prodBuyPrice" class="form-control mb-2" placeholder="Prix achat (FCFA)">
+            <input type="text" id="prodLocation" class="form-control mb-2" placeholder="Emplacement">
+            </div><div class="modal-footer"><button class="btn btn-primary" onclick="saveProduct()">Enregistrer</button></div></div></div></div>`;
+        document.getElementById('pageContainer').innerHTML = html;
+
+        const catNameInput = document.getElementById('prodCategoryName');
+        const catSelect = document.getElementById('prodCategorySelect');
+        catNameInput.addEventListener('input', () => { catSelect.value = ''; });
+        catSelect.addEventListener('change', () => { if (catSelect.value) catNameInput.value = ''; });
+
+        window.searchProducts = async (lowStock = false) => {
+            const q = document.getElementById('searchProduct').value;
+            let url = `/products/search?`;
+            if (q) url += `q=${encodeURIComponent(q)}&`;
+            if (lowStock) url += `lowStock=true`;
+            const prods = await apiCall(url);
+            renderProductsTable(prods);
+        };
+        window.renderProductsTable = (prods) => {
+            const tbody = document.getElementById('productsTable');
+            if (!tbody) return;
+            tbody.innerHTML = prods.map(p => `
+                <tr class="${p.quantity <= p.reorder_level ? 'table-warning' : ''}">
+                     <td>${p.barcode || '-'}</td>
+                     <td>${p.sku}</td>
+                     <td>${p.name}</td>
+                     <td>${p.category_name || '-'}</td>
+                     <td>${p.quantity} ${p.unit}</td>
+                     <td>${p.sell_price} FCFA</td>
+                     <td><button class="btn btn-sm btn-warning" onclick="editProduct(${p.id})">✏️</button> <button class="btn btn-sm btn-danger" onclick="deleteProduct(${p.id})">🗑️</button></td>
+                </tr>
+            `).join('');
+        };
+        window.showProductModal = () => {
+            document.getElementById('prodId').value = '';
+            document.getElementById('prodBarcode').value = '';
+            document.getElementById('prodSku').value = '';
+            document.getElementById('prodName').value = '';
+            document.getElementById('prodCategoryName').value = '';
+            document.getElementById('prodCategorySelect').value = '';
+            document.getElementById('prodSupplier').value = '';
+            document.getElementById('prodQuantity').value = 0;
+            document.getElementById('prodUnit').value = 'pièce';
+            document.getElementById('prodReorder').value = 5;
+            document.getElementById('prodSellPrice').value = 0;
+            document.getElementById('prodBuyPrice').value = 0;
+            document.getElementById('prodLocation').value = '';
+            new bootstrap.Modal(document.getElementById('productModal')).show();
+        };
+        window.editProduct = async (id) => {
+            const p = (await apiCall('/products')).find(x=>x.id==id);
+            document.getElementById('prodId').value = p.id;
+            document.getElementById('prodBarcode').value = p.barcode || '';
+            document.getElementById('prodSku').value = p.sku;
+            document.getElementById('prodName').value = p.name;
+            document.getElementById('prodCategoryName').value = '';
+            document.getElementById('prodCategorySelect').value = p.category_id || '';
+            document.getElementById('prodSupplier').value = p.supplier_id || '';
+            document.getElementById('prodQuantity').value = p.quantity;
+            document.getElementById('prodUnit').value = p.unit;
+            document.getElementById('prodReorder').value = p.reorder_level;
+            document.getElementById('prodSellPrice').value = p.sell_price;
+            document.getElementById('prodBuyPrice').value = p.buy_price;
+            document.getElementById('prodLocation').value = p.location || '';
+            new bootstrap.Modal(document.getElementById('productModal')).show();
+        };
+        window.saveProduct = async () => {
+            const id = document.getElementById('prodId').value;
+            const category_id = document.getElementById('prodCategorySelect').value;
+            const category_name = document.getElementById('prodCategoryName').value;
+            const data = {
+                sku: document.getElementById('prodSku').value,
+                barcode: document.getElementById('prodBarcode').value,
+                name: document.getElementById('prodName').value,
+                category_id: category_id || null,
+                category_name: category_name || null,
+                supplier_id: document.getElementById('prodSupplier').value || null,
+                quantity: parseInt(document.getElementById('prodQuantity').value),
+                unit: document.getElementById('prodUnit').value,
+                reorder_level: parseInt(document.getElementById('prodReorder').value),
+                sell_price: parseFloat(document.getElementById('prodSellPrice').value),
+                buy_price: parseFloat(document.getElementById('prodBuyPrice').value),
+                location: document.getElementById('prodLocation').value
+            };
+            if (id) await apiCall(`/products/${id}`, 'PUT', data);
+            else await apiCall('/products', 'POST', data);
+            bootstrap.Modal.getInstance(document.getElementById('productModal')).hide();
+            searchProducts();
+        };
+        window.deleteProduct = async (id) => { if(confirm('Supprimer ?')) { await apiCall(`/products/${id}`, 'DELETE'); searchProducts(); } };
+        searchProducts();
+    }
+
+    // VENTES
+    async function renderSales() {
+        allProducts = await apiCall('/products');
+        let cart = [];
+        let clientsList = [];
+        async function loadClients() { const res = await fetch(`/api/clients?search=`, { headers: { 'Authorization': `Bearer ${token}` } }); clientsList = await res.json(); }
+        await loadClients();
+        const html = `
+            <div class="row">
+                <div class="col-md-5"><div class="card border-0 shadow-sm rounded-4 p-4">
+                <h5 class="mb-3">Nouvelle vente</h5>
+                <div class="mb-3 position-relative">
+                    <label>Client (nom)</label>
+                    <input type="text" id="clientInput" class="form-control" placeholder="Nom du client (laissez vide pour anonyme)" autocomplete="off">
+                    <div id="clientSuggestions" class="client-suggestion"></div>
+                </div>
+                <div class="mb-3">
+                    <label>Scanner code barre</label>
+                    <input type="text" id="barcodeInput" class="form-control" placeholder="Scannez ou saisissez le code barre">
+                </div>
+                <div class="search-product mb-3">
+                    <label>Rechercher produit</label>
+                    <input type="text" id="productSearch" class="form-control" placeholder="Nom, SKU...">
+                    <div id="searchResults" class="search-results"></div>
+                </div>
+                <div id="selectedProductInfo" class="mb-2 small text-muted"></div>
+                <div class="d-flex gap-2 mb-3">
+                    <input type="number" id="qtySelect" class="form-control" value="1" style="width: 100px;">
+                    <input type="number" id="priceSelect" class="form-control" placeholder="Prix unitaire" step="0.01" style="width: 140px;">
+                    <button class="btn btn-secondary" onclick="addToCart()">Ajouter</button>
+                </div>
+                <hr><h6>Panier</h6><div id="cartList"></div>
+                <div class="mt-3 fw-bold">Total : <span id="cartTotal">0</span> FCFA</div>
+                <hr>
+                <div class="form-check mb-2">
+                    <input class="form-check-input" type="checkbox" id="deferredPayment">
+                    <label>Paiement différé (facture)</label>
+                </div>
+                <div id="deferredFields" style="display:none;">
+                    <label>Date d'échéance</label>
+                    <input type="date" id="dueDate" class="form-control mb-2">
+                </div>
+                <label>Remise (FCFA) : <input type="number" id="discount" class="form-control" value="0"></label>
+                <label>Mode paiement : <select id="paymentMethod" class="form-control"><option value="cash">Espèces</option><option value="card">Carte</option><option value="transfer">Virement</option></select></label>
+                <button class="btn btn-success mt-3 w-100" onclick="completeSale()">Finaliser la vente</button>
+                </div></div>
+                <div class="col-md-7"><div class="card border-0 shadow-sm rounded-4 p-3"><h5>Historique ventes</h5>
+                <div class="row mb-2">
+                    <div class="col-md-6"><input type="text" id="filterClient" class="form-control" placeholder="Filtrer par client"></div>
+                    <div class="col-md-6"><input type="date" id="filterDate" class="form-control" placeholder="Date"></div>
+                    <div class="col-md-12 mt-2"><button class="btn btn-sm btn-primary" onclick="filterSales()">Rechercher</button> <button class="btn btn-sm btn-secondary" onclick="loadSalesList()">Réinitialiser</button></div>
+                </div>
+                <div class="table-wrapper"><table class="table table-sm"><thead><tr><th>#</th><th>Client</th><th>Total (FCFA)</th><th>Statut</th><th>Date</th><th>Actions</th></tr></thead><tbody id="salesList"></tbody></table></div></div></div>
+            </div>`;
+        document.getElementById('pageContainer').innerHTML = html;
+
+        // Autocomplétion client
+        const clientInput = document.getElementById('clientInput');
+        const clientSuggestions = document.getElementById('clientSuggestions');
+        let selectedClient = null;
+        clientInput.addEventListener('input', (e) => {
+            const term = e.target.value.toLowerCase();
+            if (term.length < 2) { clientSuggestions.style.display = 'none'; return; }
+            const filtered = clientsList.filter(c => c.name.toLowerCase().includes(term));
+            if (!filtered.length) { clientSuggestions.style.display = 'none'; return; }
+            clientSuggestions.innerHTML = filtered.map(c => `<div data-id="${c.id}" data-name="${c.name}" data-email="${c.email||''}" data-phone="${c.phone||''}" data-address="${c.address||''}">${c.name}</div>`).join('');
+            clientSuggestions.style.display = 'block';
+            document.querySelectorAll('#clientSuggestions div').forEach(el => {
+                el.addEventListener('click', () => {
+                    selectedClient = { id: parseInt(el.dataset.id), name: el.dataset.name, email: el.dataset.email, phone: el.dataset.phone, address: el.dataset.address };
+                    clientInput.value = el.dataset.name;
+                    clientSuggestions.style.display = 'none';
+                });
+            });
+        });
+        document.addEventListener('click', (e) => { if (!clientInput.contains(e.target) && !clientSuggestions.contains(e.target)) clientSuggestions.style.display = 'none'; });
+
+        // Recherche produit
+        const searchInput = document.getElementById('productSearch');
+        const resultsDiv = document.getElementById('searchResults');
+        const selectedInfo = document.getElementById('selectedProductInfo');
+        let selectedProduct = null;
+        let searchTimeout;
+        searchInput.addEventListener('input', (e) => {
+            const term = e.target.value.toLowerCase();
+            if (term.length < 2) { resultsDiv.style.display = 'none'; return; }
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                const filtered = allProducts.filter(p => p.name.toLowerCase().includes(term) || p.sku.toLowerCase().includes(term) || (p.barcode && p.barcode.toLowerCase().includes(term)));
+                if (!filtered.length) { resultsDiv.style.display = 'none'; return; }
+                resultsDiv.innerHTML = filtered.map(p => `<div class="result-item" data-id="${p.id}" data-name="${p.name}" data-price="${p.sell_price}" data-stock="${p.quantity}">${p.name} (${p.sku}) - ${p.sell_price} FCFA (stock:${p.quantity})</div>`).join('');
+                resultsDiv.style.display = 'block';
+                document.querySelectorAll('.result-item').forEach(el => {
+                    el.addEventListener('click', () => {
+                        selectedProduct = { id: parseInt(el.dataset.id), name: el.dataset.name, price: parseFloat(el.dataset.price), stock: parseInt(el.dataset.stock) };
+                        searchInput.value = el.dataset.name;
+                        document.getElementById('priceSelect').value = selectedProduct.price;
+                        selectedInfo.innerHTML = `Prix catalogue: ${selectedProduct.price} FCFA, Stock: ${selectedProduct.stock}`;
+                        resultsDiv.style.display = 'none';
+                    });
+                });
+            }, 300);
+        });
+        document.addEventListener('click', (e) => { if (!searchInput.contains(e.target) && !resultsDiv.contains(e.target)) resultsDiv.style.display = 'none'; });
+
+        // Scanner code barre
+        const barcodeInput = document.getElementById('barcodeInput');
+        barcodeInput.addEventListener('change', async (e) => {
+            const code = e.target.value.trim();
+            if (code.length === 0) return;
+            try {
+                const prod = await apiCall(`/products/barcode/${encodeURIComponent(code)}`);
+                selectedProduct = { id: prod.id, name: prod.name, price: parseFloat(prod.sell_price), stock: parseInt(prod.quantity) };
+                searchInput.value = prod.name;
+                document.getElementById('priceSelect').value = selectedProduct.price;
+                selectedInfo.innerHTML = `Prix catalogue: ${selectedProduct.price} FCFA, Stock: ${selectedProduct.stock}`;
+            } catch(err) { alert('Produit non trouvé'); }
+            barcodeInput.value = '';
+        });
+
+        const deferredCheck = document.getElementById('deferredPayment');
+        const deferredFields = document.getElementById('deferredFields');
+        deferredCheck.addEventListener('change', () => deferredFields.style.display = deferredCheck.checked ? 'block' : 'none');
+
+        window.addToCart = () => {
+            if (!selectedProduct) return alert('Sélectionnez un produit');
+            let qty = parseInt(document.getElementById('qtySelect').value);
+            if (isNaN(qty) || qty <= 0) qty = 1;
+            let unitPrice = parseFloat(document.getElementById('priceSelect').value);
+            if (isNaN(unitPrice) || unitPrice <= 0) unitPrice = selectedProduct.price;
+            if (qty > selectedProduct.stock) return alert(`Stock insuffisant (${selectedProduct.stock} disponible)`);
+            const existing = cart.find(i => i.product_id === selectedProduct.id);
+            if (existing) {
+                existing.quantity += qty;
+                existing.unit_price = unitPrice;
+                existing.total_price = existing.quantity * existing.unit_price;
+            } else {
+                cart.push({ product_id: selectedProduct.id, name: selectedProduct.name, quantity: qty, unit_price: unitPrice, total_price: qty * unitPrice, stock: selectedProduct.stock });
+            }
+            renderCart();
+            selectedProduct = null;
+            searchInput.value = '';
+            document.getElementById('priceSelect').value = '';
+            selectedInfo.innerHTML = '';
+        };
+        window.renderCart = () => {
+            const container = document.getElementById('cartList');
+            let total = 0;
+            container.innerHTML = cart.map((item, idx) => {
+                total += item.total_price;
+                return `<div class="cart-item">
+                            <span>${item.name}</span>
+                            <div class="qty-control">
+                                <button class="btn btn-sm" onclick="updateQty(${idx}, -1)">-</button>
+                                <span class="mx-2">${item.quantity}</span>
+                                <button class="btn btn-sm" onclick="updateQty(${idx}, 1)">+</button>
+                            </div>
+                            <input type="number" step="0.01" class="price-input" value="${item.unit_price}" onchange="updatePrice(${idx}, this.value)">
+                            <span>${item.total_price.toFixed(0)} FCFA</span>
+                            <button class="btn btn-sm btn-danger" onclick="removeFromCart(${idx})">X</button>
+                        </div>`;
+            }).join('');
+            document.getElementById('cartTotal').innerText = total.toFixed(0);
+        };
+        window.updateQty = (idx, delta) => {
+            const newQty = cart[idx].quantity + delta;
+            if (newQty < 1) return;
+            if (newQty > cart[idx].stock) return alert('Stock insuffisant');
+            cart[idx].quantity = newQty;
+            cart[idx].total_price = cart[idx].quantity * cart[idx].unit_price;
+            renderCart();
+        };
+        window.updatePrice = (idx, newPrice) => {
+            const price = parseFloat(newPrice);
+            if (isNaN(price) || price <= 0) return;
+            cart[idx].unit_price = price;
+            cart[idx].total_price = cart[idx].quantity * price;
+            renderCart();
+        };
+        window.removeFromCart = (idx) => { cart.splice(idx,1); renderCart(); };
+        window.completeSale = async () => {
+            if (cart.length === 0) return alert('Panier vide');
+            const clientName = clientInput.value.trim();
+            let clientData = {};
+            if (selectedClient) clientData = { client_name: selectedClient.name, client_email: selectedClient.email, client_phone: selectedClient.phone, client_address: selectedClient.address };
+            else if (clientName !== '') clientData = { client_name: clientName, client_email: '', client_phone: '', client_address: '' };
+            else clientData = { client_name: '', client_email: '', client_phone: '', client_address: '' };
+            const discount = parseFloat(document.getElementById('discount').value);
+            const payment_method = document.getElementById('paymentMethod').value;
+            const isDeferred = document.getElementById('deferredPayment').checked;
+            const due_date = isDeferred ? document.getElementById('dueDate').value : null;
+            const status = isDeferred ? 'pending' : 'completed';
+            const items = cart.map(i => ({ product_id: i.product_id, quantity: i.quantity, unit_price: i.unit_price }));
+            try {
+                const result = await apiCall('/sales', 'POST', { ...clientData, items, discount, payment_method, status, due_date });
+                alert(`Vente enregistrée (N° ${result.sale_id}) - ${status === 'pending' ? 'Facture en attente' : 'Payée'}`);
+                if (!isDeferred && confirm('Télécharger la facture ?')) window.open(`/api/sales/${result.sale_id}/invoice?token=${token}`, '_blank');
+                cart = [];
+                renderCart();
+                loadSalesList();
+                renderDashboard();
+                clientInput.value = '';
+                selectedClient = null;
+            } catch(err) { alert(err.message); }
+        };
+        window.filterSales = async () => {
+            const client = document.getElementById('filterClient').value;
+            const date = document.getElementById('filterDate').value;
+            let url = '/sales?';
+            if (client) url += `client_name=${encodeURIComponent(client)}&`;
+            if (date) url += `start_date=${date}&end_date=${date}`;
+            const sales = await apiCall(url);
+            renderSalesTable(sales);
+        };
+        window.loadSalesList = async () => {
+            const sales = await apiCall('/sales');
+            renderSalesTable(sales);
+        };
+        function renderSalesTable(sales) {
+            document.getElementById('salesList').innerHTML = sales.slice(0,50).map(s => `
+                <tr>
+                    <td>${s.id}</td>
+                    <td>${s.client_name||'-'}</td>
+                    <td>${s.final_amount.toLocaleString()}</td>
+                    <td><span class="badge-status ${s.status==='completed'?'bg-success text-white':'bg-warning text-dark'}">${s.status==='completed'?'Payée':'Impayée'}</span></td>
+                    <td>${new Date(s.sale_date).toLocaleString()}</td>
+                    <td>
+                        <button class="btn btn-sm btn-info" onclick="window.open('/api/sales/${s.id}/invoice?token=${token}','_blank')">Facture</button>
+                        <button class="btn btn-sm btn-primary" onclick="window.open('/api/sales/${s.id}/order?token=${token}','_blank')">Bon commande</button>
+                        <button class="btn btn-sm btn-secondary" onclick="window.open('/api/sales/${s.id}/delivery?token=${token}','_blank')">Livraison</button>
+                        ${s.status === 'pending' ? `<button class="btn btn-sm btn-warning" onclick="recordPayment(${s.id}, ${s.final_amount})">Règlement</button>` : ''}
+                    </td>
+                </tr>
+            `).join('');
+        }
+        window.recordPayment = async (saleId, totalAmount) => {
+            let amount = parseFloat(prompt(`Montant à payer (max ${totalAmount.toLocaleString()} FCFA) :`, totalAmount));
+            if (isNaN(amount) || amount <= 0) return;
+            const method = prompt('Mode de paiement (cash, card, transfer) :', 'cash');
+            try {
+                const result = await apiCall(`/sales/${saleId}/payment`, 'POST', { amount, payment_method: method });
+                alert(`Règlement enregistré. Reste à payer : ${result.remaining} FCFA`);
+                loadSalesList();
+                if (typeof loadAllInvoices === 'function') loadAllInvoices();
+            } catch(err) { alert(err.message); }
+        };
+        loadSalesList();
+    }
+
+    // FACTURES CLIENTS (recherche)
+    async function renderInvoices() {
+        let invoices = [];
+        const html = `<div class="card border-0 shadow-sm rounded-4 p-4">
+            <div class="row mb-3">
+                <div class="col-md-4"><input type="text" id="searchClientName" class="form-control" placeholder="Nom du client"></div>
+                <div class="col-md-4"><input type="date" id="searchDate" class="form-control" placeholder="Date"></div>
+                <div class="col-md-4"><button class="btn btn-primary" onclick="searchInvoices()">Rechercher</button> <button class="btn btn-secondary" onclick="loadAllInvoices()">Toutes</button></div>
+            </div>
+            <div id="invoicesList"></div></div>`;
+        document.getElementById('pageContainer').innerHTML = html;
+        window.searchInvoices = async () => {
+            const client = document.getElementById('searchClientName').value;
+            const date = document.getElementById('searchDate').value;
+            let url = '/sales?status=pending';
+            if (client) url += `&client_name=${encodeURIComponent(client)}`;
+            if (date) url += `&start_date=${date}&end_date=${date}`;
+            invoices = await apiCall(url);
+            renderTable(invoices);
+        };
+        window.loadAllInvoices = async () => {
+            invoices = await apiCall('/sales?status=pending');
+            renderTable(invoices);
+        };
+        window.renderTable = (invoices) => {
+            if (invoices.length === 0) { document.getElementById('invoicesList').innerHTML = '<div class="alert alert-info">Aucune facture impayée</div>'; return; }
+            let html = `<div class="table-wrapper"><table class="table"><thead><tr><th>N°</th><th>Client</th><th>Montant (FCFA)</th><th>Date vente</th><th>Échéance</th><th>Actions</th></tr></thead><tbody>`;
+            invoices.forEach(f => {
+                html += `<tr>
+                            <td>${f.id}</td>
+                            <td>${f.client_name || 'Client particulier'}</td>
+                            <td>${f.final_amount.toLocaleString()}</td>
+                            <td>${new Date(f.sale_date).toLocaleDateString()}</td>
+                            <td>${f.due_date ? new Date(f.due_date).toLocaleDateString() : '-'}</td>
+                            <td>
+                                <button class="btn btn-sm btn-warning" onclick="recordPaymentInvoice(${f.id}, ${f.final_amount})">Règlement</button>
+                                <button class="btn btn-sm btn-info" onclick="window.open('/api/sales/${f.id}/invoice?token=${token}','_blank')">PDF</button>
+                            </td>
+                         </tr>`;
+            });
+            html += `</tbody></table></div>`;
+            document.getElementById('invoicesList').innerHTML = html;
+        };
+        window.recordPaymentInvoice = async (saleId, totalAmount) => {
+            let amount = parseFloat(prompt(`Montant à payer (max ${totalAmount.toLocaleString()} FCFA) :`, totalAmount));
+            if (isNaN(amount) || amount <= 0) return;
+            const method = prompt('Mode de paiement (cash, card, transfer) :', 'cash');
+            try {
+                const result = await apiCall(`/sales/${saleId}/payment`, 'POST', { amount, payment_method: method });
+                alert(`Règlement enregistré. Reste à payer : ${result.remaining} FCFA`);
+                searchInvoices();
+            } catch(err) { alert(err.message); }
+        };
+        await loadAllInvoices();
+    }
+
+    // FACTURES PROFORMA
+    async function renderProforma() {
+        let proformas = [];
+        const html = `
+            <button class="btn btn-primary mb-3" onclick="showProformaModal()">+ Nouvelle facture proforma</button>
+            <div class="card border-0 shadow-sm rounded-4 p-4">
+                <div class="table-wrapper"><table class="table"><thead><tr><th>N°</th><th>Client</th><th>Date</th><th>Total (FCFA)</th><th>Statut</th><th>Actions</th></tr></thead><tbody id="proformaList"></tbody></table></div>
+            </div>
+            <div class="modal fade" id="proformaModal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-header"><h5>Nouvelle facture proforma</h5><button class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="row"><div class="col-md-6"><label>Client</label><input type="text" id="proformaClient" class="form-control mb-2" placeholder="Nom du client"><label>Email</label><input type="email" id="proformaEmail" class="form-control mb-2" placeholder="Email"><label>Téléphone</label><input type="text" id="proformaPhone" class="form-control mb-2" placeholder="Téléphone"><label>Adresse</label><textarea id="proformaAddress" class="form-control mb-2" placeholder="Adresse"></textarea><label>Valable jusqu'au</label><input type="date" id="proformaValidUntil" class="form-control mb-2"></div><div class="col-md-6"><label>Remise (FCFA)</label><input type="number" id="proformaDiscount" class="form-control mb-2" value="0"><label>Notes</label><textarea id="proformaNotes" class="form-control mb-2" placeholder="Notes"></textarea></div></div><hr><h6>Articles</h6><div id="proformaItemsList"></div><button class="btn btn-secondary btn-sm mt-2" onclick="addProformaItem()">+ Ajouter article</button></div><div class="modal-footer"><button class="btn btn-success" onclick="saveProforma()">Enregistrer</button></div></div></div></div>`;
+        document.getElementById('pageContainer').innerHTML = html;
+        let items = [];
+        window.addProformaItem = () => {
+            const idx = items.length;
+            const itemHtml = `<div class="row mb-2" id="item-${idx}"><div class="col-md-5"><input type="text" class="form-control" placeholder="Description" id="desc-${idx}"></div><div class="col-md-2"><input type="number" class="form-control" placeholder="Qté" id="qty-${idx}" value="1"></div><div class="col-md-3"><input type="number" step="0.01" class="form-control" placeholder="Prix unit." id="price-${idx}"></div><div class="col-md-2"><button class="btn btn-danger btn-sm" onclick="removeProformaItem(${idx})">X</button></div></div>`;
+            document.getElementById('proformaItemsList').insertAdjacentHTML('beforeend', itemHtml);
+            items.push(idx);
+        };
+        window.removeProformaItem = (idx) => {
+            document.getElementById(`item-${idx}`)?.remove();
+            items = items.filter(i => i !== idx);
+        };
+        window.saveProforma = async () => {
+            const client_name = document.getElementById('proformaClient').value;
+            const client_email = document.getElementById('proformaEmail').value;
+            const client_phone = document.getElementById('proformaPhone').value;
+            const client_address = document.getElementById('proformaAddress').value;
+            const valid_until = document.getElementById('proformaValidUntil').value;
+            const discount = parseFloat(document.getElementById('proformaDiscount').value);
+            const notes = document.getElementById('proformaNotes').value;
+            const articleItems = [];
+            for (let i of items) {
+                const desc = document.getElementById(`desc-${i}`).value;
+                const qty = parseFloat(document.getElementById(`qty-${i}`).value);
+                const price = parseFloat(document.getElementById(`price-${i}`).value);
+                if (desc && qty > 0 && price > 0) {
+                    articleItems.push({ description: desc, quantity: qty, unit_price: price });
+                }
+            }
+            if (articleItems.length === 0) return alert('Ajoutez au moins un article');
+            try {
+                await apiCall('/proforma', 'POST', { client_name, client_email, client_phone, client_address, items: articleItems, discount, valid_until, notes });
+                alert('Proforma créée');
+                bootstrap.Modal.getInstance(document.getElementById('proformaModal')).hide();
+                loadProformas();
+            } catch(err) { alert(err.message); }
+        };
+        window.showProformaModal = () => {
+            document.getElementById('proformaItemsList').innerHTML = '';
+            items = [];
+            addProformaItem();
+            new bootstrap.Modal(document.getElementById('proformaModal')).show();
+        };
+        async function loadProformas() {
+            proformas = await apiCall('/proforma');
+            document.getElementById('proformaList').innerHTML = proformas.map(p => `
+                <tr>
+                    <td>${p.proforma_number}</td>
+                    <td>${p.client_name || '-'}</td>
+                    <td>${new Date(p.issue_date).toLocaleDateString()}</td>
+                    <td>${p.total.toLocaleString()}</td>
+                    <td>${p.status}</td>
+                    <td>
+                        <button class="btn btn-sm btn-info" onclick="window.open('/api/proforma/${p.id}/pdf?token=${token}','_blank')">PDF</button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteProforma(${p.id})">Supprimer</button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+        window.deleteProforma = async (id) => { if(confirm('Supprimer cette proforma ?')) { await apiCall(`/proforma/${id}`, 'DELETE'); loadProformas(); } };
+        loadProformas();
+    }
+
+    // CLIENTS
+    async function renderClients() {
+        const clients = await apiCall('/clients');
+        let html = `<button class="btn btn-primary mb-3" onclick="showClientModal()">+ Client</button>
+        <div class="table-wrapper"><table class="table"><thead><tr><th>Nom</th><th>Email</th><th>Téléphone</th><th>Actions</th></tr></thead><tbody>${clients.map(c=>`<tr><td>${c.name}</td><td>${c.email||''}</td><td>${c.phone||''}</td><td><button class="btn btn-sm btn-warning" onclick="editClient(${c.id})">✏️</button> <button class="btn btn-sm btn-danger" onclick="deleteClient(${c.id})">🗑️</button></td></tr>`).join('')}</tbody></table></div>
+        <div class="modal fade" id="clientModal"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5>Client</h5></div><div class="modal-body"><input type="hidden" id="clientId"><input id="clientName" placeholder="Nom*" class="form-control mb-2"><input id="clientEmail" placeholder="Email" class="form-control mb-2"><input id="clientPhone" placeholder="Téléphone" class="form-control mb-2"><textarea id="clientAddress" placeholder="Adresse" class="form-control"></textarea></div><div class="modal-footer"><button class="btn btn-primary" onclick="saveClient()">Sauvegarder</button></div></div></div></div>`;
+        document.getElementById('pageContainer').innerHTML = html;
+        window.showClientModal = () => { document.getElementById('clientId').value=''; document.getElementById('clientName').value=''; document.getElementById('clientEmail').value=''; document.getElementById('clientPhone').value=''; document.getElementById('clientAddress').value=''; new bootstrap.Modal(document.getElementById('clientModal')).show(); };
+        window.editClient = async (id) => { const c = clients.find(x=>x.id==id); document.getElementById('clientId').value=c.id; document.getElementById('clientName').value=c.name; document.getElementById('clientEmail').value=c.email||''; document.getElementById('clientPhone').value=c.phone||''; document.getElementById('clientAddress').value=c.address||''; new bootstrap.Modal(document.getElementById('clientModal')).show(); };
+        window.saveClient = async () => { const data = { name: document.getElementById('clientName').value, email: document.getElementById('clientEmail').value, phone: document.getElementById('clientPhone').value, address: document.getElementById('clientAddress').value }; const id = document.getElementById('clientId').value; if(id) await apiCall(`/clients/${id}`, 'PUT', data); else await apiCall('/clients', 'POST', data); bootstrap.Modal.getInstance(document.getElementById('clientModal')).hide(); renderClients(); };
+        window.deleteClient = async (id) => { if(confirm('Supprimer ?')) { await apiCall(`/clients/${id}`, 'DELETE'); renderClients(); } };
+    }
+
+    // CAISSE
+    async function renderCash() {
+        const transactions = await apiCall('/cash-register');
+        const summary = await apiCall('/cash-register/summary');
+        const html = `
+            <div class="card border-0 shadow-sm rounded-4 p-4">
+                <div class="row mb-4">
+                    <div class="col-md-6">
+                        <button class="btn btn-success" onclick="addCashTransaction('deposit')">💰 Dépôt (entrée)</button>
+                        <button class="btn btn-danger" onclick="addCashTransaction('withdrawal')">💸 Retrait (sortie)</button>
+                        <button class="btn btn-warning" onclick="addCashTransaction('expense')">📉 Dépense</button>
+                    </div>
+                    <div class="col-md-6 text-end">
+                        <div class="stat-card p-2 d-inline-block">
+                            <h6>Solde actuel</h6>
+                            <h3 class="mb-0">${summary.balance.toLocaleString()} FCFA</h3>
+                        </div>
+                    </div>
+                </div>
+                <ul class="nav nav-tabs mb-3">
+                    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#operations">Opérations</button></li>
+                    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#balance">Résumé</button></li>
+                </ul>
+                <div class="tab-content">
+                    <div class="tab-pane fade show active" id="operations">
+                        <div class="table-wrapper"><table class="table"><thead><tr><th>Type</th><th>Montant (FCFA)</th><th>Description</th><th>Date</th></tr></thead><tbody>
+                            ${transactions.map(t => `<tr><td>${t.transaction_type}</td><td>${t.amount.toLocaleString()}</td><td>${t.description || ''}</td><td>${new Date(t.created_at).toLocaleString()}</td></tr>`).join('')}
+                        </tbody></table></div>
+                    </div>
+                    <div class="tab-pane fade" id="balance">
+                        <div class="card p-3"><h5>Résumé de la caisse</h5><table class="table"><tr><th>Entrées totales</th><td>${summary.entries.toLocaleString()} FCFA</td></tr>
+                        <tr><th>Sorties totales</th><td>${summary.expenses.toLocaleString()} FCFA</td></tr>
+                        <tr class="table-success"><th>Solde</th><td>${summary.balance.toLocaleString()} FCFA</td></tr></div>
+                    </div>
+                </div>
+            </div>`;
+        document.getElementById('pageContainer').innerHTML = html;
+        window.addCashTransaction = async (type) => {
+            let amount = parseFloat(prompt(`Montant (FCFA) :`));
+            if (isNaN(amount) || amount <= 0) return alert('Montant invalide');
+            let desc = prompt('Description :');
+            try {
+                await apiCall('/cash-register', 'POST', { transaction_type: type, amount, description: desc });
+                renderCash();
+            } catch(err) { alert(err.message); }
+        };
+    }
+
+    // INVENTAIRE
+    async function renderInventory() {
+        const movements = await apiCall('/inventory/movements');
+        const products = await apiCall('/products');
+        let html = `
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <h6>Ajuster stock</h6>
+                    <select id="adjustProduct" class="form-control mb-2">${products.map(p=>`<option value="${p.id}">${p.name} (actuel:${p.quantity})</option>`)}</select>
+                    <input type="number" id="newQty" class="form-control mb-2" placeholder="Nouvelle quantité">
+                    <button class="btn btn-warning" onclick="adjustStock()">Appliquer ajustement</button>
+                </div>
+                <div class="col-md-6">
+                    <h6>Inventaire global</h6>
+                    <button class="btn btn-primary" onclick="showGlobalInventory()">Voir inventaire complet</button>
+                </div>
+            </div>
+            <div class="table-wrapper"><table class="table"><thead><tr><th>Produit</th><th>Type</th><th>Variation</th><th>Avant→Après</th><th>Date</th></tr></thead><tbody>${movements.map(m=>`<tr><td>${m.product_name}</td><td>${m.type}</td><td>${m.quantity_change}</td><td>${m.quantity_before}→${m.quantity_after}</td><td>${new Date(m.created_at).toLocaleString()}</td></tr>`).join('')}</tbody></table></div>`;
+        document.getElementById('pageContainer').innerHTML = html;
+        window.adjustStock = async () => {
+            const product_id = document.getElementById('adjustProduct').value;
+            const new_quantity = parseInt(document.getElementById('newQty').value);
+            if(!product_id || isNaN(new_quantity)) return alert('Données invalides');
+            await apiCall('/inventory/adjust', 'POST', { product_id, new_quantity, reason: 'Ajustement manuel' });
+            renderInventory();
+        };
+        window.showGlobalInventory = async () => {
+            const inventory = await apiCall('/inventory/global');
+            let html = '<div class="modal fade" id="inventoryModal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-header"><h5>Inventaire complet</h5><button class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="table-wrapper"><table class="table"><thead><tr><th>SKU</th><th>Produit</th><th>Quantité actuelle</th><th>Unité</th><th>Seuil</th></tr></thead><tbody>';
+            inventory.forEach(p => {
+                html += `<tr><td>${p.sku}</td><td>${p.name}</td><td>${p.quantity}</td><td>${p.unit}</td><td>${p.reorder_level}</td></tr>`;
+            });
+            html += `</tbody></table></div></div><div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Fermer</button></div></div></div></div>`;
+            document.body.insertAdjacentHTML('beforeend', html);
+            new bootstrap.Modal(document.getElementById('inventoryModal')).show();
+            document.getElementById('inventoryModal').addEventListener('hidden.bs.modal', () => document.getElementById('inventoryModal').remove());
+        };
+    }
+
+    // RAPPORTS
+    async function renderReports() {
+        const salesData = await apiCall('/reports/sales-by-period?period=month');
+        const html = `<canvas id="salesChart" height="200"></canvas>`;
+        document.getElementById('pageContainer').innerHTML = html;
+        const ctx = document.getElementById('salesChart').getContext('2d');
+        new Chart(ctx, { type: 'line', data: { labels: salesData.map(d=>d.date), datasets: [{ label: 'Ventes (FCFA)', data: salesData.map(d=>d.total), borderColor: '#2ecc71', tension: 0.3, fill: true, backgroundColor: 'rgba(46,204,113,0.05)' }] } });
+    }
+
+    // PARAMÈTRES
+    async function renderSettings() {
+        const settings = await apiCall('/settings');
+        const html = `<div class="card p-4 border-0 shadow-sm rounded-4"><h5>Paramètres société</h5><label>Nom entreprise</label><input id="companyName" class="form-control mb-2" value="${settings.company_name||''}"><label>Adresse</label><input id="companyAddress" class="form-control mb-2" value="${settings.company_address||''}"><label>Téléphone</label><input id="companyPhone" class="form-control mb-2" value="${settings.company_phone||''}"><label>Email</label><input id="companyEmail" class="form-control mb-2" value="${settings.company_email||''}"><label>URL du logo</label><input id="logoUrl" class="form-control mb-2" value="${settings.logo_url||''}" placeholder="https://exemple.com/logo.png"><label>Taux TVA (%)</label><input id="taxRate" class="form-control mb-2" value="${settings.tax_rate||20}"><label>Seuil alerte stock</label><input id="lowStockAlert" class="form-control mb-2" value="${settings.low_stock_alert||5}"><label>Devise</label><input id="currency" class="form-control mb-2" value="${settings.currency||'FCFA'}"><button class="btn btn-primary" onclick="saveSettings()">Enregistrer</button></div>`;
+        document.getElementById('pageContainer').innerHTML = html;
+        window.saveSettings = async () => {
+            const data = { company_name: document.getElementById('companyName').value, company_address: document.getElementById('companyAddress').value, company_phone: document.getElementById('companyPhone').value, company_email: document.getElementById('companyEmail').value, logo_url: document.getElementById('logoUrl').value, tax_rate: parseFloat(document.getElementById('taxRate').value), low_stock_alert: parseInt(document.getElementById('lowStockAlert').value), currency: document.getElementById('currency').value };
+            await apiCall('/settings', 'PUT', data);
+            alert('Paramètres mis à jour');
+        };
+    }
+
+    // HISTORIQUE
+    async function renderHistory() {
+        const history = await apiCall('/history');
+        const html = `<div class="table-wrapper"><table class="table"><thead><tr><th>Type</th><th>Référence</th><th>Montant</th><th>Date</th></tr></thead><tbody>${history.map(h=>`<tr><td>${h.type}</td><td>${h.client_name || h.product_name || h.id}</td><td>${h.amount ? h.amount.toLocaleString() : ''}</td><td>${new Date(h.date).toLocaleString()}</td></tr>`).join('')}</tbody></td></div>`;
+        document.getElementById('pageContainer').innerHTML = html;
+    }
+
+    // Initialisation
+    if (token && localStorage.getItem('user')) {
+        currentUser = JSON.parse(localStorage.getItem('user'));
+        showApp();
+    } else {
+        showAuthPage();
+    }
+</script>
+</body>
+</html>
