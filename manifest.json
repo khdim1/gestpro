@@ -1,12 +1,10 @@
 {
-  "name": "GestPro - Gestion Professionnelle",
+  "name": "GestPro",
   "short_name": "GestPro",
-  "description": "Application de gestion de stock, ventes, factures, caisse",
   "start_url": "/",
   "display": "standalone",
   "theme_color": "#2c6e9e",
-  "background_color": "#f6f9fc",
-  "orientation": "portrait-primary",
+  "background_color": "#ffffff",
   "icons": [
     {
       "src": "/icons/icon-512.png",
