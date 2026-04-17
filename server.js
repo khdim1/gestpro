@@ -16,15 +16,17 @@ app.use(express.static(path.join(__dirname)));
 require('dotenv').config();
 
 const DB_CONFIG = {
-    host: process.env.DB_HOST,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
+    host: process.env.DB_HOST || 'localhost',
+    user: process.env.DB_USER || 'root',
+    password: process.env.DB_PASSWORD || '',
+    database: process.env.DB_NAME || 'gestpro_db',
     waitForConnections: true,
     connectionLimit: 10
 };
 const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_key_2025';
 const PORT = process.env.PORT || 3000;
+
+let pool;
 
 function fetchImage(url) {
     return new Promise((resolve, reject) => {
@@ -57,7 +59,7 @@ async function initAndStart() {
         conn.release();
         console.log('✅ Connecté à MySQL');
 
-        // ========== CRÉATION DES TABLES ==========
+        // Création des tables (identique à votre version)
         await pool.query(`CREATE TABLE IF NOT EXISTS users (
             id INT PRIMARY KEY AUTO_INCREMENT,
             name VARCHAR(100) NOT NULL,
@@ -215,13 +217,9 @@ async function initAndStart() {
             FOREIGN KEY (proforma_id) REFERENCES proforma_invoices(id) ON DELETE CASCADE
         )`);
 
-        // Correction forcée de la colonne transaction_type (évite l'erreur Data truncated)
         try {
             await pool.query(`ALTER TABLE cash_register MODIFY COLUMN transaction_type ENUM('sale','purchase','expense','withdrawal','deposit','payment') NOT NULL`);
-            console.log('✅ Colonne transaction_type mise à jour');
-        } catch (err) {
-            console.log('ℹ️ Colonne transaction_type déjà correcte');
-        }
+        } catch (err) {}
 
         console.log('✅ Tables prêtes');
         app.listen(PORT, () => console.log(`🚀 Serveur sur http://localhost:${PORT}`));
@@ -297,13 +295,11 @@ app.get('/api/clients', authenticate, async (req, res) => {
 app.post('/api/clients', authenticate, async (req, res) => {
     const { name, email, phone, address } = req.body;
     if (!name) return res.status(400).json({ error: 'Nom requis' });
-    let [existing] = await pool.query('SELECT id FROM clients WHERE user_id=? AND name=?', [req.user.id, name]);
-    if (existing.length > 0) return res.json({ id: existing[0].id, name, email, phone, address, existing: true });
     const [result] = await pool.query(
         'INSERT INTO clients (user_id, name, email, phone, address) VALUES (?,?,?,?,?)',
         [req.user.id, name, email, phone, address]
     );
-    res.status(201).json({ id: result.insertId, name, email, phone, address, existing: false });
+    res.status(201).json({ id: result.insertId, name, email, phone, address });
 });
 app.put('/api/clients/:id', authenticate, async (req, res) => {
     const { name, email, phone, address } = req.body;
@@ -339,43 +335,23 @@ app.delete('/api/categories/:id', authenticate, async (req, res) => {
     res.json({ message: 'OK' });
 });
 
-// ========== ROUTES FOURNISSEURS ==========
-app.get('/api/suppliers', authenticate, async (req, res) => {
-    const [rows] = await pool.query('SELECT * FROM suppliers WHERE user_id=? ORDER BY name', [req.user.id]);
-    res.json(rows);
-});
-app.post('/api/suppliers', authenticate, async (req, res) => {
-    const { name, contact_name, email, phone, address } = req.body;
-    const [result] = await pool.query('INSERT INTO suppliers (user_id, name, contact_name, email, phone, address) VALUES (?,?,?,?,?,?)', [req.user.id, name, contact_name, email, phone, address]);
-    res.status(201).json({ id: result.insertId });
-});
-app.put('/api/suppliers/:id', authenticate, async (req, res) => {
-    const { name, contact_name, email, phone, address } = req.body;
-    await pool.query('UPDATE suppliers SET name=?, contact_name=?, email=?, phone=?, address=? WHERE id=? AND user_id=?', [name, contact_name, email, phone, address, req.params.id, req.user.id]);
-    res.json({ message: 'OK' });
-});
-app.delete('/api/suppliers/:id', authenticate, async (req, res) => {
-    await pool.query('DELETE FROM suppliers WHERE id=? AND user_id=?', [req.params.id, req.user.id]);
-    res.json({ message: 'OK' });
-});
-
 // ========== ROUTES PRODUITS ==========
 app.get('/api/products', authenticate, async (req, res) => {
     const [rows] = await pool.query(`
-        SELECT p.*, c.name as category_name, s.name as supplier_name
+        SELECT p.*, c.name as category_name
         FROM products p
         LEFT JOIN categories c ON p.category_id = c.id
-        LEFT JOIN suppliers s ON p.supplier_id = s.id
         WHERE p.user_id = ? ORDER BY p.name`, [req.user.id]);
     res.json(rows);
 });
+
 app.post('/api/products', authenticate, async (req, res) => {
-    const { sku, barcode, name, description, category_name, category_id, supplier_id, quantity, unit, reorder_level, buy_price, sell_price, location } = req.body;
+    const { sku, barcode, name, description, category_id, category_name, supplier_id, quantity, unit, reorder_level, buy_price, sell_price, location } = req.body;
     if (!sku || !name) return res.status(400).json({ error: 'SKU et nom requis' });
     const connection = await pool.getConnection();
     try {
         await connection.beginTransaction();
-        let finalCatId = null;
+        let finalCatId = category_id;
         if (category_name && category_name.trim() !== '') {
             let [cat] = await connection.query('SELECT id FROM categories WHERE user_id=? AND name=?', [req.user.id, category_name]);
             if (cat.length === 0) {
@@ -384,30 +360,30 @@ app.post('/api/products', authenticate, async (req, res) => {
             } else {
                 finalCatId = cat[0].id;
             }
-        } else if (category_id) {
-            finalCatId = category_id;
         }
-        const supId = supplier_id === '' || supplier_id === undefined ? null : parseInt(supplier_id);
+        const supId = supplier_id ? parseInt(supplier_id) : null;
         const [result] = await connection.query(`
             INSERT INTO products (user_id, sku, barcode, name, description, category_id, supplier_id, quantity, unit, reorder_level, buy_price, sell_price, location)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-            [req.user.id, sku, barcode || null, name, description, finalCatId, supId, quantity||0, unit||'pièce', reorder_level||5, buy_price||0, sell_price||0, location||null]);
+            [req.user.id, sku, barcode || null, name, description || '', finalCatId || null, supId, quantity || 0, unit || 'pièce', reorder_level || 5, buy_price || 0, sell_price || 0, location || null]);
         await connection.commit();
-        res.status(201).json({ id: result.insertId, ...req.body });
+        res.status(201).json({ id: result.insertId });
     } catch (err) {
         await connection.rollback();
-        if (err.code === 'ER_DUP_ENTRY') res.status(400).json({ error: 'SKU ou code barre déjà utilisé' });
-        else res.status(500).json({ error: 'Erreur serveur' });
+        console.error('Erreur création produit:', err);
+        if (err.code === 'ER_DUP_ENTRY') return res.status(400).json({ error: 'SKU ou code barre déjà utilisé' });
+        res.status(500).json({ error: 'Erreur serveur: ' + err.message });
     } finally {
         connection.release();
     }
 });
+
 app.put('/api/products/:id', authenticate, async (req, res) => {
-    const { sku, barcode, name, description, category_name, category_id, supplier_id, quantity, unit, reorder_level, buy_price, sell_price, location } = req.body;
+    const { sku, barcode, name, description, category_id, category_name, supplier_id, quantity, unit, reorder_level, buy_price, sell_price, location } = req.body;
     const connection = await pool.getConnection();
     try {
         await connection.beginTransaction();
-        let finalCatId = null;
+        let finalCatId = category_id;
         if (category_name && category_name.trim() !== '') {
             let [cat] = await connection.query('SELECT id FROM categories WHERE user_id=? AND name=?', [req.user.id, category_name]);
             if (cat.length === 0) {
@@ -416,34 +392,34 @@ app.put('/api/products/:id', authenticate, async (req, res) => {
             } else {
                 finalCatId = cat[0].id;
             }
-        } else if (category_id) {
-            finalCatId = category_id;
         }
-        const supId = supplier_id === '' || supplier_id === undefined ? null : parseInt(supplier_id);
+        const supId = supplier_id ? parseInt(supplier_id) : null;
         await connection.query(`
             UPDATE products SET sku=?, barcode=?, name=?, description=?, category_id=?, supplier_id=?, quantity=?, unit=?, reorder_level=?, buy_price=?, sell_price=?, location=?
             WHERE id=? AND user_id=?`,
-            [sku, barcode, name, description, finalCatId, supId, quantity, unit, reorder_level, buy_price, sell_price, location, req.params.id, req.user.id]);
+            [sku, barcode, name, description, finalCatId || null, supId, quantity, unit, reorder_level, buy_price, sell_price, location, req.params.id, req.user.id]);
         await connection.commit();
         res.json({ message: 'Mis à jour' });
     } catch (err) {
         await connection.rollback();
-        res.status(500).json({ error: 'Erreur' });
+        console.error('Erreur modification produit:', err);
+        res.status(500).json({ error: 'Erreur serveur: ' + err.message });
     } finally {
         connection.release();
     }
 });
+
 app.delete('/api/products/:id', authenticate, async (req, res) => {
     await pool.query('DELETE FROM products WHERE id=? AND user_id=?', [req.params.id, req.user.id]);
     res.json({ message: 'Supprimé' });
 });
 
-// Recherche produit par code barre
 app.get('/api/products/barcode/:code', authenticate, async (req, res) => {
     const [rows] = await pool.query('SELECT * FROM products WHERE user_id=? AND barcode=?', [req.user.id, req.params.code]);
     if (rows.length === 0) return res.status(404).json({ error: 'Produit non trouvé' });
     res.json(rows[0]);
 });
+
 app.get('/api/products/search', authenticate, async (req, res) => {
     const { q, lowStock } = req.query;
     let query = 'SELECT p.*, c.name as category_name FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE p.user_id = ?';
@@ -483,7 +459,7 @@ app.post('/api/sales', authenticate, async (req, res) => {
         for (let item of items) {
             const [prod] = await connection.query('SELECT quantity FROM products WHERE id=? AND user_id=? FOR UPDATE', [item.product_id, req.user.id]);
             if (prod.length === 0) throw new Error(`Produit ${item.product_id} inexistant`);
-            if (prod[0].quantity < item.quantity) throw new Error(`Stock insuffisant pour ${item.name || item.product_id}`);
+            if (prod[0].quantity < item.quantity) throw new Error(`Stock insuffisant`);
             item.total_price = item.unit_price * item.quantity;
             subtotal += item.total_price;
         }
@@ -521,6 +497,7 @@ app.post('/api/sales', authenticate, async (req, res) => {
         res.status(201).json({ sale_id, final_amount, status: finalStatus });
     } catch (err) {
         await connection.rollback();
+        console.error(err);
         res.status(400).json({ error: err.message });
     } finally {
         connection.release();
@@ -540,15 +517,6 @@ app.get('/api/sales', authenticate, async (req, res) => {
     res.json(rows);
 });
 
-app.get('/api/sales/:id', authenticate, async (req, res) => {
-    const [saleRows] = await pool.query('SELECT * FROM sales WHERE id=? AND user_id=?', [req.params.id, req.user.id]);
-    if (saleRows.length === 0) return res.status(404).json({ error: 'Vente non trouvée' });
-    const [items] = await pool.query(`SELECT si.*, p.name as product_name FROM sale_items si JOIN products p ON si.product_id = p.id WHERE si.sale_id = ?`, [req.params.id]);
-    const [payments] = await pool.query('SELECT * FROM payments WHERE sale_id = ? ORDER BY payment_date', [req.params.id]);
-    res.json({ sale: saleRows[0], items, payments });
-});
-
-// ========== PAIEMENT ==========
 app.post('/api/sales/:id/payment', authenticate, async (req, res) => {
     const { amount, payment_method } = req.body;
     const saleId = req.params.id;
@@ -587,11 +555,7 @@ app.post('/api/sales/:id/payment', authenticate, async (req, res) => {
             newStatus = 'completed';
         }
         await connection.commit();
-        res.json({
-            message: 'Règlement enregistré',
-            remaining: sale.final_amount - newTotalPaid,
-            status: newStatus
-        });
+        res.json({ message: 'Règlement enregistré', remaining: sale.final_amount - newTotalPaid, status: newStatus });
     } catch (err) {
         await connection.rollback();
         console.error('Erreur paiement:', err);
@@ -601,7 +565,7 @@ app.post('/api/sales/:id/payment', authenticate, async (req, res) => {
     }
 });
 
-// ========== CAISSE ==========
+// ========== CAISSE, INVENTAIRE, RAPPORTS, ETC. ==========
 app.get('/api/cash-register', authenticate, async (req, res) => {
     const [rows] = await pool.query('SELECT * FROM cash_register WHERE user_id=? ORDER BY created_at DESC LIMIT 200', [req.user.id]);
     res.json(rows);
@@ -631,7 +595,6 @@ app.get('/api/cash-register/summary', authenticate, async (req, res) => {
     res.json({ entries: entrees[0].total, expenses: sorties[0].total, balance: entrees[0].total - sorties[0].total });
 });
 
-// ========== INVENTAIRE ==========
 app.post('/api/inventory/adjust', authenticate, async (req, res) => {
     const { product_id, new_quantity, reason } = req.body;
     const connection = await pool.getConnection();
@@ -661,7 +624,6 @@ app.get('/api/inventory/global', authenticate, async (req, res) => {
     res.json(rows);
 });
 
-// ========== RAPPORTS ==========
 app.get('/api/reports/dashboard', authenticate, async (req, res) => {
     const [totalProducts] = await pool.query('SELECT COUNT(*) as count FROM products WHERE user_id=?', [req.user.id]);
     const [lowStock] = await pool.query('SELECT COUNT(*) as count FROM products WHERE user_id=? AND quantity <= reorder_level', [req.user.id]);
@@ -679,7 +641,6 @@ app.get('/api/reports/sales-by-period', authenticate, async (req, res) => {
     res.json(rows);
 });
 
-// ========== PARAMÈTRES ==========
 app.get('/api/settings', authenticate, async (req, res) => {
     const [rows] = await pool.query('SELECT * FROM settings WHERE user_id=?', [req.user.id]);
     if (rows.length === 0) {
@@ -694,7 +655,6 @@ app.put('/api/settings', authenticate, async (req, res) => {
     res.json({ message: 'Paramètres mis à jour' });
 });
 
-// ========== HISTORIQUE ==========
 app.get('/api/history', authenticate, async (req, res) => {
     const [sales] = await pool.query(`SELECT 'sale' as type, s.id, s.final_amount as amount, s.sale_date as date, c.name as client_name, s.status FROM sales s LEFT JOIN clients c ON s.client_id = c.id WHERE s.user_id = ? ORDER BY s.sale_date DESC LIMIT 100`, [req.user.id]);
     const [movements] = await pool.query(`SELECT 'stock' as type, sm.id, sm.quantity_change as amount, sm.created_at as date, p.name as product_name, sm.type as movement_type FROM stock_movements sm JOIN products p ON sm.product_id = p.id WHERE sm.user_id = ? ORDER BY sm.created_at DESC LIMIT 100`, [req.user.id]);
@@ -702,12 +662,9 @@ app.get('/api/history', authenticate, async (req, res) => {
     res.json(history);
 });
 
-// ========== FACTURES PROFORMA ==========
+// ========== PROFORMA ==========
 async function getNextProformaNumber(userId) {
-    const [rows] = await pool.query(
-        'SELECT proforma_number FROM proforma_invoices WHERE user_id = ? ORDER BY id DESC LIMIT 1',
-        [userId]
-    );
+    const [rows] = await pool.query('SELECT proforma_number FROM proforma_invoices WHERE user_id = ? ORDER BY id DESC LIMIT 1', [userId]);
     let lastNumber = 0;
     if (rows.length > 0) {
         const match = rows[0].proforma_number.match(/PROF-(\d+)/);
@@ -732,16 +689,14 @@ app.post('/api/proforma', authenticate, async (req, res) => {
         const total = subtotal + tax - (discount || 0);
         const proformaNumber = await getNextProformaNumber(req.user.id);
         const [result] = await connection.query(
-            `INSERT INTO proforma_invoices 
-             (user_id, proforma_number, client_name, client_email, client_phone, client_address, subtotal, tax, discount, total, valid_until, notes, status)
+            `INSERT INTO proforma_invoices (user_id, proforma_number, client_name, client_email, client_phone, client_address, subtotal, tax, discount, total, valid_until, notes, status)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')`,
             [req.user.id, proformaNumber, client_name || '', client_email || '', client_phone || '', client_address || '', subtotal, tax, discount || 0, total, valid_until || null, notes || '']
         );
         const proformaId = result.insertId;
         for (let item of items) {
             await connection.query(
-                `INSERT INTO proforma_items (proforma_id, description, quantity, unit_price, total_price)
-                 VALUES (?, ?, ?, ?, ?)`,
+                `INSERT INTO proforma_items (proforma_id, description, quantity, unit_price, total_price) VALUES (?, ?, ?, ?, ?)`,
                 [proformaId, item.description, item.quantity, item.unit_price, item.total_price]
             );
         }
@@ -756,23 +711,8 @@ app.post('/api/proforma', authenticate, async (req, res) => {
     }
 });
 app.get('/api/proforma', authenticate, async (req, res) => {
-    const [rows] = await pool.query(
-        'SELECT * FROM proforma_invoices WHERE user_id = ? ORDER BY issue_date DESC',
-        [req.user.id]
-    );
+    const [rows] = await pool.query('SELECT * FROM proforma_invoices WHERE user_id = ? ORDER BY issue_date DESC', [req.user.id]);
     res.json(rows);
-});
-app.get('/api/proforma/:id', authenticate, async (req, res) => {
-    const [invoiceRows] = await pool.query(
-        'SELECT * FROM proforma_invoices WHERE id = ? AND user_id = ?',
-        [req.params.id, req.user.id]
-    );
-    if (invoiceRows.length === 0) return res.status(404).json({ error: 'Proforma non trouvée' });
-    const [items] = await pool.query(
-        'SELECT * FROM proforma_items WHERE proforma_id = ?',
-        [req.params.id]
-    );
-    res.json({ invoice: invoiceRows[0], items });
 });
 app.delete('/api/proforma/:id', authenticate, async (req, res) => {
     await pool.query('DELETE FROM proforma_invoices WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
@@ -781,16 +721,10 @@ app.delete('/api/proforma/:id', authenticate, async (req, res) => {
 app.get('/api/proforma/:id/pdf', authenticate, async (req, res) => {
     try {
         const proformaId = req.params.id;
-        const [invoiceRows] = await pool.query(
-            'SELECT * FROM proforma_invoices WHERE id = ? AND user_id = ?',
-            [proformaId, req.user.id]
-        );
+        const [invoiceRows] = await pool.query('SELECT * FROM proforma_invoices WHERE id = ? AND user_id = ?', [proformaId, req.user.id]);
         if (invoiceRows.length === 0) return res.status(404).json({ error: 'Proforma non trouvée' });
         const invoice = invoiceRows[0];
-        const [items] = await pool.query(
-            'SELECT * FROM proforma_items WHERE proforma_id = ?',
-            [proformaId]
-        );
+        const [items] = await pool.query('SELECT * FROM proforma_items WHERE proforma_id = ?', [proformaId]);
         const [settingsRows] = await pool.query('SELECT * FROM settings WHERE user_id = ?', [req.user.id]);
         const company = settingsRows[0] || { company_name: 'Mon Entreprise', company_address: '', company_phone: '', company_email: '', logo_url: '', currency: 'FCFA' };
         const doc = new PDFDocument({ margin: 50, size: 'A4' });
@@ -850,7 +784,7 @@ app.get('/api/proforma/:id/pdf', authenticate, async (req, res) => {
     } catch (err) { console.error(err); res.status(500).json({ error: 'Erreur génération proforma' }); }
 });
 
-// ========== FACTURE, BON DE COMMANDE, BORDEREAU DE LIVRAISON ==========
+// ========== FACTURE, BON DE COMMANDE, BORDEREAU DE LIVRAISON (complets) ==========
 app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
     try {
         const saleId = req.params.id;
