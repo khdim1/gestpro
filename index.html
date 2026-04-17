@@ -209,220 +209,228 @@
             </div>
             <div class="row mt-4">
                 <div class="col-md-6"><div class="card p-3 border-0 shadow-sm rounded-4"><h5>Top 5 produits</h5><canvas id="topProductsChart" height="200"></canvas></div></div>
-                <div class="col-md-6"><div class="card p-3 border-0 shadow-sm rounded-4"><h5>Dernières ventes</h5><div class="table-wrapper"><table class="table"><thead><tr><th>#</th><th>Client</th><th>Total</th><th>Date</th></tr></thead><tbody>${data.recentSales.map(s => `<tr><td>#${s.id}${s.client_name||'-'}${s.final_amount} FCFA${new Date(s.sale_date).toLocaleDateString()}</td>`).join('')}</tbody></table></div></div></div>
+                <div class="col-md-6"><div class="card p-3 border-0 shadow-sm rounded-4"><h5>Dernières ventes</h5><div class="table-wrapper"><table class="table"><thead><tr><th>#</th><th>Client</th><th>Total</th><th>Date</th></tr></thead><tbody>${data.recentSales.map(s => `<td>#${s.id}${s.client_name||'-'}${s.final_amount} FCFA${new Date(s.sale_date).toLocaleDateString()}</td>`).join('')}</tbody></table></div></div></div>
             </div>`;
         document.getElementById('pageContainer').innerHTML = html;
         const ctx = document.getElementById('topProductsChart')?.getContext('2d');
         if (ctx && data.topProducts.length) new Chart(ctx, { type: 'bar', data: { labels: data.topProducts.map(p=>p.name), datasets: [{ label: 'Quantité vendue', data: data.topProducts.map(p=>p.qte), backgroundColor: '#2ecc71' }] } });
     }
 
-    // ========== PRODUITS (formulaire simplifié avec champs demandés) ==========
+    // ========== PRODUITS (version corrigée et robuste) ==========
     async function renderProducts() {
-        const categories = await apiCall('/categories');
-        const html = `
-            <div class="row mb-3">
-                <div class="col-md-4">
-                    <input type="text" id="searchProduct" class="form-control" placeholder="Rechercher...">
-                </div>
-                <div class="col-md-2">
-                    <button class="btn btn-outline-secondary" onclick="searchProducts()">Rechercher</button>
-                </div>
-                <div class="col-md-2">
-                    <button class="btn btn-outline-warning" id="lowStockFilter" onclick="searchProducts(true)">Stock faible</button>
-                </div>
-                <div class="col-md-4 text-end">
-                    <button class="btn btn-primary" onclick="showProductModal()">+ Nouveau produit</button>
-                </div>
-            </div>
-            <div class="table-wrapper">
-                <table class="table align-middle">
-                    <thead>
-                        <tr><th>Code barre</th><th>Nom</th><th>Catégorie</th><th>Stock</th><th>Prix vente</th><th>Actions</th></tr>
-                    </thead>
-                    <tbody id="productsTable"></tbody>
-                </table>
-            </div>
+        console.log("renderProducts démarrée");
+        try {
+            // 1. Récupération des catégories
+            const categories = await apiCall('/categories');
+            console.log("Catégories chargées :", categories);
 
-            <!-- Modal produit - uniquement les champs demandés -->
-            <div class="modal fade" id="productModal" tabindex="-1" aria-hidden="true">
-                <div class="modal-dialog">
-                    <div class="modal-content">
-                        <div class="modal-header">
-                            <h5 class="modal-title">Ajouter / Modifier produit</h5>
-                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                        </div>
-                        <div class="modal-body">
-                            <input type="hidden" id="prodId">
-                            <div class="mb-3">
-                                <label class="form-label">Nom du produit *</label>
-                                <input type="text" id="prodName" class="form-control" required>
+            // 2. Construction du HTML
+            const html = `
+                <div class="row mb-3">
+                    <div class="col-md-4">
+                        <input type="text" id="searchProduct" class="form-control" placeholder="Rechercher...">
+                    </div>
+                    <div class="col-md-2">
+                        <button class="btn btn-outline-secondary" onclick="searchProducts()">Rechercher</button>
+                    </div>
+                    <div class="col-md-2">
+                        <button class="btn btn-outline-warning" id="lowStockFilter" onclick="searchProducts(true)">Stock faible</button>
+                    </div>
+                    <div class="col-md-4 text-end">
+                        <button class="btn btn-primary" onclick="showProductModal()">+ Nouveau produit</button>
+                    </div>
+                </div>
+                <div class="table-wrapper">
+                    <table class="table align-middle">
+                        <thead>
+                            <tr><th>Code barre</th><th>Nom</th><th>Catégorie</th><th>Stock</th><th>Prix vente</th><th>Actions</th></tr>
+                        </thead>
+                        <tbody id="productsTable"><tr><td colspan="6" class="text-center">Chargement...</td></tr></tbody>
+                    </table>
+                </div>
+
+                <!-- Modal produit -->
+                <div class="modal fade" id="productModal" tabindex="-1" aria-hidden="true">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title">Ajouter / Modifier produit</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                             </div>
-                            <div class="mb-3">
-                                <label class="form-label">Quantité (stock initial)</label>
-                                <input type="number" id="prodQuantity" class="form-control" value="0" step="1">
+                            <div class="modal-body">
+                                <input type="hidden" id="prodId">
+                                <div class="mb-3"><label>Nom *</label><input type="text" id="prodName" class="form-control"></div>
+                                <div class="mb-3"><label>Quantité</label><input type="number" id="prodQuantity" class="form-control" value="0"></div>
+                                <div class="mb-3"><label>Code barre</label><input type="text" id="prodBarcode" class="form-control"></div>
+                                <div class="mb-3"><label>Prix d'achat (FCFA)</label><input type="number" step="0.01" id="prodBuyPrice" class="form-control" value="0"></div>
+                                <div class="mb-3"><label>Prix de vente (FCFA) *</label><input type="number" step="0.01" id="prodSellPrice" class="form-control"></div>
+                                <div class="mb-3"><label>Unité</label><input type="text" id="prodUnit" class="form-control" value="pièce"></div>
+                                <div class="mb-3">
+                                    <label>Catégorie</label>
+                                    <input type="text" id="prodCategoryName" class="form-control mb-2" placeholder="Nouvelle catégorie">
+                                    <select id="prodCategorySelect" class="form-select">
+                                        <option value="">Ou sélectionner existante</option>
+                                        ${categories.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
+                                    </select>
+                                </div>
                             </div>
-                            <div class="mb-3">
-                                <label class="form-label">Code barre</label>
-                                <input type="text" id="prodBarcode" class="form-control" placeholder="Optionnel">
+                            <div class="modal-footer">
+                                <button class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                                <button class="btn btn-primary" id="saveProductBtn">Enregistrer</button>
                             </div>
-                            <div class="mb-3">
-                                <label class="form-label">Prix d'achat (FCFA)</label>
-                                <input type="number" step="0.01" id="prodBuyPrice" class="form-control" value="0">
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label">Prix de vente (FCFA) *</label>
-                                <input type="number" step="0.01" id="prodSellPrice" class="form-control" required>
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label">Unité</label>
-                                <input type="text" id="prodUnit" class="form-control" value="pièce" placeholder="pièce, kg, litre...">
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label">Catégorie</label>
-                                <input type="text" id="prodCategoryName" class="form-control mb-2" placeholder="Nouvelle catégorie">
-                                <select id="prodCategorySelect" class="form-select">
-                                    <option value="">Ou sélectionner existante</option>
-                                    ${categories.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
-                                </select>
-                            </div>
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
-                            <button type="button" class="btn btn-primary" id="saveProductBtn">Enregistrer</button>
                         </div>
                     </div>
                 </div>
-            </div>
-        `;
-        document.getElementById('pageContainer').innerHTML = html;
+            `;
+            document.getElementById('pageContainer').innerHTML = html;
 
-        const catNameInput = document.getElementById('prodCategoryName');
-        const catSelect = document.getElementById('prodCategorySelect');
-        if (catNameInput && catSelect) {
-            catNameInput.addEventListener('input', () => { catSelect.value = ''; });
-            catSelect.addEventListener('change', () => { if (catSelect.value) catNameInput.value = ''; });
-        }
-
-        window.searchProducts = async (lowStock = false) => {
-            const q = document.getElementById('searchProduct').value;
-            let url = `/products/search?`;
-            if (q) url += `q=${encodeURIComponent(q)}&`;
-            if (lowStock) url += `lowStock=true`;
-            const prods = await apiCall(url);
-            const tbody = document.getElementById('productsTable');
-            tbody.innerHTML = prods.map(p => `
-                <tr class="${p.quantity <= p.reorder_level ? 'table-warning' : ''}">
-                    <td>${p.barcode || '-'}</td>
-                    <td>${p.name}</td>
-                    <td>${p.category_name || '-'}</td>
-                    <td>${p.quantity} ${p.unit}</td>
-                    <td>${p.sell_price} FCFA</td>
-                    <td>
-                        <button class="btn btn-sm btn-warning" onclick="editProduct(${p.id})">✏️</button>
-                        <button class="btn btn-sm btn-danger" onclick="deleteProduct(${p.id})">🗑️</button>
-                    </td>
-                </tr>
-            `).join('');
-        };
-
-        window.showProductModal = () => {
-            document.getElementById('prodId').value = '';
-            document.getElementById('prodName').value = '';
-            document.getElementById('prodQuantity').value = 0;
-            document.getElementById('prodBarcode').value = '';
-            document.getElementById('prodBuyPrice').value = 0;
-            document.getElementById('prodSellPrice').value = 0;
-            document.getElementById('prodUnit').value = 'pièce';
-            document.getElementById('prodCategoryName').value = '';
-            document.getElementById('prodCategorySelect').value = '';
-            new bootstrap.Modal(document.getElementById('productModal')).show();
-        };
-
-        window.editProduct = async (id) => {
-            const products = await apiCall('/products');
-            const p = products.find(x => x.id == id);
-            if (!p) return alert('Produit non trouvé');
-            document.getElementById('prodId').value = p.id;
-            document.getElementById('prodName').value = p.name;
-            document.getElementById('prodQuantity').value = p.quantity;
-            document.getElementById('prodBarcode').value = p.barcode || '';
-            document.getElementById('prodBuyPrice').value = p.buy_price;
-            document.getElementById('prodSellPrice').value = p.sell_price;
-            document.getElementById('prodUnit').value = p.unit;
-            document.getElementById('prodCategoryName').value = '';
-            document.getElementById('prodCategorySelect').value = p.category_id || '';
-            new bootstrap.Modal(document.getElementById('productModal')).show();
-        };
-
-        window.deleteProduct = async (id) => {
-            if (confirm('Supprimer définitivement ce produit ?')) {
-                await apiCall(`/products/${id}`, 'DELETE');
-                searchProducts();
-                renderDashboard();
+            // 3. Gestion des événements pour la catégorie
+            const catName = document.getElementById('prodCategoryName');
+            const catSelect = document.getElementById('prodCategorySelect');
+            if (catName && catSelect) {
+                catName.addEventListener('input', () => catSelect.value = '');
+                catSelect.addEventListener('change', () => { if (catSelect.value) catName.value = ''; });
             }
-        };
 
-        const saveBtn = document.getElementById('saveProductBtn');
-        if (saveBtn) {
-            const newSaveBtn = saveBtn.cloneNode(true);
-            saveBtn.parentNode.replaceChild(newSaveBtn, saveBtn);
-            newSaveBtn.addEventListener('click', async () => {
-                const id = document.getElementById('prodId').value;
-                const name = document.getElementById('prodName').value.trim();
-                if (!name) { alert('Le nom est obligatoire'); return; }
-                const sell_price = parseFloat(document.getElementById('prodSellPrice').value);
-                if (isNaN(sell_price) || sell_price <= 0) { alert('Prix de vente invalide'); return; }
-
-                let category_id = document.getElementById('prodCategorySelect').value;
-                let category_name = document.getElementById('prodCategoryName').value.trim();
-                if (category_name === '') category_name = null;
-                if (category_id === '') category_id = null;
-
-                let sku;
-                if (id) {
-                    const products = await apiCall('/products');
-                    const existing = products.find(p => p.id == id);
-                    sku = existing ? existing.sku : 'PROD-' + Date.now() + '-' + Math.floor(Math.random() * 10000);
-                } else {
-                    sku = 'PROD-' + Date.now() + '-' + Math.floor(Math.random() * 10000);
-                }
-
-                const productData = {
-                    sku: sku,
-                    barcode: document.getElementById('prodBarcode').value.trim() || null,
-                    name: name,
-                    description: '',
-                    category_id: category_id,
-                    category_name: category_name,
-                    supplier_id: null,
-                    quantity: parseInt(document.getElementById('prodQuantity').value) || 0,
-                    unit: document.getElementById('prodUnit').value.trim() || 'pièce',
-                    reorder_level: 5,
-                    buy_price: parseFloat(document.getElementById('prodBuyPrice').value) || 0,
-                    sell_price: sell_price,
-                    location: ''
-                };
-
+            // 4. Définition des fonctions globales
+            window.searchProducts = async (lowStock = false) => {
+                const q = document.getElementById('searchProduct')?.value || '';
+                let url = `/products/search?`;
+                if (q) url += `q=${encodeURIComponent(q)}&`;
+                if (lowStock) url += `lowStock=true`;
                 try {
-                    if (id) {
-                        await apiCall(`/products/${id}`, 'PUT', productData);
-                        alert('Produit modifié');
-                    } else {
-                        await apiCall('/products', 'POST', productData);
-                        alert('Produit créé');
+                    const prods = await apiCall(url);
+                    const tbody = document.getElementById('productsTable');
+                    if (tbody) {
+                        tbody.innerHTML = prods.map(p => `
+                            <tr class="${p.quantity <= p.reorder_level ? 'table-warning' : ''}">
+                                <td>${p.barcode || '-'}</td>
+                                <td>${p.name}</td>
+                                <td>${p.category_name || '-'}</td>
+                                <td>${p.quantity} ${p.unit}</td>
+                                <td>${p.sell_price} FCFA</td>
+                                <td>
+                                    <button class="btn btn-sm btn-warning" onclick="editProduct(${p.id})">✏️</button>
+                                    <button class="btn btn-sm btn-danger" onclick="deleteProduct(${p.id})">🗑️</button>
+                                </td>
+                            </tr>
+                        `).join('');
                     }
-                    bootstrap.Modal.getInstance(document.getElementById('productModal')).hide();
-                    searchProducts();
-                    renderDashboard();
-                } catch (err) {
-                    alert('Erreur: ' + err.message);
+                } catch(err) {
+                    console.error("Erreur searchProducts :", err);
+                    const tbody = document.getElementById('productsTable');
+                    if (tbody) tbody.innerHTML = `<tr><td colspan="6" class="text-danger">Erreur : ${err.message}</td></tr>`;
                 }
-            });
+            };
+
+            window.showProductModal = () => {
+                document.getElementById('prodId').value = '';
+                document.getElementById('prodName').value = '';
+                document.getElementById('prodQuantity').value = 0;
+                document.getElementById('prodBarcode').value = '';
+                document.getElementById('prodBuyPrice').value = 0;
+                document.getElementById('prodSellPrice').value = 0;
+                document.getElementById('prodUnit').value = 'pièce';
+                document.getElementById('prodCategoryName').value = '';
+                document.getElementById('prodCategorySelect').value = '';
+                new bootstrap.Modal(document.getElementById('productModal')).show();
+            };
+
+            window.editProduct = async (id) => {
+                try {
+                    const products = await apiCall('/products');
+                    const p = products.find(x => x.id == id);
+                    if (!p) return alert('Produit non trouvé');
+                    document.getElementById('prodId').value = p.id;
+                    document.getElementById('prodName').value = p.name;
+                    document.getElementById('prodQuantity').value = p.quantity;
+                    document.getElementById('prodBarcode').value = p.barcode || '';
+                    document.getElementById('prodBuyPrice').value = p.buy_price;
+                    document.getElementById('prodSellPrice').value = p.sell_price;
+                    document.getElementById('prodUnit').value = p.unit;
+                    document.getElementById('prodCategoryName').value = '';
+                    document.getElementById('prodCategorySelect').value = p.category_id || '';
+                    new bootstrap.Modal(document.getElementById('productModal')).show();
+                } catch(err) {
+                    alert("Erreur chargement : " + err.message);
+                }
+            };
+
+            window.deleteProduct = async (id) => {
+                if (confirm('Supprimer définitivement ce produit ?')) {
+                    await apiCall(`/products/${id}`, 'DELETE');
+                    searchProducts();
+                }
+            };
+
+            // 5. Bouton enregistrer (avec évitement des doublons)
+            const saveBtn = document.getElementById('saveProductBtn');
+            if (saveBtn) {
+                const newSaveBtn = saveBtn.cloneNode(true);
+                saveBtn.parentNode.replaceChild(newSaveBtn, saveBtn);
+                newSaveBtn.addEventListener('click', async () => {
+                    const id = document.getElementById('prodId').value;
+                    const name = document.getElementById('prodName').value.trim();
+                    if (!name) { alert('Le nom est obligatoire'); return; }
+                    const sell_price = parseFloat(document.getElementById('prodSellPrice').value);
+                    if (isNaN(sell_price) || sell_price <= 0) { alert('Prix de vente invalide'); return; }
+
+                    let category_id = document.getElementById('prodCategorySelect').value;
+                    let category_name = document.getElementById('prodCategoryName').value.trim();
+                    if (category_name === '') category_name = null;
+                    if (category_id === '') category_id = null;
+
+                    let sku;
+                    if (id) {
+                        const products = await apiCall('/products');
+                        const existing = products.find(p => p.id == id);
+                        sku = existing ? existing.sku : 'PROD-' + Date.now() + '-' + Math.floor(Math.random() * 10000);
+                    } else {
+                        sku = 'PROD-' + Date.now() + '-' + Math.floor(Math.random() * 10000);
+                    }
+
+                    const productData = {
+                        sku: sku,
+                        barcode: document.getElementById('prodBarcode').value.trim() || null,
+                        name: name,
+                        description: '',
+                        category_id: category_id,
+                        category_name: category_name,
+                        supplier_id: null,
+                        quantity: parseInt(document.getElementById('prodQuantity').value) || 0,
+                        unit: document.getElementById('prodUnit').value.trim() || 'pièce',
+                        reorder_level: 5,
+                        buy_price: parseFloat(document.getElementById('prodBuyPrice').value) || 0,
+                        sell_price: sell_price,
+                        location: ''
+                    };
+
+                    try {
+                        if (id) {
+                            await apiCall(`/products/${id}`, 'PUT', productData);
+                            alert('Produit modifié');
+                        } else {
+                            await apiCall('/products', 'POST', productData);
+                            alert('Produit créé');
+                        }
+                        bootstrap.Modal.getInstance(document.getElementById('productModal')).hide();
+                        searchProducts();
+                    } catch(err) {
+                        alert('Erreur : ' + err.message);
+                    }
+                });
+            }
+
+            // 6. Chargement initial
+            await searchProducts();
+            console.log("renderProducts terminée avec succès");
+        } catch(err) {
+            console.error("Erreur dans renderProducts :", err);
+            document.getElementById('pageContainer').innerHTML = `<div class="alert alert-danger">Erreur : ${err.message}</div>`;
         }
-        searchProducts();
     }
 
-    // ========== VENTES ==========
+    // ========== VENTES (inchangé, fonctionnel) ==========
     async function renderSales() {
         let allProducts = await apiCall('/products');
         let cart = [];
@@ -474,7 +482,7 @@
                     <div class="col-md-6"><input type="date" id="filterDate" class="form-control" placeholder="Date"></div>
                     <div class="col-md-12 mt-2"><button class="btn btn-sm btn-primary" onclick="filterSales()">Rechercher</button> <button class="btn btn-sm btn-secondary" onclick="loadSalesList()">Réinitialiser</button></div>
                 </div>
-                <div class="table-wrapper"><table class="table table-sm"><thead><tr><th>#</th><th>Client</th><th>Total (FCFA)</th><th>Statut</th><th>Date</th><th>Actions</th></tr></thead><tbody id="salesList"></tbody></table></div></div></div>
+                <div class="table-wrapper"><table class="table table-sm"><thead><tr><th>#</th><th>Client</th><th>Total (FCFA)</th><th>Statut</th><th>Date</th><th>Actions</th></tr></thead><tbody id="salesList"></tbody></td></div></div></div>
             </div>`;
         document.getElementById('pageContainer').innerHTML = html;
 
@@ -696,13 +704,8 @@
             let html = `<div class="table-wrapper"><table class="table"><thead><tr><th>N°</th><th>Client</th><th>Montant (FCFA)</th><th>Date vente</th><th>Échéance</th><th>Actions</th></tr></thead><tbody>`;
             invoices.forEach(f => {
                 html += `<tr>
-                             <td>${f.id}</td>
-                             <td>${f.client_name || 'Client particulier'}</td>
-                             <td>${f.final_amount.toLocaleString()}</td>
-                             <td>${new Date(f.sale_date).toLocaleDateString()}</td>
-                             <td>${f.due_date ? new Date(f.due_date).toLocaleDateString() : '-'}</td>
-                             <td>
-                                <button class="btn btn-sm btn-warning" onclick="recordPaymentInvoice(${f.id}, ${f.final_amount})">Règlement</button>
+                             <td>${f.id}${f.client_name || 'Client particulier'}${f.final_amount.toLocaleString()}${new Date(f.sale_date).toLocaleDateString()}${f.due_date ? new Date(f.due_date).toLocaleDateString() : '-'}
+                             <td><button class="btn btn-sm btn-warning" onclick="recordPaymentInvoice(${f.id}, ${f.final_amount})">Règlement</button>
                                 <button class="btn btn-sm btn-info" onclick="window.open('/api/sales/${f.id}/invoice?token=${token}','_blank')">PDF</button>
                              </td>
                           </tr>`;
@@ -779,13 +782,8 @@
             proformas = await apiCall('/proforma');
             document.getElementById('proformaList').innerHTML = proformas.map(p => `
                 <tr>
-                    <td>${p.proforma_number}</td>
-                    <td>${p.client_name || '-'}</td>
-                    <td>${new Date(p.issue_date).toLocaleDateString()}</td>
-                    <td>${p.total.toLocaleString()}</td>
-                    <td>${p.status}</td>
-                    <td>
-                        <button class="btn btn-sm btn-info" onclick="window.open('/api/proforma/${p.id}/pdf?token=${token}','_blank')">PDF</button>
+                    <td>${p.proforma_number}${p.client_name || '-'}${new Date(p.issue_date).toLocaleDateString()}${p.total.toLocaleString()}${p.status}
+                    <td><button class="btn btn-sm btn-info" onclick="window.open('/api/proforma/${p.id}/pdf?token=${token}','_blank')">PDF</button>
                         <button class="btn btn-sm btn-danger" onclick="deleteProforma(${p.id})">Supprimer</button>
                     </td>
                 </tr>
@@ -800,11 +798,9 @@
         const clients = await apiCall('/clients');
         let html = `<button class="btn btn-primary mb-3" onclick="showClientModal()">+ Client</button>
         <div class="table-wrapper"><table class="table"><thead><tr><th>Nom</th><th>Email</th><th>Téléphone</th><th>Actions</th></tr></thead><tbody>${clients.map(c=>`<tr>
-                <td>${c.name}</td>
-                <td>${c.email||''}</td>
-                <td>${c.phone||''}</td>
-                <td><button class="btn btn-sm btn-warning" onclick="editClient(${c.id})">✏️</button> <button class="btn btn-sm btn-danger" onclick="deleteClient(${c.id})">🗑️</button></td>
-            </tr>`).join('')}</tbody></table></div>
+                <td>${c.name}${c.email||''}${c.phone||''}
+                <td><button class="btn btn-sm btn-warning" onclick="editClient(${c.id})">✏️</button> <button class="btn btn-sm btn-danger" onclick="deleteClient(${c.id})">🗑️</button>
+            </td>`).join('')}</tbody></table></div>
         <div class="modal fade" id="clientModal"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5>Client</h5></div><div class="modal-body"><input type="hidden" id="clientId"><input id="clientName" placeholder="Nom*" class="form-control mb-2"><input id="clientEmail" placeholder="Email" class="form-control mb-2"><input id="clientPhone" placeholder="Téléphone" class="form-control mb-2"><textarea id="clientAddress" placeholder="Adresse" class="form-control"></textarea></div><div class="modal-footer"><button class="btn btn-primary" onclick="saveClient()">Sauvegarder</button></div></div></div></div>`;
         document.getElementById('pageContainer').innerHTML = html;
         window.showClientModal = () => { document.getElementById('clientId').value=''; document.getElementById('clientName').value=''; document.getElementById('clientEmail').value=''; document.getElementById('clientPhone').value=''; document.getElementById('clientAddress').value=''; new bootstrap.Modal(document.getElementById('clientModal')).show(); };
@@ -839,7 +835,7 @@
                 <div class="tab-content">
                     <div class="tab-pane fade show active" id="operations">
                         <div class="table-wrapper"><table class="table"><thead><tr><th>Type</th><th>Montant (FCFA)</th><th>Description</th><th>Date</th></tr></thead><tbody>
-                            ${transactions.map(t => `<tr><td>${t.transaction_type}</td><td>${t.amount.toLocaleString()}</td><td>${t.description || ''}</td><td>${new Date(t.created_at).toLocaleString()}</td></tr>`).join('')}
+                            ${transactions.map(t => `<tr><td>${t.transaction_type}${t.amount.toLocaleString()}${t.description || ''}${new Date(t.created_at).toLocaleString()}</td>`).join('')}
                         </tbody></table></div>
                     </div>
                     <div class="tab-pane fade" id="balance">
@@ -879,11 +875,7 @@
                 </div>
             </div>
             <div class="table-wrapper"><table class="table"><thead><tr><th>Produit</th><th>Type</th><th>Variation</th><th>Avant→Après</th><th>Date</th></tr></thead><tbody>${movements.map(m=>`<tr>
-                <td>${m.product_name}</td>
-                <td>${m.type}</td>
-                <td>${m.quantity_change}</td>
-                <td>${m.quantity_before}→${m.quantity_after}</td>
-                <td>${new Date(m.created_at).toLocaleString()}</td>
+                <td>${m.product_name}${m.type}${m.quantity_change}${m.quantity_before}→${m.quantity_after}${new Date(m.created_at).toLocaleString()}
             </tr>`).join('')}</tbody></table></div>`;
         document.getElementById('pageContainer').innerHTML = html;
         window.adjustStock = async () => {
@@ -897,7 +889,7 @@
             const inventory = await apiCall('/inventory/global');
             let html = '<div class="modal fade" id="inventoryModal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-header"><h5>Inventaire complet</h5><button class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="table-wrapper"><table class="table"><thead><tr><th>SKU</th><th>Produit</th><th>Quantité actuelle</th><th>Unité</th><th>Seuil</th></tr></thead><tbody>';
             inventory.forEach(p => {
-                html += `<tr><td>${p.sku}</td><td>${p.name}</td><td>${p.quantity}</td><td>${p.unit}</td><td>${p.reorder_level}</td></tr>`;
+                html += `<tr><td>${p.sku}${p.name}${p.quantity}${p.unit}${p.reorder_level}</td>`;
             });
             html += `</tbody></table></div></div><div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Fermer</button></div></div></div></div>`;
             document.body.insertAdjacentHTML('beforeend', html);
@@ -931,10 +923,7 @@
     async function renderHistory() {
         const history = await apiCall('/history');
         const html = `<div class="table-wrapper"><table class="table"><thead><tr><th>Type</th><th>Référence</th><th>Montant</th><th>Date</th></tr></thead><tbody>${history.map(h=>`<tr>
-                <td>${h.type}</td>
-                <td>${h.client_name || h.product_name || h.id}</td>
-                <td>${h.amount ? h.amount.toLocaleString() : ''}</td>
-                <td>${new Date(h.date).toLocaleString()}</td>
+                <td>${h.type}${h.client_name || h.product_name || h.id}${h.amount ? h.amount.toLocaleString() : ''}${new Date(h.date).toLocaleString()}
             </tr>`).join('')}</tbody></table></div>`;
         document.getElementById('pageContainer').innerHTML = html;
     }
