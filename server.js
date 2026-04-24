@@ -748,19 +748,13 @@ app.get('/api/proforma/:id/pdf', authenticate, async (req, res) => {
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename=proforma_${invoice.proforma_number}.pdf`);
         doc.pipe(res);
-        const primaryColor = '#2c3e50', secondaryColor = '#3498db', lightGray = '#ecf0f1', borderColor = '#bdc3c7';
-        let startY = 45, logoWidth = 0;
-        if (company.logo_url && company.logo_url.trim() !== '') {
-            try { const logoBuffer = await fetchImage(company.logo_url); doc.image(logoBuffer, 50, startY, { width: 100 }); logoWidth = 120; } catch (err) {}
-        }
-        const headerX = 50 + logoWidth, headerWidth = 500 - logoWidth, headerY = startY, headerHeight = 80;
-        doc.rect(headerX, headerY, headerWidth, headerHeight).fill(primaryColor);
-        doc.fillColor('white');
-        doc.fontSize(22).font('Helvetica-Bold').text(company.company_name, headerX + 10, headerY + 20, { width: headerWidth - 20, align: 'center' });
-        let y = Math.max(startY + headerHeight, startY + (logoWidth ? 60 : 0)) + 20;
-        doc.fillColor(secondaryColor).fontSize(18).font('Helvetica-Bold').text(`FACTURE PROFORMA N° ${invoice.proforma_number}`, 50, y, { align: 'center' });
+        
+        // Utiliser la même fonction d'en-tête que pour les factures
+        let y = await drawCompanyHeader(doc, company);
+        
+        doc.fillColor('#3498db').fontSize(18).font('Helvetica-Bold').text(`FACTURE PROFORMA N° ${invoice.proforma_number}`, 50, y, { align: 'center' });
         y += 30;
-        doc.fillColor(lightGray).rect(50, y, 500, 80).fill();
+        doc.fillColor('#ecf0f1').rect(50, y, 500, 80).fill();
         doc.fillColor('black').fontSize(10);
         doc.text(`Date d'émission : ${new Date(invoice.issue_date).toLocaleString()}`, 60, y + 10);
         doc.text(`Client : ${invoice.client_name || 'Client particulier'}`, 60, y + 25);
@@ -770,7 +764,7 @@ app.get('/api/proforma/:id/pdf', authenticate, async (req, res) => {
         if (invoice.valid_until) doc.text(`Valable jusqu'au : ${new Date(invoice.valid_until).toLocaleDateString()}`, 400, y + 10);
         y += 90;
         const tableTop = y;
-        doc.fillColor(primaryColor).rect(50, tableTop, 500, 20).fill();
+        doc.fillColor('#2c3e50').rect(50, tableTop, 500, 20).fill();
         doc.fillColor('white').fontSize(10).font('Helvetica-Bold');
         doc.text('Description', 60, tableTop + 5);
         doc.text('Quantité', 250, tableTop + 5);
@@ -785,19 +779,18 @@ app.get('/api/proforma/:id/pdf', authenticate, async (req, res) => {
             doc.text(`${item.total_price.toLocaleString()} ${company.currency}`, 450, rowY);
             rowY += 20;
         });
-        for (let i = 0; i <= items.length; i++) doc.lineWidth(0.5).strokeColor(borderColor).moveTo(50, tableTop + 20 + i * 20).lineTo(550, tableTop + 20 + i * 20).stroke();
+        for (let i = 0; i <= items.length; i++) doc.lineWidth(0.5).strokeColor('#bdc3c7').moveTo(50, tableTop + 20 + i * 20).lineTo(550, tableTop + 20 + i * 20).stroke();
         rowY += 10;
         doc.font('Helvetica-Bold');
         doc.text(`Sous-total : ${invoice.subtotal.toLocaleString()} ${company.currency}`, 350, rowY);
         rowY += 15; doc.text(`TVA (20%) : ${invoice.tax.toLocaleString()} ${company.currency}`, 350, rowY);
         rowY += 15; doc.text(`Remise : ${invoice.discount.toLocaleString()} ${company.currency}`, 350, rowY);
-        rowY += 15; doc.fillColor(secondaryColor).fontSize(12).text(`Total : ${invoice.total.toLocaleString()} ${company.currency}`, 350, rowY, { bold: true });
-        doc.fillColor(primaryColor).rect(50, 750, 500, 30).fill();
+        rowY += 15; doc.fillColor('#3498db').fontSize(12).text(`Total : ${invoice.total.toLocaleString()} ${company.currency}`, 350, rowY, { bold: true });
+        doc.fillColor('#2c3e50').rect(50, 750, 500, 30).fill();
         doc.fillColor('white').fontSize(8).text('Document non contractuel - Devis valant accord', 50, 760, { align: 'center' });
         doc.end();
     } catch (err) { console.error(err); res.status(500).json({ error: 'Erreur génération proforma' }); }
 });
-
 // ========== FACTURE, BON DE COMMANDE, BORDEREAU DE LIVRAISON (avec en-tête enrichi) ==========
 async function drawCompanyHeader(doc, company, startY = 45) {
     let logoWidth = 0;
@@ -1021,10 +1014,13 @@ app.get('/api/sales/:id/delivery', authenticate, async (req, res) => {
     } catch (err) { console.error(err); res.status(500).json({ error: 'Erreur génération bordereau de livraison' }); }
 });
 
-// ========== SERVEUR FRONTEND ==========
+// ========== SERVEUR FRONTEND AVEC ANTI-CACHE ==========
 app.use((req, res, next) => {
     if (req.path.startsWith('/api')) return next();
+    // Désactiver le cache pour index.html
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     res.sendFile(path.join(__dirname, 'index.html'));
 });
-
 initAndStart();
