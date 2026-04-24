@@ -59,7 +59,7 @@ async function initAndStart() {
         conn.release();
         console.log('✅ Connecté à MySQL');
 
-        // Création des tables (identique à votre version)
+        // Création des tables (avec les nouvelles colonnes)
         await pool.query(`CREATE TABLE IF NOT EXISTS users (
             id INT PRIMARY KEY AUTO_INCREMENT,
             name VARCHAR(100) NOT NULL,
@@ -68,12 +68,17 @@ async function initAndStart() {
             role ENUM('admin','user') DEFAULT 'user',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )`);
+
         await pool.query(`CREATE TABLE IF NOT EXISTS settings (
             id INT PRIMARY KEY AUTO_INCREMENT,
             user_id INT NOT NULL,
             company_name VARCHAR(200),
+            company_subtitle VARCHAR(200),
+            company_activity TEXT,
+            company_rc VARCHAR(100),
             company_address TEXT,
             company_phone VARCHAR(50),
+            company_phone2 VARCHAR(50),
             company_email VARCHAR(100),
             logo_url TEXT,
             tax_rate DECIMAL(5,2) DEFAULT 20.00,
@@ -81,6 +86,7 @@ async function initAndStart() {
             currency VARCHAR(10) DEFAULT 'FCFA',
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )`);
+
         await pool.query(`CREATE TABLE IF NOT EXISTS categories (
             id INT PRIMARY KEY AUTO_INCREMENT,
             user_id INT NOT NULL,
@@ -89,6 +95,7 @@ async function initAndStart() {
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
             UNIQUE(user_id, name)
         )`);
+
         await pool.query(`CREATE TABLE IF NOT EXISTS suppliers (
             id INT PRIMARY KEY AUTO_INCREMENT,
             user_id INT NOT NULL,
@@ -99,6 +106,7 @@ async function initAndStart() {
             address TEXT,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )`);
+
         await pool.query(`CREATE TABLE IF NOT EXISTS products (
             id INT PRIMARY KEY AUTO_INCREMENT,
             user_id INT NOT NULL,
@@ -121,6 +129,7 @@ async function initAndStart() {
             UNIQUE(user_id, sku),
             UNIQUE(user_id, barcode)
         )`);
+
         await pool.query(`CREATE TABLE IF NOT EXISTS clients (
             id INT PRIMARY KEY AUTO_INCREMENT,
             user_id INT NOT NULL,
@@ -131,6 +140,7 @@ async function initAndStart() {
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )`);
+
         await pool.query(`CREATE TABLE IF NOT EXISTS sales (
             id INT PRIMARY KEY AUTO_INCREMENT,
             user_id INT NOT NULL,
@@ -147,6 +157,7 @@ async function initAndStart() {
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
             FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL
         )`);
+
         await pool.query(`CREATE TABLE IF NOT EXISTS sale_items (
             id INT PRIMARY KEY AUTO_INCREMENT,
             sale_id INT NOT NULL,
@@ -157,6 +168,7 @@ async function initAndStart() {
             FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE,
             FOREIGN KEY (product_id) REFERENCES products(id)
         )`);
+
         await pool.query(`CREATE TABLE IF NOT EXISTS payments (
             id INT PRIMARY KEY AUTO_INCREMENT,
             sale_id INT NOT NULL,
@@ -165,6 +177,7 @@ async function initAndStart() {
             payment_method ENUM('cash','card','transfer') DEFAULT 'cash',
             FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE
         )`);
+
         await pool.query(`CREATE TABLE IF NOT EXISTS cash_register (
             id INT PRIMARY KEY AUTO_INCREMENT,
             user_id INT NOT NULL,
@@ -175,6 +188,7 @@ async function initAndStart() {
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )`);
+
         await pool.query(`CREATE TABLE IF NOT EXISTS stock_movements (
             id INT PRIMARY KEY AUTO_INCREMENT,
             product_id INT NOT NULL,
@@ -189,6 +203,7 @@ async function initAndStart() {
             FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )`);
+
         await pool.query(`CREATE TABLE IF NOT EXISTS proforma_invoices (
             id INT PRIMARY KEY AUTO_INCREMENT,
             user_id INT NOT NULL,
@@ -207,6 +222,7 @@ async function initAndStart() {
             status ENUM('draft','sent','accepted','rejected') DEFAULT 'draft',
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )`);
+
         await pool.query(`CREATE TABLE IF NOT EXISTS proforma_items (
             id INT PRIMARY KEY AUTO_INCREMENT,
             proforma_id INT NOT NULL,
@@ -217,9 +233,11 @@ async function initAndStart() {
             FOREIGN KEY (proforma_id) REFERENCES proforma_invoices(id) ON DELETE CASCADE
         )`);
 
-        try {
-            await pool.query(`ALTER TABLE cash_register MODIFY COLUMN transaction_type ENUM('sale','purchase','expense','withdrawal','deposit','payment') NOT NULL`);
-        } catch (err) {}
+        // Ajout des colonnes pour settings (compatible MySQL < 8.0.29)
+try { await pool.query(`ALTER TABLE settings ADD COLUMN company_subtitle VARCHAR(200)`); } catch(e) { if(e.code !== 'ER_DUP_FIELDNAME') console.warn(e); }
+try { await pool.query(`ALTER TABLE settings ADD COLUMN company_activity TEXT`); } catch(e) { if(e.code !== 'ER_DUP_FIELDNAME') console.warn(e); }
+try { await pool.query(`ALTER TABLE settings ADD COLUMN company_rc VARCHAR(100)`); } catch(e) { if(e.code !== 'ER_DUP_FIELDNAME') console.warn(e); }
+try { await pool.query(`ALTER TABLE settings ADD COLUMN company_phone2 VARCHAR(50)`); } catch(e) { if(e.code !== 'ER_DUP_FIELDNAME') console.warn(e); }
 
         console.log('✅ Tables prêtes');
         app.listen(PORT, () => console.log(`🚀 Serveur sur http://localhost:${PORT}`));
@@ -256,9 +274,9 @@ app.post('/api/register', async (req, res) => {
             [name, email, hashed]
         );
         await pool.query(
-            `INSERT INTO settings (user_id, company_name, company_address, company_phone, company_email, logo_url, tax_rate, low_stock_alert, currency)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [result.insertId, 'Mon Entreprise', '', '', '', '', 20, 5, 'FCFA']
+            `INSERT INTO settings (user_id, company_name, company_subtitle, company_activity, company_rc, company_address, company_phone, company_phone2, company_email, logo_url, tax_rate, low_stock_alert, currency)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [result.insertId, 'Mon Entreprise', '', '', '', '', '', '', '', '', 20, 5, 'FCFA']
         );
         res.status(201).json({ message: 'Utilisateur créé' });
     } catch (err) {
@@ -344,7 +362,6 @@ app.get('/api/products', authenticate, async (req, res) => {
         WHERE p.user_id = ? ORDER BY p.name`, [req.user.id]);
     res.json(rows);
 });
-
 app.post('/api/products', authenticate, async (req, res) => {
     const { sku, barcode, name, description, category_id, category_name, supplier_id, quantity, unit, reorder_level, buy_price, sell_price, location } = req.body;
     if (!sku || !name) return res.status(400).json({ error: 'SKU et nom requis' });
@@ -377,7 +394,6 @@ app.post('/api/products', authenticate, async (req, res) => {
         connection.release();
     }
 });
-
 app.put('/api/products/:id', authenticate, async (req, res) => {
     const { sku, barcode, name, description, category_id, category_name, supplier_id, quantity, unit, reorder_level, buy_price, sell_price, location } = req.body;
     const connection = await pool.getConnection();
@@ -408,18 +424,15 @@ app.put('/api/products/:id', authenticate, async (req, res) => {
         connection.release();
     }
 });
-
 app.delete('/api/products/:id', authenticate, async (req, res) => {
     await pool.query('DELETE FROM products WHERE id=? AND user_id=?', [req.params.id, req.user.id]);
     res.json({ message: 'Supprimé' });
 });
-
 app.get('/api/products/barcode/:code', authenticate, async (req, res) => {
     const [rows] = await pool.query('SELECT * FROM products WHERE user_id=? AND barcode=?', [req.user.id, req.params.code]);
     if (rows.length === 0) return res.status(404).json({ error: 'Produit non trouvé' });
     res.json(rows[0]);
 });
-
 app.get('/api/products/search', authenticate, async (req, res) => {
     const { q, lowStock } = req.query;
     let query = 'SELECT p.*, c.name as category_name FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE p.user_id = ?';
@@ -503,7 +516,6 @@ app.post('/api/sales', authenticate, async (req, res) => {
         connection.release();
     }
 });
-
 app.get('/api/sales', authenticate, async (req, res) => {
     const { client_name, status, start_date, end_date } = req.query;
     let query = `SELECT s.*, c.name as client_name FROM sales s LEFT JOIN clients c ON s.client_id = c.id WHERE s.user_id = ?`;
@@ -516,7 +528,6 @@ app.get('/api/sales', authenticate, async (req, res) => {
     const [rows] = await pool.query(query, params);
     res.json(rows);
 });
-
 app.post('/api/sales/:id/payment', authenticate, async (req, res) => {
     const { amount, payment_method } = req.body;
     const saleId = req.params.id;
@@ -565,7 +576,7 @@ app.post('/api/sales/:id/payment', authenticate, async (req, res) => {
     }
 });
 
-// ========== CAISSE, INVENTAIRE, RAPPORTS, ETC. ==========
+// ========== CAISSE, INVENTAIRE, RAPPORTS ==========
 app.get('/api/cash-register', authenticate, async (req, res) => {
     const [rows] = await pool.query('SELECT * FROM cash_register WHERE user_id=? ORDER BY created_at DESC LIMIT 200', [req.user.id]);
     res.json(rows);
@@ -594,7 +605,6 @@ app.get('/api/cash-register/summary', authenticate, async (req, res) => {
     );
     res.json({ entries: entrees[0].total, expenses: sorties[0].total, balance: entrees[0].total - sorties[0].total });
 });
-
 app.post('/api/inventory/adjust', authenticate, async (req, res) => {
     const { product_id, new_quantity, reason } = req.body;
     const connection = await pool.getConnection();
@@ -623,7 +633,6 @@ app.get('/api/inventory/global', authenticate, async (req, res) => {
     const [rows] = await pool.query('SELECT id, sku, name, quantity, unit, reorder_level FROM products WHERE user_id = ? ORDER BY name', [req.user.id]);
     res.json(rows);
 });
-
 app.get('/api/reports/dashboard', authenticate, async (req, res) => {
     const [totalProducts] = await pool.query('SELECT COUNT(*) as count FROM products WHERE user_id=?', [req.user.id]);
     const [lowStock] = await pool.query('SELECT COUNT(*) as count FROM products WHERE user_id=? AND quantity <= reorder_level', [req.user.id]);
@@ -641,17 +650,25 @@ app.get('/api/reports/sales-by-period', authenticate, async (req, res) => {
     res.json(rows);
 });
 
+// ========== PARAMÈTRES (avec nouveaux champs) ==========
 app.get('/api/settings', authenticate, async (req, res) => {
     const [rows] = await pool.query('SELECT * FROM settings WHERE user_id=?', [req.user.id]);
     if (rows.length === 0) {
-        await pool.query('INSERT INTO settings (user_id, company_name, company_address, company_phone, company_email, logo_url, tax_rate, low_stock_alert, currency) VALUES (?,?,?,?,?,?,?,?,?)', [req.user.id, 'Mon Entreprise', '', '', '', '', 20, 5, 'FCFA']);
-        return res.json({ company_name: 'Mon Entreprise', company_address: '', company_phone: '', company_email: '', logo_url: '', tax_rate: 20, low_stock_alert: 5, currency: 'FCFA' });
+        await pool.query(
+            `INSERT INTO settings (user_id, company_name, company_subtitle, company_activity, company_rc, company_address, company_phone, company_phone2, company_email, logo_url, tax_rate, low_stock_alert, currency)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [req.user.id, 'Mon Entreprise', '', '', '', '', '', '', '', '', 20, 5, 'FCFA']
+        );
+        return res.json({ company_name: 'Mon Entreprise', company_subtitle: '', company_activity: '', company_rc: '', company_address: '', company_phone: '', company_phone2: '', company_email: '', logo_url: '', tax_rate: 20, low_stock_alert: 5, currency: 'FCFA' });
     }
     res.json(rows[0]);
 });
 app.put('/api/settings', authenticate, async (req, res) => {
-    const { company_name, company_address, company_phone, company_email, logo_url, tax_rate, low_stock_alert, currency } = req.body;
-    await pool.query('UPDATE settings SET company_name=?, company_address=?, company_phone=?, company_email=?, logo_url=?, tax_rate=?, low_stock_alert=?, currency=? WHERE user_id=?', [company_name, company_address, company_phone, company_email, logo_url, tax_rate, low_stock_alert, currency, req.user.id]);
+    const { company_name, company_subtitle, company_activity, company_rc, company_address, company_phone, company_phone2, company_email, logo_url, tax_rate, low_stock_alert, currency } = req.body;
+    await pool.query(
+        `UPDATE settings SET company_name=?, company_subtitle=?, company_activity=?, company_rc=?, company_address=?, company_phone=?, company_phone2=?, company_email=?, logo_url=?, tax_rate=?, low_stock_alert=?, currency=? WHERE user_id=?`,
+        [company_name, company_subtitle, company_activity, company_rc, company_address, company_phone, company_phone2, company_email, logo_url, tax_rate, low_stock_alert, currency, req.user.id]
+    );
     res.json({ message: 'Paramètres mis à jour' });
 });
 
@@ -726,7 +743,7 @@ app.get('/api/proforma/:id/pdf', authenticate, async (req, res) => {
         const invoice = invoiceRows[0];
         const [items] = await pool.query('SELECT * FROM proforma_items WHERE proforma_id = ?', [proformaId]);
         const [settingsRows] = await pool.query('SELECT * FROM settings WHERE user_id = ?', [req.user.id]);
-        const company = settingsRows[0] || { company_name: 'Mon Entreprise', company_address: '', company_phone: '', company_email: '', logo_url: '', currency: 'FCFA' };
+        const company = settingsRows[0] || { company_name: 'Mon Entreprise', currency: 'FCFA' };
         const doc = new PDFDocument({ margin: 50, size: 'A4' });
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename=proforma_${invoice.proforma_number}.pdf`);
@@ -740,9 +757,6 @@ app.get('/api/proforma/:id/pdf', authenticate, async (req, res) => {
         doc.rect(headerX, headerY, headerWidth, headerHeight).fill(primaryColor);
         doc.fillColor('white');
         doc.fontSize(22).font('Helvetica-Bold').text(company.company_name, headerX + 10, headerY + 20, { width: headerWidth - 20, align: 'center' });
-        doc.fontSize(10).font('Helvetica').text(company.company_address, headerX + 10, headerY + 50, { align: 'center', width: headerWidth - 20 });
-        if (company.company_phone) doc.text(`Tél : ${company.company_phone}`, headerX + 10, headerY + 65, { align: 'center', width: headerWidth - 20 });
-        if (company.company_email) doc.text(`Email : ${company.company_email}`, headerX + 10, headerY + 80, { align: 'center', width: headerWidth - 20 });
         let y = Math.max(startY + headerHeight, startY + (logoWidth ? 60 : 0)) + 20;
         doc.fillColor(secondaryColor).fontSize(18).font('Helvetica-Bold').text(`FACTURE PROFORMA N° ${invoice.proforma_number}`, 50, y, { align: 'center' });
         y += 30;
@@ -784,7 +798,50 @@ app.get('/api/proforma/:id/pdf', authenticate, async (req, res) => {
     } catch (err) { console.error(err); res.status(500).json({ error: 'Erreur génération proforma' }); }
 });
 
-// ========== FACTURE, BON DE COMMANDE, BORDEREAU DE LIVRAISON (complets) ==========
+// ========== FACTURE, BON DE COMMANDE, BORDEREAU DE LIVRAISON (avec en-tête enrichi) ==========
+async function drawCompanyHeader(doc, company, startY = 45) {
+    let logoWidth = 0;
+    if (company.logo_url && company.logo_url.trim() !== '') {
+        try { 
+            const logoBuffer = await fetchImage(company.logo_url); 
+            doc.image(logoBuffer, 50, startY, { width: 100 }); 
+            logoWidth = 120; 
+        } catch (err) {}
+    }
+    const headerX = 50 + logoWidth;
+    const headerWidth = 500 - logoWidth;
+    const headerY = startY;
+    const headerHeight = 110;
+    doc.rect(headerX, headerY, headerWidth, headerHeight).fill('#2c3e50');
+    doc.fillColor('white');
+    doc.fontSize(18).font('Helvetica-Bold').text(company.company_name, headerX + 10, headerY + 10, { width: headerWidth - 20, align: 'center' });
+    let currentY = headerY + 35;
+    if (company.company_subtitle && company.company_subtitle.trim() !== '') {
+        doc.fontSize(10).font('Helvetica').text(company.company_subtitle, headerX + 10, currentY, { width: headerWidth - 20, align: 'center' });
+        currentY += 15;
+    }
+    if (company.company_activity && company.company_activity.trim() !== '') {
+        doc.fontSize(9).font('Helvetica-Oblique').text(company.company_activity, headerX + 10, currentY, { width: headerWidth - 20, align: 'center' });
+        currentY += 15;
+    }
+    if (company.company_rc && company.company_rc.trim() !== '') {
+        doc.fontSize(8).font('Helvetica').text(company.company_rc, headerX + 10, currentY, { width: headerWidth - 20, align: 'center' });
+        currentY += 15;
+    }
+    if (company.company_address && company.company_address.trim() !== '') {
+        doc.fontSize(9).font('Helvetica').text(company.company_address, headerX + 10, currentY, { width: headerWidth - 20, align: 'center' });
+        currentY += 15;
+    }
+    let phoneLine = '';
+    if (company.company_phone) phoneLine += `Tél : ${company.company_phone}`;
+    if (company.company_phone2) phoneLine += ` // ${company.company_phone2}`;
+    if (phoneLine) {
+        doc.fontSize(9).font('Helvetica').text(phoneLine, headerX + 10, currentY, { width: headerWidth - 20, align: 'center' });
+    }
+    return Math.max(startY + headerHeight, startY + (logoWidth ? 60 : 0)) + 20;
+}
+
+// Facture
 app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
     try {
         const saleId = req.params.id;
@@ -801,27 +858,16 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
             [saleId]
         );
         const [settingsRows] = await pool.query('SELECT * FROM settings WHERE user_id = ?', [req.user.id]);
-        const company = settingsRows[0] || { company_name: 'Mon Entreprise', company_address: '', company_phone: '', company_email: '', logo_url: '', currency: 'FCFA' };
+        const company = settingsRows[0] || { company_name: 'Mon Entreprise', company_address: '', company_phone: '', company_phone2: '', company_subtitle: '', company_activity: '', company_rc: '', currency: 'FCFA' };
         const doc = new PDFDocument({ margin: 50, size: 'A4' });
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename=facture_${saleId}.pdf`);
         doc.pipe(res);
-        const primaryColor = '#2c3e50', secondaryColor = '#3498db', lightGray = '#ecf0f1', borderColor = '#bdc3c7';
-        let startY = 45, logoWidth = 0;
-        if (company.logo_url && company.logo_url.trim() !== '') {
-            try { const logoBuffer = await fetchImage(company.logo_url); doc.image(logoBuffer, 50, startY, { width: 100 }); logoWidth = 120; } catch (err) {}
-        }
-        const headerX = 50 + logoWidth, headerWidth = 500 - logoWidth, headerY = startY, headerHeight = 80;
-        doc.rect(headerX, headerY, headerWidth, headerHeight).fill(primaryColor);
-        doc.fillColor('white');
-        doc.fontSize(22).font('Helvetica-Bold').text(company.company_name, headerX + 10, headerY + 20, { width: headerWidth - 20, align: 'center' });
-        doc.fontSize(10).font('Helvetica').text(company.company_address, headerX + 10, headerY + 50, { align: 'center', width: headerWidth - 20 });
-        if (company.company_phone) doc.text(`Tél : ${company.company_phone}`, headerX + 10, headerY + 65, { align: 'center', width: headerWidth - 20 });
-        if (company.company_email) doc.text(`Email : ${company.company_email}`, headerX + 10, headerY + 80, { align: 'center', width: headerWidth - 20 });
-        let y = Math.max(startY + headerHeight, startY + (logoWidth ? 60 : 0)) + 20;
-        doc.fillColor(secondaryColor).fontSize(18).font('Helvetica-Bold').text(`FACTURE N° ${saleId}`, 50, y, { align: 'center' });
+        // Entête personnalisée
+        let y = await drawCompanyHeader(doc, company);
+        doc.fillColor('#3498db').fontSize(18).font('Helvetica-Bold').text(`FACTURE N° ${saleId}`, 50, y, { align: 'center' });
         y += 30;
-        doc.fillColor(lightGray).rect(50, y, 500, 80).fill();
+        doc.fillColor('#ecf0f1').rect(50, y, 500, 80).fill();
         doc.fillColor('black').fontSize(10);
         doc.text(`Date : ${new Date(sale.sale_date).toLocaleString()}`, 60, y + 10);
         doc.text(`Client : ${sale.client_name || 'Client particulier'}`, 60, y + 25);
@@ -830,7 +876,7 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         doc.text(`Statut : ${sale.status === 'completed' ? '✓ Payée' : '⏳ En attente'}`, 400, y + 10);
         y += 90;
         const tableTop = y;
-        doc.fillColor(primaryColor).rect(50, tableTop, 500, 20).fill();
+        doc.fillColor('#2c3e50').rect(50, tableTop, 500, 20).fill();
         doc.fillColor('white').fontSize(10).font('Helvetica-Bold');
         doc.text('Produit', 60, tableTop + 5);
         doc.text('Quantité', 250, tableTop + 5);
@@ -845,19 +891,20 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
             doc.text(`${item.total_price.toLocaleString()} ${company.currency}`, 450, rowY);
             rowY += 20;
         });
-        for (let i = 0; i <= items.length; i++) doc.lineWidth(0.5).strokeColor(borderColor).moveTo(50, tableTop + 20 + i * 20).lineTo(550, tableTop + 20 + i * 20).stroke();
+        for (let i = 0; i <= items.length; i++) doc.lineWidth(0.5).strokeColor('#bdc3c7').moveTo(50, tableTop + 20 + i * 20).lineTo(550, tableTop + 20 + i * 20).stroke();
         rowY += 10;
         doc.font('Helvetica-Bold');
         doc.text(`Sous-total : ${sale.total_amount.toLocaleString()} ${company.currency}`, 350, rowY);
         rowY += 15; doc.text(`TVA (20%) : ${sale.tax.toLocaleString()} ${company.currency}`, 350, rowY);
         rowY += 15; doc.text(`Remise : ${sale.discount.toLocaleString()} ${company.currency}`, 350, rowY);
-        rowY += 15; doc.fillColor(secondaryColor).fontSize(12).text(`Total à payer : ${sale.final_amount.toLocaleString()} ${company.currency}`, 350, rowY, { bold: true });
-        doc.fillColor(primaryColor).rect(50, 750, 500, 30).fill();
+        rowY += 15; doc.fillColor('#3498db').fontSize(12).text(`Total à payer : ${sale.final_amount.toLocaleString()} ${company.currency}`, 350, rowY, { bold: true });
+        doc.fillColor('#2c3e50').rect(50, 750, 500, 30).fill();
         doc.fillColor('white').fontSize(8).text('Merci de votre confiance', 50, 760, { align: 'center' });
         doc.end();
     } catch (err) { console.error(err); res.status(500).json({ error: 'Erreur génération facture' }); }
 });
 
+// Bon de commande (identique à facture mais titre différent)
 app.get('/api/sales/:id/order', authenticate, async (req, res) => {
     try {
         const saleId = req.params.id;
@@ -874,27 +921,15 @@ app.get('/api/sales/:id/order', authenticate, async (req, res) => {
             [saleId]
         );
         const [settingsRows] = await pool.query('SELECT * FROM settings WHERE user_id = ?', [req.user.id]);
-        const company = settingsRows[0] || { company_name: 'Mon Entreprise', company_address: '', company_phone: '', company_email: '', logo_url: '', currency: 'FCFA' };
+        const company = settingsRows[0] || { company_name: 'Mon Entreprise', currency: 'FCFA' };
         const doc = new PDFDocument({ margin: 50, size: 'A4' });
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename=bon_commande_${saleId}.pdf`);
         doc.pipe(res);
-        const primaryColor = '#2c3e50', secondaryColor = '#3498db', lightGray = '#ecf0f1', borderColor = '#bdc3c7';
-        let startY = 45, logoWidth = 0;
-        if (company.logo_url && company.logo_url.trim() !== '') {
-            try { const logoBuffer = await fetchImage(company.logo_url); doc.image(logoBuffer, 50, startY, { width: 100 }); logoWidth = 120; } catch (err) {}
-        }
-        const headerX = 50 + logoWidth, headerWidth = 500 - logoWidth, headerY = startY, headerHeight = 80;
-        doc.rect(headerX, headerY, headerWidth, headerHeight).fill(primaryColor);
-        doc.fillColor('white');
-        doc.fontSize(22).font('Helvetica-Bold').text(company.company_name, headerX + 10, headerY + 20, { width: headerWidth - 20, align: 'center' });
-        doc.fontSize(10).font('Helvetica').text(company.company_address, headerX + 10, headerY + 50, { align: 'center', width: headerWidth - 20 });
-        if (company.company_phone) doc.text(`Tél : ${company.company_phone}`, headerX + 10, headerY + 65, { align: 'center', width: headerWidth - 20 });
-        if (company.company_email) doc.text(`Email : ${company.company_email}`, headerX + 10, headerY + 80, { align: 'center', width: headerWidth - 20 });
-        let y = Math.max(startY + headerHeight, startY + (logoWidth ? 60 : 0)) + 20;
-        doc.fillColor(secondaryColor).fontSize(18).font('Helvetica-Bold').text(`BON DE COMMANDE N° ${saleId}`, 50, y, { align: 'center' });
+        let y = await drawCompanyHeader(doc, company);
+        doc.fillColor('#3498db').fontSize(18).font('Helvetica-Bold').text(`BON DE COMMANDE N° ${saleId}`, 50, y, { align: 'center' });
         y += 30;
-        doc.fillColor(lightGray).rect(50, y, 500, 80).fill();
+        doc.fillColor('#ecf0f1').rect(50, y, 500, 80).fill();
         doc.fillColor('black').fontSize(10);
         doc.text(`Date : ${new Date(sale.sale_date).toLocaleString()}`, 60, y + 10);
         doc.text(`Client : ${sale.client_name || 'Client particulier'}`, 60, y + 25);
@@ -902,7 +937,7 @@ app.get('/api/sales/:id/order', authenticate, async (req, res) => {
         if (sale.client_address) doc.text(`Adresse de livraison : ${sale.client_address}`, 60, y + 55);
         y += 90;
         const tableTop = y;
-        doc.fillColor(primaryColor).rect(50, tableTop, 500, 20).fill();
+        doc.fillColor('#2c3e50').rect(50, tableTop, 500, 20).fill();
         doc.fillColor('white').fontSize(10).font('Helvetica-Bold');
         doc.text('Produit', 60, tableTop + 5);
         doc.text('Quantité', 250, tableTop + 5);
@@ -917,19 +952,20 @@ app.get('/api/sales/:id/order', authenticate, async (req, res) => {
             doc.text(`${item.total_price.toLocaleString()} ${company.currency}`, 450, rowY);
             rowY += 20;
         });
-        for (let i = 0; i <= items.length; i++) doc.lineWidth(0.5).strokeColor(borderColor).moveTo(50, tableTop + 20 + i * 20).lineTo(550, tableTop + 20 + i * 20).stroke();
+        for (let i = 0; i <= items.length; i++) doc.lineWidth(0.5).strokeColor('#bdc3c7').moveTo(50, tableTop + 20 + i * 20).lineTo(550, tableTop + 20 + i * 20).stroke();
         rowY += 10;
         doc.font('Helvetica-Bold');
         doc.text(`Sous-total : ${sale.total_amount.toLocaleString()} ${company.currency}`, 350, rowY);
         rowY += 15; doc.text(`TVA (20%) : ${sale.tax.toLocaleString()} ${company.currency}`, 350, rowY);
         rowY += 15; doc.text(`Remise : ${sale.discount.toLocaleString()} ${company.currency}`, 350, rowY);
-        rowY += 15; doc.fillColor(secondaryColor).fontSize(12).text(`Total : ${sale.final_amount.toLocaleString()} ${company.currency}`, 350, rowY, { bold: true });
-        doc.fillColor(primaryColor).rect(50, 750, 500, 30).fill();
+        rowY += 15; doc.fillColor('#3498db').fontSize(12).text(`Total : ${sale.final_amount.toLocaleString()} ${company.currency}`, 350, rowY, { bold: true });
+        doc.fillColor('#2c3e50').rect(50, 750, 500, 30).fill();
         doc.fillColor('white').fontSize(8).text('Merci de votre commande', 50, 760, { align: 'center' });
         doc.end();
     } catch (err) { console.error(err); res.status(500).json({ error: 'Erreur génération bon de commande' }); }
 });
 
+// Bordereau de livraison
 app.get('/api/sales/:id/delivery', authenticate, async (req, res) => {
     try {
         const saleId = req.params.id;
@@ -946,27 +982,15 @@ app.get('/api/sales/:id/delivery', authenticate, async (req, res) => {
             [saleId]
         );
         const [settingsRows] = await pool.query('SELECT * FROM settings WHERE user_id = ?', [req.user.id]);
-        const company = settingsRows[0] || { company_name: 'Mon Entreprise', company_address: '', company_phone: '', company_email: '', logo_url: '', currency: 'FCFA' };
+        const company = settingsRows[0] || { company_name: 'Mon Entreprise', currency: 'FCFA' };
         const doc = new PDFDocument({ margin: 50, size: 'A4' });
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename=bordereau_livraison_${saleId}.pdf`);
         doc.pipe(res);
-        const primaryColor = '#2c3e50', secondaryColor = '#3498db', lightGray = '#ecf0f1', borderColor = '#bdc3c7';
-        let startY = 45, logoWidth = 0;
-        if (company.logo_url && company.logo_url.trim() !== '') {
-            try { const logoBuffer = await fetchImage(company.logo_url); doc.image(logoBuffer, 50, startY, { width: 100 }); logoWidth = 120; } catch (err) {}
-        }
-        const headerX = 50 + logoWidth, headerWidth = 500 - logoWidth, headerY = startY, headerHeight = 80;
-        doc.rect(headerX, headerY, headerWidth, headerHeight).fill(primaryColor);
-        doc.fillColor('white');
-        doc.fontSize(22).font('Helvetica-Bold').text(company.company_name, headerX + 10, headerY + 20, { width: headerWidth - 20, align: 'center' });
-        doc.fontSize(10).font('Helvetica').text(company.company_address, headerX + 10, headerY + 50, { align: 'center', width: headerWidth - 20 });
-        if (company.company_phone) doc.text(`Tél : ${company.company_phone}`, headerX + 10, headerY + 65, { align: 'center', width: headerWidth - 20 });
-        if (company.company_email) doc.text(`Email : ${company.company_email}`, headerX + 10, headerY + 80, { align: 'center', width: headerWidth - 20 });
-        let y = Math.max(startY + headerHeight, startY + (logoWidth ? 60 : 0)) + 20;
-        doc.fillColor(secondaryColor).fontSize(18).font('Helvetica-Bold').text(`BORDEREAU DE LIVRAISON N° ${saleId}`, 50, y, { align: 'center' });
+        let y = await drawCompanyHeader(doc, company);
+        doc.fillColor('#3498db').fontSize(18).font('Helvetica-Bold').text(`BORDEREAU DE LIVRAISON N° ${saleId}`, 50, y, { align: 'center' });
         y += 30;
-        doc.fillColor(lightGray).rect(50, y, 500, 80).fill();
+        doc.fillColor('#ecf0f1').rect(50, y, 500, 80).fill();
         doc.fillColor('black').fontSize(10);
         doc.text(`Date de commande : ${new Date(sale.sale_date).toLocaleString()}`, 60, y + 10);
         doc.text(`Client : ${sale.client_name || 'Client particulier'}`, 60, y + 25);
@@ -974,7 +998,7 @@ app.get('/api/sales/:id/delivery', authenticate, async (req, res) => {
         if (sale.client_address) doc.text(`Adresse de livraison : ${sale.client_address}`, 60, y + 55);
         y += 90;
         const tableTop = y;
-        doc.fillColor(primaryColor).rect(50, tableTop, 500, 20).fill();
+        doc.fillColor('#2c3e50').rect(50, tableTop, 500, 20).fill();
         doc.fillColor('white').fontSize(10).font('Helvetica-Bold');
         doc.text('Produit', 60, tableTop + 5);
         doc.text('Quantité', 250, tableTop + 5);
@@ -987,11 +1011,11 @@ app.get('/api/sales/:id/delivery', authenticate, async (req, res) => {
             doc.text('', 350, rowY);
             rowY += 20;
         });
-        for (let i = 0; i <= items.length; i++) doc.lineWidth(0.5).strokeColor(borderColor).moveTo(50, tableTop + 20 + i * 20).lineTo(550, tableTop + 20 + i * 20).stroke();
+        for (let i = 0; i <= items.length; i++) doc.lineWidth(0.5).strokeColor('#bdc3c7').moveTo(50, tableTop + 20 + i * 20).lineTo(550, tableTop + 20 + i * 20).stroke();
         rowY += 30;
         doc.text(`Date de livraison : _____________`, 50, rowY);
         doc.text(`Signature du client : _____________`, 300, rowY);
-        doc.fillColor(primaryColor).rect(50, 750, 500, 30).fill();
+        doc.fillColor('#2c3e50').rect(50, 750, 500, 30).fill();
         doc.fillColor('white').fontSize(8).text('Bon de livraison à conserver', 50, 760, { align: 'center' });
         doc.end();
     } catch (err) { console.error(err); res.status(500).json({ error: 'Erreur génération bordereau de livraison' }); }

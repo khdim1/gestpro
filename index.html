@@ -928,17 +928,74 @@ async function renderProducts() {
         new Chart(ctx, { type: 'line', data: { labels: salesData.map(d=>d.date), datasets: [{ label: 'Ventes (FCFA)', data: salesData.map(d=>d.total), borderColor: '#2ecc71', tension: 0.3, fill: true, backgroundColor: 'rgba(46,204,113,0.05)' }] } });
     }
 
-    // ========== PARAMÈTRES ==========
-    async function renderSettings() {
-        const settings = await apiCall('/settings');
-        const html = `<div class="card p-4 border-0 shadow-sm rounded-4"><h5>Paramètres société</h5><label>Nom entreprise</label><input id="companyName" class="form-control mb-2" value="${settings.company_name||''}"><label>Adresse</label><input id="companyAddress" class="form-control mb-2" value="${settings.company_address||''}"><label>Téléphone</label><input id="companyPhone" class="form-control mb-2" value="${settings.company_phone||''}"><label>Email</label><input id="companyEmail" class="form-control mb-2" value="${settings.company_email||''}"><label>URL du logo</label><input id="logoUrl" class="form-control mb-2" value="${settings.logo_url||''}" placeholder="https://exemple.com/logo.png"><label>Taux TVA (%)</label><input id="taxRate" class="form-control mb-2" value="${settings.tax_rate||20}"><label>Seuil alerte stock</label><input id="lowStockAlert" class="form-control mb-2" value="${settings.low_stock_alert||5}"><label>Devise</label><input id="currency" class="form-control mb-2" value="${settings.currency||'FCFA'}"><button class="btn btn-primary" onclick="saveSettings()">Enregistrer</button></div>`;
-        document.getElementById('pageContainer').innerHTML = html;
-        window.saveSettings = async () => {
-            const data = { company_name: document.getElementById('companyName').value, company_address: document.getElementById('companyAddress').value, company_phone: document.getElementById('companyPhone').value, company_email: document.getElementById('companyEmail').value, logo_url: document.getElementById('logoUrl').value, tax_rate: parseFloat(document.getElementById('taxRate').value), low_stock_alert: parseInt(document.getElementById('lowStockAlert').value), currency: document.getElementById('currency').value };
-            await apiCall('/settings', 'PUT', data);
-            alert('Paramètres mis à jour');
+    // ========== PARAMÈTRES (avec tous les champs pour l'en-tête de facture) ==========
+async function renderSettings() {
+    const settings = await apiCall('/settings');
+    const html = `
+        <div class="card p-4 border-0 shadow-sm rounded-4">
+            <h5>Paramètres société</h5>
+            <label>Nom entreprise</label>
+            <input id="companyName" class="form-control mb-2" value="${settings.company_name || ''}">
+            
+            <label>Sous-titre (ex: SERIGNE MOUSTAPHA DIOUF)</label>
+            <input id="companySubtitle" class="form-control mb-2" value="${settings.company_subtitle || ''}">
+            
+            <label>Activité / Commerce (ex: D.M. Commerçant Dépot Sanitaire - Plomberie - Etanchéité)</label>
+            <textarea id="companyActivity" class="form-control mb-2" rows="2">${settings.company_activity || ''}</textarea>
+            
+            <label>Numéro RC (ex: RC : SN DBI 2014 - A - 0393 - Pikine Route des Niayes)</label>
+            <input id="companyRc" class="form-control mb-2" value="${settings.company_rc || ''}">
+            
+            <label>Adresse</label>
+            <input id="companyAddress" class="form-control mb-2" value="${settings.company_address || ''}">
+            
+            <label>Téléphone principal</label>
+            <input id="companyPhone" class="form-control mb-2" value="${settings.company_phone || ''}">
+            
+            <label>Téléphone secondaire (optionnel)</label>
+            <input id="companyPhone2" class="form-control mb-2" value="${settings.company_phone2 || ''}">
+            
+            <label>Email</label>
+            <input id="companyEmail" class="form-control mb-2" value="${settings.company_email || ''}">
+            
+            <label>URL du logo (laisser vide si pas de logo)</label>
+            <input id="logoUrl" class="form-control mb-2" value="${settings.logo_url || ''}" placeholder="https://exemple.com/logo.png">
+            
+            <label>Taux TVA (%)</label>
+            <input id="taxRate" class="form-control mb-2" value="${settings.tax_rate || 20}">
+            
+            <label>Seuil alerte stock</label>
+            <input id="lowStockAlert" class="form-control mb-2" value="${settings.low_stock_alert || 5}">
+            
+            <label>Devise</label>
+            <input id="currency" class="form-control mb-2" value="${settings.currency || 'FCFA'}">
+            
+            <button class="btn btn-primary mt-2" onclick="saveSettings()">Enregistrer</button>
+        </div>
+    `;
+    document.getElementById('pageContainer').innerHTML = html;
+
+    window.saveSettings = async () => {
+        const data = {
+            company_name: document.getElementById('companyName').value,
+            company_subtitle: document.getElementById('companySubtitle').value,
+            company_activity: document.getElementById('companyActivity').value,
+            company_rc: document.getElementById('companyRc').value,
+            company_address: document.getElementById('companyAddress').value,
+            company_phone: document.getElementById('companyPhone').value,
+            company_phone2: document.getElementById('companyPhone2').value,
+            company_email: document.getElementById('companyEmail').value,
+            logo_url: document.getElementById('logoUrl').value,
+            tax_rate: parseFloat(document.getElementById('taxRate').value),
+            low_stock_alert: parseInt(document.getElementById('lowStockAlert').value),
+            currency: document.getElementById('currency').value
         };
-    }
+        await apiCall('/settings', 'PUT', data);
+        alert('Paramètres mis à jour');
+        renderSettings(); // recharger la page pour afficher les nouvelles valeurs
+    };
+}
+   
 
     // ========== HISTORIQUE ==========
     async function renderHistory() {
