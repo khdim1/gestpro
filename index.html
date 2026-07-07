@@ -483,8 +483,6 @@
         }
         .cash-stat-item .amount.green { color: var(--secondary); }
         .cash-stat-item .amount.red { color: var(--danger); }
-        
-        /* ===== LOGOS DE PAIEMENT ===== */
         .payment-logos {
             display: flex;
             gap: 8px;
@@ -524,18 +522,9 @@
             background: #e67e22;
             color: white;
         }
-        .payment-logo.card {
-            background: #3498db;
-            color: white;
-        }
-        .payment-logo.transfer {
-            background: #9b59b6;
-            color: white;
-        }
         .payment-logo .logo-icon {
             font-size: 1.1rem;
         }
-        
         @media (max-width: 768px) {
             .sidebar { transform: translateX(-100%); }
             .sidebar.open { transform: translateX(0); }
@@ -582,21 +571,21 @@
         <h4><i class="bi bi-box-seam"></i> GestPro</h4>
         <span class="text-muted-custom fs-small">Gestion professionnelle</span>
     </div>
-   <nav class="nav flex-column mt-2">
-    <a class="nav-link active" data-page="dashboard"><i class="bi bi-speedometer2" style="color: #2c6e9e;"></i> Tableau de bord</a>
-    <a class="nav-link" data-page="products"><i class="bi bi-box-seam" style="color: #27ae60;"></i> Produits</a>
-    <a class="nav-link" data-page="sales"><i class="bi bi-cart-plus" style="color: #f39c12;"></i> Ventes</a>
-    <a class="nav-link" data-page="proforma"><i class="bi bi-file-text" style="color: #8e44ad;"></i> Proforma</a>
-    <a class="nav-link" data-page="invoices"><i class="bi bi-receipt" style="color: #e74c3c;"></i> Factures</a>
-    <a class="nav-link" data-page="clients"><i class="bi bi-people" style="color: #3498db;"></i> Clients</a>
-    <a class="nav-link" data-page="cash"><i class="bi bi-cash-stack" style="color: #2ecc71;"></i> Caisse</a>
-    <a class="nav-link" data-page="inventory"><i class="bi bi-clipboard-data" style="color: #9b59b6;"></i> Inventaire</a>
-    <a class="nav-link" data-page="reports"><i class="bi bi-graph-up" style="color: #e67e22;"></i> Rapports</a>
-    <a class="nav-link" data-page="settings"><i class="bi bi-gear" style="color: #7f8c8d;"></i> Paramètres</a>
-    <a class="nav-link" data-page="history"><i class="bi bi-clock-history" style="color: #1abc9c;"></i> Historique</a>
-    <hr class="nav-divider">
-    <a class="nav-link logout" id="logoutBtn"><i class="bi bi-box-arrow-right" style="color: #e74c3c;"></i> Déconnexion</a>
-</nav>
+    <nav class="nav flex-column mt-2">
+        <a class="nav-link active" data-page="dashboard"><i class="bi bi-speedometer2" style="color: #2c6e9e;"></i> Tableau de bord</a>
+        <a class="nav-link" data-page="products"><i class="bi bi-box-seam" style="color: #27ae60;"></i> Produits</a>
+        <a class="nav-link" data-page="sales"><i class="bi bi-cart-plus" style="color: #f39c12;"></i> Ventes</a>
+        <a class="nav-link" data-page="proforma"><i class="bi bi-file-text" style="color: #8e44ad;"></i> Proforma</a>
+        <a class="nav-link" data-page="invoices"><i class="bi bi-receipt" style="color: #e74c3c;"></i> Factures</a>
+        <a class="nav-link" data-page="clients"><i class="bi bi-people" style="color: #3498db;"></i> Clients</a>
+        <a class="nav-link" data-page="cash"><i class="bi bi-cash-stack" style="color: #2ecc71;"></i> Caisse</a>
+        <a class="nav-link" data-page="inventory"><i class="bi bi-clipboard-data" style="color: #9b59b6;"></i> Inventaire</a>
+        <a class="nav-link" data-page="reports"><i class="bi bi-graph-up" style="color: #e67e22;"></i> Rapports</a>
+        <a class="nav-link" data-page="settings"><i class="bi bi-gear" style="color: #7f8c8d;"></i> Paramètres</a>
+        <a class="nav-link" data-page="history"><i class="bi bi-clock-history" style="color: #1abc9c;"></i> Historique</a>
+        <hr class="nav-divider">
+        <a class="nav-link logout" id="logoutBtn"><i class="bi bi-box-arrow-right" style="color: #e74c3c;"></i> Déconnexion</a>
+    </nav>
 </div>
 
 <div class="toggle-sidebar" id="toggleSidebar"><i class="bi bi-list"></i></div>
@@ -619,6 +608,13 @@
     // ========================================================================
     let token = localStorage.getItem('token');
     let currentUser = null;
+
+    // ===== FORMATAGE DES NOMBRES AVEC ESPACES =====
+    function formatNumber(number) {
+        if (number === undefined || number === null || isNaN(number)) return '0';
+        const num = parseFloat(number);
+        return num.toLocaleString('fr-FR').replace(/\s/g, ' ').replace(/,/g, ' ');
+    }
 
     async function apiCall(endpoint, method = 'GET', body = null) {
         const headers = { 'Content-Type': 'application/json' };
@@ -721,14 +717,14 @@
             const html = `
                 <div class="row g-4 fade-in">
                     <div class="col-md-3 delay-1"><div class="stat-card"><div class="stat-icon"><i class="bi bi-boxes"></i></div><h6>Produits</h6><h2>${data.totalProducts}</h2><span class="stat-label">dont ${data.lowStock} stock faible</span><br><span class="stat-label">${lowStockLink}</span></div></div>
-                    <div class="col-md-3 delay-2"><div class="stat-card green"><div class="stat-icon"><i class="bi bi-coin"></i></div><h6>Valeur stock</h6><h2>${parseFloat(data.inventoryValue || 0).toFixed(0)} FCFA</h2></div></div>
-                    <div class="col-md-3 delay-3"><div class="stat-card orange"><div class="stat-icon"><i class="bi bi-calendar-today"></i></div><h6>Ventes aujourd'hui</h6><h2>${parseFloat(data.todaySales || 0).toFixed(0)} FCFA</h2></div></div>
-                    <div class="col-md-3 delay-4"><div class="stat-card"><div class="stat-icon"><i class="bi bi-calendar-month"></i></div><h6>Ventes mois</h6><h2>${parseFloat(data.monthSales || 0).toFixed(0)} FCFA</h2></div></div>
+                    <div class="col-md-3 delay-2"><div class="stat-card green"><div class="stat-icon"><i class="bi bi-coin"></i></div><h6>Valeur stock</h6><h2>${formatNumber(data.inventoryValue)} FCFA</h2></div></div>
+                    <div class="col-md-3 delay-3"><div class="stat-card orange"><div class="stat-icon"><i class="bi bi-calendar-today"></i></div><h6>Ventes aujourd'hui</h6><h2>${formatNumber(data.todaySales)} FCFA</h2></div></div>
+                    <div class="col-md-3 delay-4"><div class="stat-card"><div class="stat-icon"><i class="bi bi-calendar-month"></i></div><h6>Ventes mois</h6><h2>${formatNumber(data.monthSales)} FCFA</h2></div></div>
                 </div>
                 <div class="row mt-4">
                     <div class="col-md-6"><div class="card-modern"><div class="card-title"><i class="bi bi-bar-chart-fill text-primary-custom me-2"></i>Top 5 produits</div><canvas id="topProductsChart" height="200"></canvas></div></div>
                     <div class="col-md-6"><div class="card-modern"><div class="card-title"><i class="bi bi-clock-history text-primary-custom me-2"></i>Dernières ventes</div><div class="table-wrapper"><table class="table"><thead><tr><th>#</th><th>Client</th><th>Total</th><th>Date</th></tr></thead><tbody>
-                        ${(data.recentSales || []).map(s => `<tr><td>#${s.id}</td><td>${s.client_name||'-'}</td><td>${s.final_amount} FCFA</td><td>${new Date(s.sale_date).toLocaleDateString()}</td></tr>`).join('')}
+                        ${(data.recentSales || []).map(s => `<tr><td>#${s.id}</td><td>${s.client_name||'-'}</td><td>${formatNumber(s.final_amount)} FCFA</td><td>${new Date(s.sale_date).toLocaleDateString()}</td></tr>`).join('')}
                     </tbody></table></div></div></div>
                 </div>
             `;
@@ -866,7 +862,7 @@
                             <td><strong>${p.name}</strong></td>
                             <td>${p.category_name || '-'}</td>
                             <td>${p.quantity} ${p.unit}</td>
-                            <td>${p.sell_price} FCFA</td>
+                            <td>${formatNumber(p.sell_price)} FCFA</td>
                             <td>
                                 <button class="btn btn-sm btn-warning me-1" onclick="editProduct(${p.id})"><i class="bi bi-pencil"></i></button>
                                 <button class="btn btn-sm btn-danger" onclick="deleteProduct(${p.id})"><i class="bi bi-trash"></i></button>
@@ -1040,12 +1036,6 @@
                                 <div class="payment-logo orange" onclick="selectPayment('orange')" id="pay-orange">
                                     <span class="logo-icon">📱</span> Orange Money
                                 </div>
-                                <div class="payment-logo card" onclick="selectPayment('card')" id="pay-card">
-                                    <span class="logo-icon">💳</span> Carte
-                                </div>
-                                <div class="payment-logo transfer" onclick="selectPayment('transfer')" id="pay-transfer">
-                                    <span class="logo-icon">🏦</span> Virement
-                                </div>
                             </div>
                             <input type="hidden" id="paymentMethod" value="cash">
                         </div>
@@ -1095,7 +1085,7 @@
                             ${hasImage ? `<img src="${p.image_url}" alt="${p.name}">` : `<i class="bi bi-box-seam"></i>`}
                         </div>
                         <div class="product-name" title="${p.name}">${p.name}</div>
-                        <div class="product-price">${p.sell_price} FCFA</div>
+                        <div class="product-price">${formatNumber(p.sell_price)} FCFA</div>
                         <div class="product-stock ${p.quantity <= p.reorder_level ? 'stock-low' : ''}">${p.quantity} ${p.unit}</div>
                     </div>
                 `;
@@ -1190,7 +1180,7 @@
                 total += item.total_price;
                 return `<div class="cart-item">
                     <span><strong>${item.name}</strong> × ${item.quantity}</span>
-                    <span>${item.total_price.toFixed(0)} FCFA</span>
+                    <span>${formatNumber(item.total_price)} FCFA</span>
                     <div class="d-flex gap-1">
                         <button class="btn btn-sm btn-outline-secondary" onclick="updateQty(${idx}, -1)"><i class="bi bi-dash"></i></button>
                         <button class="btn btn-sm btn-outline-secondary" onclick="updateQty(${idx}, 1)"><i class="bi bi-plus"></i></button>
@@ -1198,7 +1188,7 @@
                     </div>
                 </div>`;
             }).join('');
-            document.getElementById('cartTotal').innerText = total.toFixed(0) + ' FCFA';
+            document.getElementById('cartTotal').innerText = formatNumber(total) + ' FCFA';
             if (countEl) countEl.innerText = cart.length;
         };
 
@@ -1311,7 +1301,7 @@
                 <tr>
                     <td><strong>${s.id}</strong></td>
                     <td>${s.client_name || '-'}</td>
-                    <td>${s.final_amount.toLocaleString()} FCFA</td>
+                    <td>${formatNumber(s.final_amount)} FCFA</td>
                     <td><span class="badge-status ${s.status === 'completed' ? 'badge-success' : 'badge-warning'}">${s.status === 'completed' ? 'Payée' : 'Impayée'}</span></td>
                     <td>${new Date(s.sale_date).toLocaleString().slice(0, 10)}</td>
                     <td>
@@ -1331,7 +1321,7 @@
             document.getElementById('editRemisePct').value = sale.remise_pct || 0;
             document.getElementById('editAcompte').value = sale.acompte || 0;
             let itemsHtml = '<h6>Articles :</h6><div class="table-wrapper"><table class="table table-sm"><thead><tr><th>Produit</th><th>Quantité</th><th>Prix unit.</th><th>Total</th></tr></thead><tbody>';
-            items.forEach(item => { itemsHtml += `<tr><td>${item.product_name}</td><td>${item.quantity}</td><td>${item.unit_price} FCFA</td><td>${item.total_price} FCFA</td></tr>`; });
+            items.forEach(item => { itemsHtml += `<tr><td>${item.product_name}</td><td>${item.quantity}</td><td>${formatNumber(item.unit_price)} FCFA</td><td>${formatNumber(item.total_price)} FCFA</td></tr>`; });
             itemsHtml += '</tbody></table></div>';
             document.getElementById('editSaleItems').innerHTML = itemsHtml;
             new bootstrap.Modal(document.getElementById('editSaleModal')).show();
@@ -1351,12 +1341,12 @@
         };
 
         window.recordPayment = async (saleId, totalAmount) => {
-            let amount = parseFloat(prompt(`Montant à payer (max ${totalAmount.toLocaleString()} FCFA) :`, totalAmount));
+            let amount = parseFloat(prompt(`Montant à payer (max ${formatNumber(totalAmount)} FCFA) :`, totalAmount));
             if (isNaN(amount) || amount <= 0) return;
             const method = prompt('Mode de paiement (cash, card, transfer) :', 'cash');
             try {
                 const result = await apiCall(`/sales/${saleId}/payment`, 'POST', { amount, payment_method: method });
-                alert(`✅ Règlement enregistré. Reste à payer : ${result.remaining} FCFA`);
+                alert(`✅ Règlement enregistré. Reste à payer : ${formatNumber(result.remaining)} FCFA`);
                 loadSalesList();
                 if (typeof loadAllInvoices === 'function') loadAllInvoices();
             } catch(err) { alert(err.message); }
@@ -1367,7 +1357,7 @@
         loadSalesList();
     }
 
-    // ===== AUTRES PAGES (inchangées) =====
+    // ===== AUTRES PAGES =====
     async function renderInvoices() {
         let invoices = [];
         const html = `<div class="card-modern"><div class="row g-2 mb-3"><div class="col-md-4"><input type="text" id="searchClientName" class="form-control" placeholder="Nom du client"></div><div class="col-md-4"><input type="date" id="searchDate" class="form-control"></div><div class="col-md-4"><button class="btn btn-primary" onclick="searchInvoices()"><i class="bi bi-search"></i> Rechercher</button> <button class="btn btn-secondary" onclick="loadAllInvoices()"><i class="bi bi-arrow-counterclockwise"></i> Toutes</button></div></div><div id="invoicesList"></div></div>`;
@@ -1385,15 +1375,15 @@
         window.renderTable = (invoices) => {
             if (invoices.length === 0) { document.getElementById('invoicesList').innerHTML = '<div class="alert alert-info">Aucune facture impayée</div>'; return; }
             let html = `<div class="table-wrapper"><table class="table"><thead><tr><th>N°</th><th>Client</th><th>Montant</th><th>Date vente</th><th>Échéance</th><th>Actions</th></tr></thead><tbody>`;
-            invoices.forEach(f => { html += `<tr><td>${f.id}</td><td>${f.client_name || 'Client particulier'}</td><td>${f.final_amount.toLocaleString()} FCFA</td><td>${new Date(f.sale_date).toLocaleDateString()}</td><td>${f.due_date ? new Date(f.due_date).toLocaleDateString() : '-'}</td><td><button class="btn btn-sm btn-warning" onclick="recordPaymentInvoice(${f.id}, ${f.final_amount})"><i class="bi bi-cash"></i></button> <button class="btn btn-sm btn-info" onclick="window.open('/api/sales/${f.id}/invoice?token=${token}','_blank')"><i class="bi bi-file-pdf"></i></button></td></tr>`; });
+            invoices.forEach(f => { html += `<tr><td>${f.id}</td><td>${f.client_name || 'Client particulier'}</td><td>${formatNumber(f.final_amount)} FCFA</td><td>${new Date(f.sale_date).toLocaleDateString()}</td><td>${f.due_date ? new Date(f.due_date).toLocaleDateString() : '-'}</td><td><button class="btn btn-sm btn-warning" onclick="recordPaymentInvoice(${f.id}, ${f.final_amount})"><i class="bi bi-cash"></i></button> <button class="btn btn-sm btn-info" onclick="window.open('/api/sales/${f.id}/invoice?token=${token}','_blank')"><i class="bi bi-file-pdf"></i></button></td></tr>`; });
             html += '</tbody></table></div>';
             document.getElementById('invoicesList').innerHTML = html;
         };
         window.recordPaymentInvoice = async (saleId, totalAmount) => {
-            let amount = parseFloat(prompt(`Montant à payer (max ${totalAmount.toLocaleString()} FCFA) :`, totalAmount));
+            let amount = parseFloat(prompt(`Montant à payer (max ${formatNumber(totalAmount)} FCFA) :`, totalAmount));
             if (isNaN(amount) || amount <= 0) return;
             const method = prompt('Mode de paiement (cash, card, transfer) :', 'cash');
-            try { const result = await apiCall(`/sales/${saleId}/payment`, 'POST', { amount, payment_method: method }); alert(`✅ Règlement enregistré. Reste à payer : ${result.remaining} FCFA`); searchInvoices(); } catch(err) { alert(err.message); }
+            try { const result = await apiCall(`/sales/${saleId}/payment`, 'POST', { amount, payment_method: method }); alert(`✅ Règlement enregistré. Reste à payer : ${formatNumber(result.remaining)} FCFA`); searchInvoices(); } catch(err) { alert(err.message); }
         };
         await loadAllInvoices();
     }
@@ -1442,7 +1432,7 @@
         async function loadProformas() {
             proformas = await apiCall('/proforma');
             document.getElementById('proformaList').innerHTML = proformas.map(p => `
-                <tr><td>${p.proforma_number}</td><td>${p.client_name || '-'}</td><td>${new Date(p.issue_date).toLocaleDateString()}</td><td>${p.total.toLocaleString()} FCFA</td><td><span class="badge ${p.status==='draft'?'badge-warning':'badge-success'}">${p.status}</span></td>
+                <tr><td>${p.proforma_number}</td><td>${p.client_name || '-'}</td><td>${new Date(p.issue_date).toLocaleDateString()}</td><td>${formatNumber(p.total)} FCFA</td><td><span class="badge ${p.status==='draft'?'badge-warning':'badge-success'}">${p.status}</span></td>
                 <td><button class="btn btn-sm btn-info me-1" onclick="window.open('/api/proforma/${p.id}/pdf?token=${token}','_blank')"><i class="bi bi-file-pdf"></i></button>
                     <button class="btn btn-sm btn-danger" onclick="deleteProforma(${p.id})"><i class="bi bi-trash"></i></button></td></tr>
             `).join('');
@@ -1477,10 +1467,10 @@
                     <div><span class="badge ${cashSession.isOpen ? 'badge-success' : 'badge-warning'} p-2">${cashSession.isOpen ? '🟢 Ouverte' : '🔴 Fermée'}</span></div>
                 </div>
                 <div class="cash-stats mb-4">
-                    <div class="cash-stat-item"><div class="label">Solde actuel</div><div class="amount green">${summary.balance.toLocaleString()} FCFA</div></div>
-                    <div class="cash-stat-item"><div class="label">Entrées totales</div><div class="amount green">${summary.entries.toLocaleString()} FCFA</div></div>
-                    <div class="cash-stat-item"><div class="label">Sorties totales</div><div class="amount red">${summary.expenses.toLocaleString()} FCFA</div></div>
-                    <div class="cash-stat-item"><div class="label">Session</div><div class="amount">${cashSession.isOpen ? cashSession.openingBalance.toLocaleString() + ' FCFA' : '---'}</div></div>
+                    <div class="cash-stat-item"><div class="label">Solde actuel</div><div class="amount green">${formatNumber(summary.balance)} FCFA</div></div>
+                    <div class="cash-stat-item"><div class="label">Entrées totales</div><div class="amount green">${formatNumber(summary.entries)} FCFA</div></div>
+                    <div class="cash-stat-item"><div class="label">Sorties totales</div><div class="amount red">${formatNumber(summary.expenses)} FCFA</div></div>
+                    <div class="cash-stat-item"><div class="label">Session</div><div class="amount">${cashSession.isOpen ? formatNumber(cashSession.openingBalance) + ' FCFA' : '---'}</div></div>
                 </div>
                 <div class="row g-2 mb-4">
                     <div class="col-md-3"><button class="btn btn-success w-100" onclick="openCash()" ${cashSession.isOpen ? 'disabled' : ''}><i class="bi bi-unlock me-1"></i> Ouvrir</button></div>
@@ -1490,8 +1480,8 @@
                 </div>
                 <ul class="nav nav-tabs mb-3"><li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#operations">Opérations</button></li><li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#balance">Résumé</button></li></ul>
                 <div class="tab-content">
-                    <div class="tab-pane fade show active" id="operations"><div class="table-wrapper"><table class="table"><thead><tr><th>Type</th><th>Montant</th><th>Description</th><th>Date</th></tr></thead><tbody>${transactions.map(t => `<tr><td><span class="badge ${t.transaction_type==='sale'||t.transaction_type==='deposit'?'badge-success':'badge-danger'}">${t.transaction_type}</span></td><td>${t.amount.toLocaleString()} FCFA</td><td>${t.description || ''}</td><td>${new Date(t.created_at).toLocaleString()}</td></tr>`).join('')}</tbody></table></div></div>
-                    <div class="tab-pane fade" id="balance"><div class="card p-3"><h6>Résumé de la caisse</h6><table class="table"><tr><th>Entrées totales</th><td>${summary.entries.toLocaleString()} FCFA</td></tr><tr><th>Sorties totales</th><td>${summary.expenses.toLocaleString()} FCFA</td></tr><tr class="table-success"><th>Solde</th><td><strong>${summary.balance.toLocaleString()} FCFA</strong></td></tr>${cashSession.isOpen ? `<tr><th>Fonds de caisse</th><td>${cashSession.openingBalance.toLocaleString()} FCFA</td></tr>` : ''}</table></div></div>
+                    <div class="tab-pane fade show active" id="operations"><div class="table-wrapper"><table class="table"><thead><tr><th>Type</th><th>Montant</th><th>Description</th><th>Date</th></tr></thead><tbody>${transactions.map(t => `<tr><td><span class="badge ${t.transaction_type==='sale'||t.transaction_type==='deposit'?'badge-success':'badge-danger'}">${t.transaction_type}</span></td><td>${formatNumber(t.amount)} FCFA</td><td>${t.description || ''}</td><td>${new Date(t.created_at).toLocaleString()}</td></tr>`).join('')}</tbody></table></div></div>
+                    <div class="tab-pane fade" id="balance"><div class="card p-3"><h6>Résumé de la caisse</h6><table class="table"><tr><th>Entrées totales</th><td>${formatNumber(summary.entries)} FCFA</td></tr><tr><th>Sorties totales</th><td>${formatNumber(summary.expenses)} FCFA</td></tr><tr class="table-success"><th>Solde</th><td><strong>${formatNumber(summary.balance)} FCFA</strong></td></tr>${cashSession.isOpen ? `<tr><th>Fonds de caisse</th><td>${formatNumber(cashSession.openingBalance)} FCFA</td></tr>` : ''}</table></div></div>
                 </div>
             </div>
         `;
@@ -1504,7 +1494,7 @@
         const cashSession = { isOpen: true, openingBalance: amount, openingTime: new Date().toISOString() };
         localStorage.setItem('cashSession', JSON.stringify(cashSession));
         renderCash();
-        alert('✅ Caisse ouverte avec ' + amount.toLocaleString() + ' FCFA');
+        alert('✅ Caisse ouverte avec ' + formatNumber(amount) + ' FCFA');
     };
 
     window.closeCash = async () => {
@@ -1513,7 +1503,7 @@
         const cashSession = JSON.parse(savedSession);
         const summary = await apiCall('/cash-register/summary');
         const diff = summary.balance - cashSession.openingBalance;
-        const msg = `📊 Bilan de la caisse\nFonds initial : ${cashSession.openingBalance.toLocaleString()} FCFA\nSolde actuel : ${summary.balance.toLocaleString()} FCFA\nDifférence : ${diff >= 0 ? '+' : ''}${diff.toLocaleString()} FCFA\n\nVoulez-vous fermer la caisse ?`;
+        const msg = `📊 Bilan de la caisse\nFonds initial : ${formatNumber(cashSession.openingBalance)} FCFA\nSolde actuel : ${formatNumber(summary.balance)} FCFA\nDifférence : ${diff >= 0 ? '+' : ''}${formatNumber(diff)} FCFA\n\nVoulez-vous fermer la caisse ?`;
         if (confirm(msg)) {
             localStorage.removeItem('cashSession');
             renderCash();
@@ -1597,7 +1587,7 @@
 
     async function renderHistory() {
         const history = await apiCall('/history');
-        const html = `<div class="table-wrapper"><table class="table"><thead><tr><th>Type</th><th>Référence</th><th>Montant</th><th>Date</th></tr></thead><tbody>${history.map(h=>`<tr><td><span class="badge ${h.type==='sale'?'badge-success':'badge-info'}">${h.type}</span></td><td>${h.client_name || h.product_name || h.id}</td><td>${h.amount ? h.amount.toLocaleString() + ' FCFA' : ''}</td><td>${new Date(h.date).toLocaleString()}</td></tr>`).join('')}</tbody></table></div>`;
+        const html = `<div class="table-wrapper"><table class="table"><thead><tr><th>Type</th><th>Référence</th><th>Montant</th><th>Date</th></tr></thead><tbody>${history.map(h=>`<tr><td><span class="badge ${h.type==='sale'?'badge-success':'badge-info'}">${h.type}</span></td><td>${h.client_name || h.product_name || h.id}</td><td>${h.amount ? formatNumber(h.amount) + ' FCFA' : ''}</td><td>${new Date(h.date).toLocaleString()}</td></tr>`).join('')}</tbody></table></div>`;
         document.getElementById('pageContainer').innerHTML = html;
     }
 
