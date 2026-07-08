@@ -7,10 +7,12 @@ const path = require('path');
 const PDFDocument = require('pdfkit');
 const http = require('http');
 const https = require('https');
+const compression = require('compression');
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(compression()); // ✅ Compression pour accélérer
 app.use(express.static(path.join(__dirname)));
 
 require('dotenv').config();
@@ -22,9 +24,11 @@ const DB_CONFIG = {
     database: process.env.DB_NAME || 'gestpro_db',
     port: parseInt(process.env.DB_PORT || '3306'),
     waitForConnections: true,
-    connectionLimit: 10,
-    ssl: false
+    connectionLimit: 20, // ✅ Augmenté
+    connectTimeout: 10000,
+    acquireTimeout: 10000,
 };
+
 const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_key_2025';
 const PORT = process.env.PORT || 3000;
 
@@ -249,7 +253,16 @@ async function initAndStart() {
         try { await pool.query(`ALTER TABLE settings ADD COLUMN company_phone2 VARCHAR(50)`); } catch(e) {}
         try { await pool.query(`ALTER TABLE products ADD COLUMN image_url TEXT`); } catch(e) {}
 
-        console.log('✅ Tables prêtes');
+        // ✅ AJOUT DES INDEX POUR ACCÉLÉRER LES REQUÊTES
+        try { await pool.query(`CREATE INDEX idx_sales_user_id ON sales(user_id)`); } catch(e) {}
+        try { await pool.query(`CREATE INDEX idx_sales_sale_date ON sales(sale_date)`); } catch(e) {}
+        try { await pool.query(`CREATE INDEX idx_sales_status ON sales(status)`); } catch(e) {}
+        try { await pool.query(`CREATE INDEX idx_products_user_id ON products(user_id)`); } catch(e) {}
+        try { await pool.query(`CREATE INDEX idx_products_name ON products(name)`); } catch(e) {}
+        try { await pool.query(`CREATE INDEX idx_sale_items_sale_id ON sale_items(sale_id)`); } catch(e) {}
+
+        console.log('✅ Tables prêtes avec index');
+        
         app.listen(PORT, () => console.log(`🚀 Serveur sur http://localhost:${PORT}`));
     } catch (err) {
         console.error('❌ Erreur critique :', err.message);
@@ -304,7 +317,7 @@ app.get('/api/clients', authenticate, async (req, res) => {
     let query = 'SELECT * FROM clients WHERE user_id=?';
     const params = [req.user.id];
     if (search) { query += ' AND name LIKE ?'; params.push(`%${search}%`); }
-    query += ' ORDER BY name';
+    query += ' ORDER BY name LIMIT 100';
     const [rows] = await pool.query(query, params);
     res.json(rows);
 });
@@ -355,7 +368,10 @@ app.delete('/api/categories/:id', authenticate, async (req, res) => {
 
 // ========== ROUTES PRODUITS ==========
 app.get('/api/products', authenticate, async (req, res) => {
-    const [rows] = await pool.query('SELECT p.*, c.name as category_name FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE p.user_id = ? ORDER BY p.name', [req.user.id]);
+    const [rows] = await pool.query(
+        'SELECT p.*, c.name as category_name FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE p.user_id = ? ORDER BY p.name LIMIT 500',
+        [req.user.id]
+    );
     res.json(rows);
 });
 
@@ -445,7 +461,7 @@ app.get('/api/products/search', authenticate, async (req, res) => {
     if (lowStock === 'true') {
         query += ' AND p.quantity <= p.reorder_level';
     }
-    query += ' ORDER BY p.name';
+    query += ' ORDER BY p.name LIMIT 200';
     const [rows] = await pool.query(query, params);
     res.json(rows);
 });
@@ -467,7 +483,6 @@ app.post('/api/sales', authenticate, async (req, res) => {
         due_date = null 
     } = req.body;
 
-    // Validation stricte
     if (!items || !Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ error: 'Aucun produit dans le panier' });
     }
@@ -476,7 +491,6 @@ app.post('/api/sales', authenticate, async (req, res) => {
     try {
         await connection.beginTransaction();
 
-        // 1. Gestion du client
         let client_id = null;
         if (client_name && client_name.trim() !== '') {
             let [existing] = await connection.query(
@@ -494,14 +508,11 @@ app.post('/api/sales', authenticate, async (req, res) => {
             }
         }
 
-        // 2. Calcul du sous-total
         let subtotal = 0;
         for (let item of items) {
-            // Validation des items
             if (!item.product_id || !item.quantity || !item.unit_price) {
-                throw new Error(`Produit ${item.product_id} invalide: quantity=${item.quantity}, price=${item.unit_price}`);
+                throw new Error(`Produit ${item.product_id} invalide`);
             }
-            
             const [prod] = await connection.query(
                 'SELECT quantity FROM products WHERE id=? AND user_id=? FOR UPDATE', 
                 [item.product_id, req.user.id]
@@ -516,7 +527,6 @@ app.post('/api/sales', authenticate, async (req, res) => {
             subtotal += item.total_price;
         }
 
-        // 3. Calcul TVA et total
         const [settings] = await connection.query(
             'SELECT tax_rate FROM settings WHERE user_id = ?', 
             [req.user.id]
@@ -527,7 +537,6 @@ app.post('/api/sales', authenticate, async (req, res) => {
         const total_apres_remise = subtotal - remise_valeur;
         const final_amount = total_apres_remise + tax - (acompte || 0);
 
-        // 4. Insertion de la vente
         const finalStatus = status === 'pending' ? 'pending' : 'completed';
         const [saleResult] = await connection.query(
             `INSERT INTO sales (user_id, client_id, total_amount, remise_pct, acompte, tax, final_amount, payment_method, status, due_date)
@@ -536,7 +545,6 @@ app.post('/api/sales', authenticate, async (req, res) => {
         );
         const sale_id = saleResult.insertId;
 
-        // 5. Insertion des articles et mise à jour du stock
         for (let item of items) {
             await connection.query(
                 `INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, total_price) 
@@ -561,7 +569,6 @@ app.post('/api/sales', authenticate, async (req, res) => {
             );
         }
 
-        // 6. Enregistrement du paiement si la vente est payée
         if (finalStatus === 'completed') {
             await connection.query(
                 'INSERT INTO payments (sale_id, amount, payment_method) VALUES (?, ?, ?)',
@@ -595,14 +602,20 @@ app.post('/api/sales', authenticate, async (req, res) => {
 });
 
 app.get('/api/sales', authenticate, async (req, res) => {
-    const { client_name, status, start_date, end_date } = req.query;
+    const { client_name, status, start_date, end_date, page = 1, limit = 50 } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+    
     let query = `SELECT s.*, c.name as client_name FROM sales s LEFT JOIN clients c ON s.client_id = c.id WHERE s.user_id = ?`;
     const params = [req.user.id];
+    
     if (client_name) { query += ` AND c.name LIKE ?`; params.push(`%${client_name}%`); }
     if (status) { query += ` AND s.status = ?`; params.push(status); }
     if (start_date) { query += ` AND DATE(s.sale_date) >= ?`; params.push(start_date); }
     if (end_date) { query += ` AND DATE(s.sale_date) <= ?`; params.push(end_date); }
-    query += ` ORDER BY s.sale_date DESC LIMIT 500`;
+    
+    query += ` ORDER BY s.sale_date DESC LIMIT ? OFFSET ?`;
+    params.push(parseInt(limit), offset);
+    
     const [rows] = await pool.query(query, params);
     res.json(rows);
 });
@@ -733,12 +746,12 @@ app.get('/api/inventory/global', authenticate, async (req, res) => {
     res.json(rows);
 });
 
-// ========== ROUTES RAPPORTS ==========
+// ========== ROUTES RAPPORTS (OPTIMISÉES) ==========
 app.get('/api/reports/dashboard', authenticate, async (req, res) => {
     try {
         const [totalProducts] = await pool.query('SELECT COUNT(*) as count FROM products WHERE user_id=?', [req.user.id]);
         const [lowStock] = await pool.query('SELECT COUNT(*) as count FROM products WHERE user_id=? AND quantity <= reorder_level', [req.user.id]);
-        const [inventoryValue] = await pool.query('SELECT SUM(quantity * buy_price) as value FROM products WHERE user_id=?', [req.user.id]);
+        const [inventoryValue] = await pool.query('SELECT COALESCE(SUM(quantity * buy_price),0) as value FROM products WHERE user_id=?', [req.user.id]);
         const [todaySales] = await pool.query(`SELECT COALESCE(SUM(final_amount),0) as total FROM sales WHERE user_id=? AND DATE(sale_date) = CURDATE() AND status='completed'`, [req.user.id]);
         const [monthSales] = await pool.query(`SELECT COALESCE(SUM(final_amount),0) as total FROM sales WHERE user_id=? AND MONTH(sale_date)=MONTH(CURDATE()) AND YEAR(sale_date)=YEAR(CURDATE())`, [req.user.id]);
         const [topProducts] = await pool.query('SELECT p.name, SUM(si.quantity) as qte FROM sale_items si JOIN products p ON si.product_id = p.id JOIN sales s ON si.sale_id = s.id WHERE s.user_id=? AND s.status=\'completed\' GROUP BY p.id ORDER BY qte DESC LIMIT 5', [req.user.id]);
@@ -759,21 +772,77 @@ app.get('/api/reports/dashboard', authenticate, async (req, res) => {
     }
 });
 
+// ✅ ROUTE RAPPORTS CORRIGÉE
 app.get('/api/reports/sales-by-period', authenticate, async (req, res) => {
     const { period } = req.query;
-    let groupBy = period === 'week' ? 'DATE(sale_date)' : (period === 'month' ? 'DATE_FORMAT(sale_date, "%Y-%m-%d")' : 'DATE_FORMAT(sale_date, "%Y-%m")');
-    const [rows] = await pool.query(`SELECT ${groupBy} as date, SUM(final_amount) as total FROM sales WHERE user_id=? AND status='completed' GROUP BY date ORDER BY date DESC LIMIT 30`, [req.user.id]);
-    res.json(rows);
+    let groupBy;
+    let limit = 30;
+    
+    switch(period) {
+        case 'week':
+            groupBy = 'DATE(sale_date)';
+            limit = 7;
+            break;
+        case 'month':
+            groupBy = 'DATE(sale_date)';
+            limit = 30;
+            break;
+        default:
+            groupBy = 'DATE_FORMAT(sale_date, "%Y-%m")';
+            limit = 12;
+    }
+    
+    try {
+        const query = `
+            SELECT ${groupBy} as date, 
+                   COALESCE(SUM(final_amount), 0) as total 
+            FROM sales 
+            WHERE user_id = ? 
+              AND status = 'completed'
+            GROUP BY ${groupBy}
+            ORDER BY date DESC 
+            LIMIT ?
+        `;
+        const [rows] = await pool.query(query, [req.user.id, limit]);
+        // Inverser pour avoir l'ordre chronologique
+        res.json(rows.reverse());
+    } catch (err) {
+        console.error('❌ Erreur sales-by-period:', err);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // ========== ROUTES PARAMÈTRES ==========
 app.get('/api/settings', authenticate, async (req, res) => {
-    const [rows] = await pool.query('SELECT * FROM settings WHERE user_id=?', [req.user.id]);
-    if (rows.length === 0) {
-        await pool.query('INSERT INTO settings (user_id, company_name, company_subtitle, company_activity, company_rc, company_address, company_phone, company_phone2, company_email, logo_url, tax_rate, low_stock_alert, currency) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)', [req.user.id, 'Mon Entreprise', '', '', '', '', '', '', '', '', 20, 5, 'FCFA']);
-        return res.json({ company_name: 'Mon Entreprise', company_subtitle: '', company_activity: '', company_rc: '', company_address: '', company_phone: '', company_phone2: '', company_email: '', logo_url: '', tax_rate: 20, low_stock_alert: 5, currency: 'FCFA' });
+    try {
+        let [rows] = await pool.query('SELECT * FROM settings WHERE user_id=?', [req.user.id]);
+        if (rows.length === 0) {
+            await pool.query(
+                `INSERT INTO settings (user_id, company_name, company_subtitle, company_activity, company_rc, company_address, company_phone, company_phone2, company_email, logo_url, tax_rate, low_stock_alert, currency) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [req.user.id, 'Mon Entreprise', '', '', '', '', '', '', '', '', 20, 5, 'FCFA']
+            );
+            [rows] = await pool.query('SELECT * FROM settings WHERE user_id=?', [req.user.id]);
+        }
+        const settings = rows[0] || {};
+        res.json({
+            company_name: settings.company_name || 'Mon Entreprise',
+            company_subtitle: settings.company_subtitle || '',
+            company_activity: settings.company_activity || '',
+            company_rc: settings.company_rc || '',
+            company_address: settings.company_address || '',
+            company_phone: settings.company_phone || '',
+            company_phone2: settings.company_phone2 || '',
+            company_email: settings.company_email || '',
+            logo_url: settings.logo_url || '',
+            tax_rate: settings.tax_rate || 20,
+            low_stock_alert: settings.low_stock_alert || 5,
+            currency: settings.currency || 'FCFA'
+        });
+    } catch(err) {
+        console.error('Erreur settings:', err);
+        res.status(500).json({ error: 'Erreur chargement paramètres' });
     }
-    res.json(rows[0]);
 });
 
 app.put('/api/settings', authenticate, async (req, res) => {
@@ -784,9 +853,9 @@ app.put('/api/settings', authenticate, async (req, res) => {
 
 // ========== ROUTE HISTORIQUE ==========
 app.get('/api/history', authenticate, async (req, res) => {
-    const [sales] = await pool.query(`SELECT 'sale' as type, s.id, s.final_amount as amount, s.sale_date as date, c.name as client_name, s.status FROM sales s LEFT JOIN clients c ON s.client_id = c.id WHERE s.user_id = ? ORDER BY s.sale_date DESC LIMIT 100`, [req.user.id]);
-    const [movements] = await pool.query(`SELECT 'stock' as type, sm.id, sm.quantity_change as amount, sm.created_at as date, p.name as product_name, sm.type as movement_type FROM stock_movements sm JOIN products p ON sm.product_id = p.id WHERE sm.user_id = ? ORDER BY sm.created_at DESC LIMIT 100`, [req.user.id]);
-    const history = [...sales, ...movements].sort((a,b) => new Date(b.date) - new Date(a.date)).slice(0,100);
+    const [sales] = await pool.query(`SELECT 'sale' as type, s.id, s.final_amount as amount, s.sale_date as date, c.name as client_name, s.status FROM sales s LEFT JOIN clients c ON s.client_id = c.id WHERE s.user_id = ? ORDER BY s.sale_date DESC LIMIT 50`, [req.user.id]);
+    const [movements] = await pool.query(`SELECT 'stock' as type, sm.id, sm.quantity_change as amount, sm.created_at as date, p.name as product_name, sm.type as movement_type FROM stock_movements sm JOIN products p ON sm.product_id = p.id WHERE sm.user_id = ? ORDER BY sm.created_at DESC LIMIT 50`, [req.user.id]);
+    const history = [...sales, ...movements].sort((a,b) => new Date(b.date) - new Date(a.date)).slice(0,50);
     res.json(history);
 });
 

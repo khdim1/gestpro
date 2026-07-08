@@ -253,7 +253,7 @@
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
             gap: 12px;
-            max-height: 400px;
+            max-height: 500px;
             overflow-y: auto;
             padding: 4px 2px;
         }
@@ -609,23 +609,69 @@
     let token = localStorage.getItem('token');
     let currentUser = null;
 
-    // ===== FORMATAGE DES NOMBRES AVEC ESPACES =====
     function formatNumber(number) {
         if (number === undefined || number === null || isNaN(number)) return '0';
         const num = parseFloat(number);
         return num.toLocaleString('fr-FR').replace(/\s/g, ' ').replace(/,/g, ' ');
     }
-
-    async function apiCall(endpoint, method = 'GET', body = null) {
+async function apiCall(endpoint, method = 'GET', body = null) {
+    try {
         const headers = { 'Content-Type': 'application/json' };
         if (token) headers['Authorization'] = `Bearer ${token}`;
-        const res = await fetch(`/api${endpoint}`, { method, headers, body: body ? JSON.stringify(body) : undefined });
-        if (res.status === 401) { logout(); throw new Error('Session expirée'); }
+        const res = await fetch(`/api${endpoint}`, { 
+            method, 
+            headers, 
+            body: body ? JSON.stringify(body) : undefined 
+        });
+        if (res.status === 401) { 
+            logout(); 
+            throw new Error('Session expirée'); 
+        }
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Erreur');
+        if (!res.ok) throw new Error(data.error || 'Erreur serveur');
         return data;
+    } catch(err) {
+        console.error('API Error:', err);
+        throw err;
     }
+}
+// ===== OPTIMISATION RAPIDE =====
 
+// 1. Cache simple
+const dataCache = new Map();
+
+async function apiCallCached(endpoint, method = 'GET', body = null, ttl = 30000) {
+    const key = `${method}:${endpoint}:${JSON.stringify(body)}`;
+    
+    if (method === 'GET' && dataCache.has(key)) {
+        const cached = dataCache.get(key);
+        if (Date.now() - cached.timestamp < ttl) {
+            return cached.data;
+        }
+        dataCache.delete(key);
+    }
+    
+    const data = await apiCall(endpoint, method, body);
+    if (method === 'GET') {
+        dataCache.set(key, { data, timestamp: Date.now() });
+    }
+    return data;
+}
+
+// 2. Chargement parallèle des données
+async function loadPageData(pages) {
+    return await Promise.all(pages.map(page => 
+        apiCallCached(page.endpoint, 'GET', null, 60000)
+    ));
+}
+
+// 3. Éviter les re-rendus inutiles
+function updateElement(id, content) {
+    const el = document.getElementById(id);
+    if (el && el.innerHTML !== content) {
+        el.innerHTML = content;
+    }
+}
     // ========================================================================
     // AUTH
     // ========================================================================
@@ -1305,9 +1351,11 @@
                     <td><span class="badge-status ${s.status === 'completed' ? 'badge-success' : 'badge-warning'}">${s.status === 'completed' ? 'Payée' : 'Impayée'}</span></td>
                     <td>${new Date(s.sale_date).toLocaleString().slice(0, 10)}</td>
                     <td>
-                        <button class="btn btn-sm btn-info me-1" onclick="window.open('/api/sales/${s.id}/invoice?token=${token}','_blank')"><i class="bi bi-file-pdf"></i></button>
-                        <button class="btn btn-sm btn-warning me-1" onclick="editSale(${s.id})"><i class="bi bi-pencil"></i></button>
-                        ${s.status === 'pending' ? `<button class="btn btn-sm btn-success" onclick="recordPayment(${s.id}, ${s.final_amount})"><i class="bi bi-cash"></i></button>` : ''}
+                        <button class="btn btn-sm btn-info me-1" onclick="window.open('/api/sales/${s.id}/invoice?token=${token}','_blank')" title="Facture"><i class="bi bi-file-pdf"></i></button>
+                        <button class="btn btn-sm btn-primary me-1" onclick="window.open('/api/sales/${s.id}/order?token=${token}','_blank')" title="Bon de commande"><i class="bi bi-clipboard-check"></i></button>
+                        <button class="btn btn-sm btn-secondary me-1" onclick="window.open('/api/sales/${s.id}/delivery?token=${token}','_blank')" title="Bordereau de livraison"><i class="bi bi-truck"></i></button>
+                        <button class="btn btn-sm btn-warning me-1" onclick="editSale(${s.id})" title="Modifier"><i class="bi bi-pencil"></i></button>
+                        ${s.status === 'pending' ? `<button class="btn btn-sm btn-success" onclick="recordPayment(${s.id}, ${s.final_amount})" title="Règlement"><i class="bi bi-cash"></i></button>` : ''}
                     </td>
                 </tr>
             `).join('');
@@ -1560,31 +1608,77 @@
             options: { responsive: true, plugins: { legend: { display: false } } }
         });
     }
-
-    async function renderSettings() {
+// ===== PARAMÈTRES (CORRIGÉ) =====
+async function renderSettings() {
+    try {
         const settings = await apiCall('/settings');
-        const html = `<div class="card-modern"><h5><i class="bi bi-gear me-2"></i>Paramètres société</h5>
-            <div class="row g-3"><div class="col-md-6"><label class="form-label">Nom entreprise</label><input id="companyName" class="form-control" value="${settings.company_name || ''}"></div>
-            <div class="col-md-6"><label class="form-label">Sous-titre</label><input id="companySubtitle" class="form-control" value="${settings.company_subtitle || ''}"></div>
-            <div class="col-12"><label class="form-label">Activité</label><textarea id="companyActivity" class="form-control" rows="2">${settings.company_activity || ''}</textarea></div>
-            <div class="col-md-6"><label class="form-label">Numéro RC</label><input id="companyRc" class="form-control" value="${settings.company_rc || ''}"></div>
-            <div class="col-md-6"><label class="form-label">Adresse</label><input id="companyAddress" class="form-control" value="${settings.company_address || ''}"></div>
-            <div class="col-md-4"><label class="form-label">Téléphone principal</label><input id="companyPhone" class="form-control" value="${settings.company_phone || ''}"></div>
-            <div class="col-md-4"><label class="form-label">Téléphone secondaire</label><input id="companyPhone2" class="form-control" value="${settings.company_phone2 || ''}"></div>
-            <div class="col-md-4"><label class="form-label">Email</label><input id="companyEmail" class="form-control" value="${settings.company_email || ''}"></div>
-            <div class="col-md-6"><label class="form-label">URL du logo</label><input id="logoUrl" class="form-control" value="${settings.logo_url || ''}" placeholder="https://exemple.com/logo.png"></div>
-            <div class="col-md-3"><label class="form-label">Taux TVA (%)</label><input id="taxRate" class="form-control" value="${settings.tax_rate || 20}"></div>
-            <div class="col-md-3"><label class="form-label">Devise</label><input id="currency" class="form-control" value="${settings.currency || 'FCFA'}"></div>
-            <div class="col-12"><button class="btn btn-primary" onclick="saveSettings()"><i class="bi bi-save me-1"></i>Enregistrer</button></div></div></div>`;
+        const html = `
+            <div class="card-modern">
+                <h5><i class="bi bi-gear me-2"></i>Paramètres société</h5>
+                <div class="row g-3">
+                    <div class="col-md-6"><label class="form-label">Nom entreprise</label><input id="companyName" class="form-control" value="${settings.company_name || ''}"></div>
+                    <div class="col-md-6"><label class="form-label">Sous-titre</label><input id="companySubtitle" class="form-control" value="${settings.company_subtitle || ''}"></div>
+                    <div class="col-12"><label class="form-label">Activité</label><textarea id="companyActivity" class="form-control" rows="2">${settings.company_activity || ''}</textarea></div>
+                    <div class="col-md-6"><label class="form-label">Numéro RC</label><input id="companyRc" class="form-control" value="${settings.company_rc || ''}"></div>
+                    <div class="col-md-6"><label class="form-label">Adresse</label><input id="companyAddress" class="form-control" value="${settings.company_address || ''}"></div>
+                    <div class="col-md-4"><label class="form-label">Téléphone principal</label><input id="companyPhone" class="form-control" value="${settings.company_phone || ''}"></div>
+                    <div class="col-md-4"><label class="form-label">Téléphone secondaire</label><input id="companyPhone2" class="form-control" value="${settings.company_phone2 || ''}"></div>
+                    <div class="col-md-4"><label class="form-label">Email</label><input id="companyEmail" class="form-control" value="${settings.company_email || ''}"></div>
+                    <div class="col-md-6"><label class="form-label">URL du logo</label><input id="logoUrl" class="form-control" value="${settings.logo_url || ''}" placeholder="https://exemple.com/logo.png"></div>
+                    <div class="col-md-3"><label class="form-label">Taux TVA (%)</label><input id="taxRate" class="form-control" value="${settings.tax_rate || 20}"></div>
+                    <div class="col-md-3"><label class="form-label">Seuil stock bas</label><input id="lowStockAlert" class="form-control" value="${settings.low_stock_alert || 5}"></div>
+                    <div class="col-md-3"><label class="form-label">Devise</label><input id="currency" class="form-control" value="${settings.currency || 'FCFA'}"></div>
+                    <div class="col-12"><button class="btn btn-primary" id="saveSettingsBtn"><i class="bi bi-save me-1"></i>Enregistrer</button></div>
+                </div>
+            </div>
+        `;
         document.getElementById('pageContainer').innerHTML = html;
-        window.saveSettings = async () => {
-            const data = { company_name: document.getElementById('companyName').value, company_subtitle: document.getElementById('companySubtitle').value, company_activity: document.getElementById('companyActivity').value, company_rc: document.getElementById('companyRc').value, company_address: document.getElementById('companyAddress').value, company_phone: document.getElementById('companyPhone').value, company_phone2: document.getElementById('companyPhone2').value, company_email: document.getElementById('companyEmail').value, logo_url: document.getElementById('logoUrl').value, tax_rate: parseFloat(document.getElementById('taxRate').value), low_stock_alert: parseInt(document.getElementById('lowStockAlert').value), currency: document.getElementById('currency').value };
-            await apiCall('/settings', 'PUT', data);
-            alert('✅ Paramètres mis à jour');
-            renderSettings();
+        
+        // Fonction saveSettings - CORRIGÉE avec vérification des éléments
+        window.saveSettings = async function() {
+            try {
+                // Vérification que tous les éléments existent
+                const getVal = (id) => {
+                    const el = document.getElementById(id);
+                    return el ? el.value : '';
+                };
+                
+                const data = {
+                    company_name: getVal('companyName'),
+                    company_subtitle: getVal('companySubtitle'),
+                    company_activity: getVal('companyActivity'),
+                    company_rc: getVal('companyRc'),
+                    company_address: getVal('companyAddress'),
+                    company_phone: getVal('companyPhone'),
+                    company_phone2: getVal('companyPhone2'),
+                    company_email: getVal('companyEmail'),
+                    logo_url: getVal('logoUrl'),
+                    tax_rate: parseFloat(getVal('taxRate')) || 20,
+                    low_stock_alert: parseInt(getVal('lowStockAlert')) || 5,
+                    currency: getVal('currency') || 'FCFA'
+                };
+                await apiCall('/settings', 'PUT', data);
+                alert('✅ Paramètres mis à jour');
+                renderSettings();
+            } catch(err) {
+                alert('❌ Erreur : ' + err.message);
+            }
         };
+        
+        // Écouteur d'événement pour le bouton avec vérification
+        const saveBtn = document.getElementById('saveSettingsBtn');
+        if (saveBtn) {
+            // Supprimer les anciens écouteurs
+            const newBtn = saveBtn.cloneNode(true);
+            saveBtn.parentNode.replaceChild(newBtn, saveBtn);
+            newBtn.addEventListener('click', window.saveSettings);
+        }
+    } catch(err) {
+        console.error('Erreur renderSettings:', err);
+        document.getElementById('pageContainer').innerHTML = `<div class="alert alert-danger">Erreur chargement paramètres : ${err.message}</div>`;
     }
-
+}
+   
     async function renderHistory() {
         const history = await apiCall('/history');
         const html = `<div class="table-wrapper"><table class="table"><thead><tr><th>Type</th><th>Référence</th><th>Montant</th><th>Date</th></tr></thead><tbody>${history.map(h=>`<tr><td><span class="badge ${h.type==='sale'?'badge-success':'badge-info'}">${h.type}</span></td><td>${h.client_name || h.product_name || h.id}</td><td>${h.amount ? formatNumber(h.amount) + ' FCFA' : ''}</td><td>${new Date(h.date).toLocaleString()}</td></tr>`).join('')}</tbody></table></div>`;
