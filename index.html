@@ -249,12 +249,94 @@
             padding: 4px 14px !important;
             font-size: 0.75rem;
         }
+        
+        /* === NOUVEAU LAYOUT VENTES === */
+        .sales-layout {
+            display: flex;
+            gap: 20px;
+            height: calc(100vh - 250px);
+            min-height: 600px;
+        }
+        .sales-products {
+            flex: 1;
+            overflow-y: auto;
+            padding-right: 10px;
+        }
+        .sales-cart {
+            width: 400px;
+            min-width: 350px;
+            background: var(--card-bg);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            border: 1px solid rgba(0,0,0,0.04);
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            max-height: 100%;
+        }
+        .sales-cart .cart-header {
+            border-bottom: 2px solid var(--primary-light);
+            padding-bottom: 10px;
+            margin-bottom: 10px;
+            flex-shrink: 0;
+        }
+        .sales-cart .cart-items {
+            flex: 1;
+            overflow-y: auto;
+            margin-bottom: 10px;
+        }
+        .sales-cart .cart-items::-webkit-scrollbar { width: 4px; }
+        .sales-cart .cart-items::-webkit-scrollbar-thumb { background: var(--primary); border-radius: 10px; }
+        .sales-cart .cart-footer {
+            border-top: 2px solid var(--primary-light);
+            padding-top: 10px;
+            flex-shrink: 0;
+        }
+        .sales-cart .cart-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #f8fafc;
+            padding: 8px 12px;
+            margin-bottom: 6px;
+            border-radius: 0.75rem;
+            transition: var(--transition);
+            border: 1px solid transparent;
+            font-size: 0.85rem;
+        }
+        .sales-cart .cart-item:hover {
+            border-color: rgba(44,110,158,0.1);
+            background: var(--primary-light);
+        }
+        .cart-item .item-name { flex: 1; font-weight: 500; }
+        .cart-item .item-qty { display: flex; align-items: center; gap: 6px; }
+        .cart-item .item-qty button {
+            background: none;
+            border: none;
+            width: 24px; height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--primary);
+            cursor: pointer;
+            transition: var(--transition);
+        }
+        .cart-item .item-qty button:hover { background: var(--primary-light); }
+        .cart-item .item-price { font-weight: 600; color: var(--primary); min-width: 80px; text-align: right; }
+        .cart-item .item-remove {
+            color: var(--danger);
+            cursor: pointer;
+            padding: 0 4px;
+            font-size: 1.1rem;
+            transition: var(--transition);
+        }
+        .cart-item .item-remove:hover { transform: scale(1.2); }
+        
         .product-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
             gap: 12px;
-            max-height: 500px;
-            overflow-y: auto;
             padding: 4px 2px;
         }
         .product-grid::-webkit-scrollbar { width: 4px; }
@@ -276,20 +358,18 @@
             border-color: var(--primary);
             box-shadow: var(--shadow-hover);
         }
-        .product-card:active {
-            transform: scale(0.95);
-        }
+        .product-card:active { transform: scale(0.95); }
         .product-card .product-image {
-            width: 80px;
-            height: 80px;
+            width: 70px;
+            height: 70px;
             border-radius: 50%;
             object-fit: cover;
-            margin: 0 auto 8px;
+            margin: 0 auto 6px;
             background: var(--primary-light);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 2.5rem;
+            font-size: 2rem;
             color: var(--primary);
             border: 2px solid #e9ecef;
         }
@@ -301,7 +381,7 @@
         }
         .product-card .product-name {
             font-weight: 600;
-            font-size: 0.85rem;
+            font-size: 0.8rem;
             margin-bottom: 2px;
             white-space: nowrap;
             overflow: hidden;
@@ -310,40 +390,29 @@
         .product-card .product-price {
             font-weight: 700;
             color: var(--primary);
-            font-size: 0.95rem;
+            font-size: 0.85rem;
         }
         .product-card .product-stock {
-            font-size: 0.7rem;
+            font-size: 0.65rem;
             color: var(--text-muted);
         }
-        .product-card .stock-low {
-            color: var(--danger);
-            font-weight: 600;
-        }
+        .product-card .stock-low { color: var(--danger); font-weight: 600; }
         .product-card .badge-stock {
             position: absolute;
-            top: 6px;
-            right: 6px;
-            font-size: 0.6rem;
+            top: 4px;
+            right: 4px;
+            font-size: 0.55rem;
             padding: 2px 8px;
             border-radius: 2rem;
         }
-        .product-card .badge-stock.out-of-stock {
-            background: var(--danger);
-            color: white;
-        }
-        .product-card .badge-stock.low-stock {
-            background: var(--warning);
-            color: white;
-        }
-        .product-card .badge-stock.in-stock {
-            background: var(--secondary);
-            color: white;
-        }
+        .badge-stock.out-of-stock { background: var(--danger); color: white; }
+        .badge-stock.low-stock { background: var(--warning); color: white; }
+        .badge-stock.in-stock { background: var(--secondary); color: white; }
+        
         input, select, textarea {
             border-radius: 2rem !important;
             border: 1px solid #dee2e6 !important;
-            padding: 10px 18px !important;
+            padding: 8px 16px !important;
             background: white;
             transition: var(--transition);
         }
@@ -352,72 +421,47 @@
             box-shadow: 0 0 0 4px rgba(44,110,158,0.1) !important;
             outline: none;
         }
-        .form-label {
-            font-weight: 600;
-            font-size: 0.85rem;
-            color: var(--text-main);
-            margin-bottom: 4px;
-        }
+        .form-label { font-weight: 600; font-size: 0.8rem; color: var(--text-main); margin-bottom: 4px; }
         .card-modern {
             background: var(--card-bg);
             border-radius: var(--radius);
-            padding: 1.5rem;
+            padding: 1.25rem;
             box-shadow: var(--shadow);
             border: 1px solid rgba(0,0,0,0.04);
             transition: var(--transition);
         }
-        .card-modern:hover {
-            box-shadow: var(--shadow-hover);
-        }
-        .card-modern .card-title {
-            font-weight: 700;
-            font-size: 1.1rem;
-            margin-bottom: 1rem;
-        }
-        .cart-item {
+        .card-modern:hover { box-shadow: var(--shadow-hover); }
+        .card-modern .card-title { font-weight: 700; font-size: 1rem; margin-bottom: 0.75rem; }
+        
+        .payment-logos {
             display: flex;
-            justify-content: space-between;
+            gap: 6px;
             align-items: center;
-            background: #f8fafc;
-            padding: 10px 16px;
-            margin-bottom: 8px;
-            border-radius: 1rem;
             flex-wrap: wrap;
-            transition: var(--transition);
-            border: 1px solid transparent;
         }
-        .cart-item:hover {
-            border-color: rgba(44,110,158,0.1);
-            background: var(--primary-light);
-        }
-        .qty-control {
-            display: inline-flex;
+        .payment-logo {
+            display: flex;
             align-items: center;
-            gap: 8px;
-            background: white;
-            padding: 2px 10px;
+            gap: 4px;
+            padding: 4px 10px;
             border-radius: 2rem;
-            border: 1px solid #dee2e6;
-        }
-        .qty-control button {
-            background: none;
-            border: none;
-            font-size: 1.1rem;
-            padding: 2px 6px;
-            color: var(--primary);
-            cursor: pointer;
-        }
-        .qty-control button:hover {
-            background: var(--primary-light);
-            border-radius: 50%;
-        }
-        .qty-control span {
-            min-width: 24px;
-            text-align: center;
+            font-size: 0.7rem;
             font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition);
+            border: 2px solid transparent;
         }
-        .search-product { position: relative; }
-        .search-results, .client-suggestion {
+        .payment-logo:hover { transform: scale(1.05); box-shadow: var(--shadow-hover); }
+        .payment-logo.active {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px var(--primary-light);
+        }
+        .payment-logo.cash { background: #f1c40f; color: #2c3e50; }
+        .payment-logo.wave { background: #2ecc71; color: white; }
+        .payment-logo.orange { background: #e67e22; color: white; }
+        .payment-logo .logo-icon { font-size: 1rem; }
+        
+        .client-suggestion {
             position: absolute;
             top: 100%;
             left: 0;
@@ -425,22 +469,20 @@
             background: white;
             border-radius: 1rem;
             box-shadow: var(--shadow-hover);
-            max-height: 260px;
+            max-height: 200px;
             overflow-y: auto;
             z-index: 1000;
             border: 1px solid rgba(0,0,0,0.04);
             margin-top: 4px;
         }
-        .search-results .result-item, .client-suggestion div {
-            padding: 10px 16px;
+        .client-suggestion div {
+            padding: 8px 16px;
             cursor: pointer;
             transition: var(--transition);
             border-bottom: 1px solid rgba(0,0,0,0.04);
         }
-        .search-results .result-item:hover, .client-suggestion div:hover {
-            background: var(--primary-light);
-            color: var(--primary);
-        }
+        .client-suggestion div:hover { background: var(--primary-light); color: var(--primary); }
+        
         .toggle-sidebar {
             display: none;
             position: fixed;
@@ -460,70 +502,14 @@
             transition: var(--transition);
         }
         .toggle-sidebar:hover { transform: scale(1.05); }
-        .cash-stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 16px;
+        
+        @media (max-width: 1200px) {
+            .sales-cart { width: 340px; min-width: 280px; }
         }
-        .cash-stat-item {
-            background: #f8fafc;
-            padding: 16px;
-            border-radius: var(--radius);
-            text-align: center;
-        }
-        .cash-stat-item .amount {
-            font-size: 1.5rem;
-            font-weight: 700;
-        }
-        .cash-stat-item .label {
-            font-size: 0.8rem;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        .cash-stat-item .amount.green { color: var(--secondary); }
-        .cash-stat-item .amount.red { color: var(--danger); }
-        .payment-logos {
-            display: flex;
-            gap: 8px;
-            align-items: center;
-            flex-wrap: wrap;
-            margin-top: 4px;
-        }
-        .payment-logo {
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            padding: 6px 12px;
-            border-radius: 2rem;
-            font-size: 0.75rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: var(--transition);
-            border: 2px solid transparent;
-        }
-        .payment-logo:hover {
-            transform: scale(1.05);
-            box-shadow: var(--shadow-hover);
-        }
-        .payment-logo.active {
-            border-color: var(--primary);
-            box-shadow: 0 0 0 2px var(--primary-light);
-        }
-        .payment-logo.cash {
-            background: #f1c40f;
-            color: #2c3e50;
-        }
-        .payment-logo.wave {
-            background: #2ecc71;
-            color: white;
-        }
-        .payment-logo.orange {
-            background: #e67e22;
-            color: white;
-        }
-        .payment-logo .logo-icon {
-            font-size: 1.1rem;
+        @media (max-width: 992px) {
+            .sales-layout { flex-direction: column; height: auto; }
+            .sales-cart { width: 100%; max-height: 500px; min-height: 300px; }
+            .sales-products { max-height: 500px; }
         }
         @media (max-width: 768px) {
             .sidebar { transform: translateX(-100%); }
@@ -533,9 +519,7 @@
             .navbar-top { flex-direction: column; gap: 8px; text-align: center; }
             .stat-card h2 { font-size: 1.4rem; }
             .product-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
-            .product-card .product-image { width: 60px; height: 60px; font-size: 2rem; }
-            .payment-logos { gap: 4px; }
-            .payment-logo { padding: 4px 10px; font-size: 0.65rem; }
+            .product-card .product-image { width: 55px; height: 55px; font-size: 1.5rem; }
         }
         @keyframes fadeInUp {
             from { opacity: 0; transform: translateY(20px); }
@@ -556,11 +540,30 @@
         .text-muted-custom { color: var(--text-muted); }
         @keyframes cartPulse {
             0% { transform: scale(1); }
-            50% { transform: scale(1.05); }
+            50% { transform: scale(1.03); }
             100% { transform: scale(1); }
         }
-        .cart-pulse {
-            animation: cartPulse 0.3s ease-in-out;
+        .cart-pulse { animation: cartPulse 0.3s ease-in-out; }
+        .barcode-input {
+            position: relative;
+        }
+        .barcode-input input {
+            padding-right: 50px !important;
+        }
+        .barcode-input .barcode-icon {
+            position: absolute;
+            right: 16px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-muted);
+            font-size: 1.2rem;
+        }
+        .barcode-scan-flash {
+            animation: flashGreen 0.5s ease;
+        }
+        @keyframes flashGreen {
+            0% { background-color: rgba(39, 174, 96, 0.3); }
+            100% { background-color: transparent; }
         }
     </style>
 </head>
@@ -614,64 +617,46 @@
         const num = parseFloat(number);
         return num.toLocaleString('fr-FR').replace(/\s/g, ' ').replace(/,/g, ' ');
     }
-async function apiCall(endpoint, method = 'GET', body = null) {
-    try {
-        const headers = { 'Content-Type': 'application/json' };
-        if (token) headers['Authorization'] = `Bearer ${token}`;
-        const res = await fetch(`/api${endpoint}`, { 
-            method, 
-            headers, 
-            body: body ? JSON.stringify(body) : undefined 
-        });
-        if (res.status === 401) { 
-            logout(); 
-            throw new Error('Session expirée'); 
+
+    async function apiCall(endpoint, method = 'GET', body = null) {
+        try {
+            const headers = { 'Content-Type': 'application/json' };
+            if (token) headers['Authorization'] = `Bearer ${token}`;
+            const res = await fetch(`/api${endpoint}`, { 
+                method, 
+                headers, 
+                body: body ? JSON.stringify(body) : undefined 
+            });
+            if (res.status === 401) { 
+                logout(); 
+                throw new Error('Session expirée'); 
+            }
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Erreur serveur');
+            return data;
+        } catch(err) {
+            console.error('API Error:', err);
+            throw err;
         }
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Erreur serveur');
+    }
+
+    const dataCache = new Map();
+    async function apiCallCached(endpoint, method = 'GET', body = null, ttl = 30000) {
+        const key = `${method}:${endpoint}:${JSON.stringify(body)}`;
+        if (method === 'GET' && dataCache.has(key)) {
+            const cached = dataCache.get(key);
+            if (Date.now() - cached.timestamp < ttl) {
+                return cached.data;
+            }
+            dataCache.delete(key);
+        }
+        const data = await apiCall(endpoint, method, body);
+        if (method === 'GET') {
+            dataCache.set(key, { data, timestamp: Date.now() });
+        }
         return data;
-    } catch(err) {
-        console.error('API Error:', err);
-        throw err;
     }
-}
-// ===== OPTIMISATION RAPIDE =====
 
-// 1. Cache simple
-const dataCache = new Map();
-
-async function apiCallCached(endpoint, method = 'GET', body = null, ttl = 30000) {
-    const key = `${method}:${endpoint}:${JSON.stringify(body)}`;
-    
-    if (method === 'GET' && dataCache.has(key)) {
-        const cached = dataCache.get(key);
-        if (Date.now() - cached.timestamp < ttl) {
-            return cached.data;
-        }
-        dataCache.delete(key);
-    }
-    
-    const data = await apiCall(endpoint, method, body);
-    if (method === 'GET') {
-        dataCache.set(key, { data, timestamp: Date.now() });
-    }
-    return data;
-}
-
-// 2. Chargement parallèle des données
-async function loadPageData(pages) {
-    return await Promise.all(pages.map(page => 
-        apiCallCached(page.endpoint, 'GET', null, 60000)
-    ));
-}
-
-// 3. Éviter les re-rendus inutiles
-function updateElement(id, content) {
-    const el = document.getElementById(id);
-    if (el && el.innerHTML !== content) {
-        el.innerHTML = content;
-    }
-}
     // ========================================================================
     // AUTH
     // ========================================================================
@@ -755,7 +740,9 @@ function updateElement(id, content) {
         else if (page === 'history') await renderHistory();
     }
 
-    // ===== DASHBOARD =====
+    // ========================================================================
+    // DASHBOARD
+    // ========================================================================
     async function renderDashboard() {
         try {
             const data = await apiCall('/reports/dashboard');
@@ -793,7 +780,9 @@ function updateElement(id, content) {
         }
     }
 
-    // ===== PRODUITS =====
+    // ========================================================================
+    // PRODUITS
+    // ========================================================================
     let selectedImageData = null;
 
     window.previewImage = function(event) {
@@ -1033,7 +1022,9 @@ function updateElement(id, content) {
         } catch(err) { console.error(err); document.getElementById('pageContainer').innerHTML = `<div class="alert alert-danger">Erreur : ${err.message}</div>`; }
     }
 
-    // ===== VENTES =====
+    // ========================================================================
+    // VENTES - VERSION AMÉLIORÉE AVEC LECTEUR CODE-BARRES
+    // ========================================================================
     async function renderSales() {
         let allProducts = await apiCall('/products');
         let cart = [];
@@ -1042,81 +1033,169 @@ function updateElement(id, content) {
         await loadClients();
 
         const html = `
-            <div class="row">
-                <div class="col-lg-4">
-                    <div class="card-modern">
-                        <h5 class="card-title"><i class="bi bi-cart-plus text-primary-custom me-2"></i>Nouvelle vente</h5>
-                        <div class="mb-2 position-relative">
-                            <label class="form-label">Client</label>
-                            <input type="text" id="clientInput" class="form-control" placeholder="Nom du client (laissez vide pour anonyme)" autocomplete="off">
-                            <div id="clientSuggestions" class="client-suggestion"></div>
-                        </div>
-                        <div class="mb-2">
-                            <label class="form-label">🔍 Rechercher un produit</label>
-                            <input type="text" id="productSearch" class="form-control" placeholder="Nom, SKU, code barre..." oninput="filterProducts()">
-                        </div>
-                        <div id="productGridContainer" class="mb-2">
-                            <div class="product-grid" id="productGrid"></div>
-                        </div>
-                        <hr>
-                        <h6 class="fw-600"><i class="bi bi-list me-2"></i>Panier (<span id="cartCount">0</span>)</h6>
-                        <div id="cartList" class="mb-2" style="max-height:200px;overflow-y:auto;"></div>
-                        <div class="d-flex justify-content-between align-items-center mt-2">
-                            <span class="fw-600">Total :</span>
-                            <h4 class="text-primary-custom mb-0" id="cartTotal">0 FCFA</h4>
-                        </div>
-                        <hr>
-                        <div class="row g-2">
-                            <div class="col-6"><label class="form-label">Remise (%)</label><input type="number" id="remise_pct" class="form-control" value="0" step="0.01"></div>
-                            <div class="col-6"><label class="form-label">Acompte (FCFA)</label><input type="number" id="acompte" class="form-control" value="0" step="0.01"></div>
-                        </div>
-                        <div class="mb-2">
-                            <label class="form-label">Mode de paiement</label>
-                            <div class="payment-logos">
-                                <div class="payment-logo cash active" onclick="selectPayment('cash')" id="pay-cash">
-                                    <span class="logo-icon">💰</span> Espèces
-                                </div>
-                                <div class="payment-logo wave" onclick="selectPayment('wave')" id="pay-wave">
-                                    <span class="logo-icon">📱</span> Wave
-                                </div>
-                                <div class="payment-logo orange" onclick="selectPayment('orange')" id="pay-orange">
-                                    <span class="logo-icon">📱</span> Orange Money
-                                </div>
-                            </div>
-                            <input type="hidden" id="paymentMethod" value="cash">
-                        </div>
-                        <div class="form-check mb-2">
-                            <input class="form-check-input" type="checkbox" id="deferredPayment">
-                            <label class="form-check-label">Paiement différé (facture)</label>
-                        </div>
-                        <div id="deferredFields" style="display:none;"><label class="form-label">Date d'échéance</label><input type="date" id="dueDate" class="form-control"></div>
-                        <button class="btn btn-success w-100 py-2 mt-2" onclick="completeSale()"><i class="bi bi-check-circle me-2"></i>Finaliser la vente</button>
+            <div class="row mb-3">
+                <div class="col-md-4">
+                    <label class="form-label">👤 Client</label>
+                    <div class="position-relative">
+                        <input type="text" id="clientInput" class="form-control" placeholder="Nom du client (laissez vide pour anonyme)" autocomplete="off">
+                        <div id="clientSuggestions" class="client-suggestion"></div>
                     </div>
                 </div>
-                <div class="col-lg-8">
-                    <div class="card-modern">
-                        <h5 class="card-title"><i class="bi bi-clock-history text-primary-custom me-2"></i>Historique ventes</h5>
-                        <div class="row g-2 mb-3">
-                            <div class="col-md-5"><input type="text" id="filterClient" class="form-control" placeholder="Filtrer par client"></div>
-                            <div class="col-md-4"><input type="date" id="filterDate" class="form-control"></div>
-                            <div class="col-md-3"><button class="btn btn-sm btn-primary w-100" onclick="filterSales()"><i class="bi bi-search"></i> Rechercher</button></div>
-                            <div class="col-md-12"><button class="btn btn-sm btn-secondary w-100" onclick="loadSalesList()"><i class="bi bi-arrow-counterclockwise"></i> Réinitialiser</button></div>
+                <div class="col-md-4">
+                    <label class="form-label">📦 Mode de paiement</label>
+                    <div class="payment-logos">
+                        <div class="payment-logo cash active" onclick="selectPayment('cash')" id="pay-cash">
+                            <span class="logo-icon">💰</span> Espèces
                         </div>
-                        <div class="table-wrapper"><table class="table table-sm"><thead><tr><th>#</th><th>Client</th><th>Total</th><th>Statut</th><th>Date</th><th>Actions</th></tr></thead><tbody id="salesList"></tbody></table></div>
+                        <div class="payment-logo wave" onclick="selectPayment('wave')" id="pay-wave">
+                            <span class="logo-icon">📱</span> Wave
+                        </div>
+                        <div class="payment-logo orange" onclick="selectPayment('orange')" id="pay-orange">
+                            <span class="logo-icon">📱</span> Orange Money
+                        </div>
+                    </div>
+                    <input type="hidden" id="paymentMethod" value="cash">
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">📋 Options</label>
+                    <div class="d-flex gap-3 align-items-center">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="deferredPayment">
+                            <label class="form-check-label">Paiement différé</label>
+                        </div>
+                        <div id="deferredFields" style="display:none;">
+                            <input type="date" id="dueDate" class="form-control form-control-sm" style="width:150px;">
+                        </div>
                     </div>
                 </div>
             </div>
-            <div class="modal fade" id="editSaleModal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-header"><h5><i class="bi bi-pencil me-2"></i>Modifier la vente #<span id="editSaleId"></span></h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div id="editSaleItems"></div><hr><div class="row"><div class="col-md-6"><label class="form-label">Remise (%)</label><input type="number" id="editRemisePct" class="form-control" step="0.01"></div><div class="col-md-6"><label class="form-label">Acompte (FCFA)</label><input type="number" id="editAcompte" class="form-control" step="0.01"></div></div></div><div class="modal-footer"><button class="btn btn-primary" onclick="saveSaleModification()"><i class="bi bi-save me-1"></i>Enregistrer</button><button class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button></div></div></div></div>
+
+            <div class="sales-layout">
+                <!-- PARTIE GAUCHE : PRODUITS -->
+                <div class="sales-products">
+                    <div class="card-modern" style="height:100%;">
+                        <div class="d-flex gap-2 mb-2">
+                            <div class="flex-grow-1 position-relative barcode-input">
+                                <input type="text" id="barcodeScan" class="form-control" placeholder="📷 Scannez un code-barres..." autofocus>
+                                <span class="barcode-icon"><i class="bi bi-upc-scan"></i></span>
+                            </div>
+                            <input type="text" id="productSearch" class="form-control" placeholder="🔍 Rechercher..." oninput="filterProducts()" style="flex:2;">
+                        </div>
+                        <div id="productGridContainer" style="height:calc(100% - 50px); overflow-y:auto;">
+                            <div class="product-grid" id="productGrid"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- PARTIE DROITE : PANIER TOUJOURS VISIBLE -->
+                <div class="sales-cart">
+                    <div class="cart-header">
+                        <h6 class="fw-600 mb-0"><i class="bi bi-cart me-2"></i>Panier <span class="badge bg-primary" id="cartCount">0</span></h6>
+                    </div>
+                    <div class="cart-items" id="cartList">
+                        <div class="text-center text-muted-custom py-4">
+                            <i class="bi bi-cart" style="font-size:2rem;"></i>
+                            <p class="mb-0">Panier vide</p>
+                        </div>
+                    </div>
+                    <div class="cart-footer">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span class="fw-600">Total :</span>
+                            <h4 class="text-primary-custom mb-0" id="cartTotal">0 FCFA</h4>
+                        </div>
+                        <div class="row g-2 mb-2">
+                            <div class="col-6">
+                                <label class="form-label" style="font-size:0.7rem;">Remise (%)</label>
+                                <input type="number" id="remise_pct" class="form-control form-control-sm" value="0" step="0.01">
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label" style="font-size:0.7rem;">Acompte (FCFA)</label>
+                                <input type="number" id="acompte" class="form-control form-control-sm" value="0" step="0.01">
+                            </div>
+                        </div>
+                        <button class="btn btn-success w-100 py-2" onclick="completeSale()">
+                            <i class="bi bi-check-circle me-2"></i>Finaliser la vente
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MODAL MODIFICATION VENTE -->
+            <div class="modal fade" id="editSaleModal" tabindex="-1">
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5><i class="bi bi-pencil me-2"></i>Modifier la vente #<span id="editSaleId"></span></h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <div id="editSaleItems"></div>
+                            <hr>
+                            <div class="row">
+                                <div class="col-md-6"><label class="form-label">Remise (%)</label><input type="number" id="editRemisePct" class="form-control" step="0.01"></div>
+                                <div class="col-md-6"><label class="form-label">Acompte (FCFA)</label><input type="number" id="editAcompte" class="form-control" step="0.01"></div>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-primary" onclick="saveSaleModification()"><i class="bi bi-save me-1"></i>Enregistrer</button>
+                            <button class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
         `;
         document.getElementById('pageContainer').innerHTML = html;
 
+        // ===== GESTION DU LECTEUR CODE-BARRES =====
+        const barcodeInput = document.getElementById('barcodeScan');
+        if (barcodeInput) {
+            barcodeInput.addEventListener('keydown', async (e) => {
+                if (e.key === 'Enter') {
+                    const code = barcodeInput.value.trim();
+                    if (code.length === 0) return;
+                    try {
+                        const prod = await apiCall(`/products/barcode/${encodeURIComponent(code)}`);
+                        addProductToCart(prod.id, prod.name, prod.sell_price, prod.quantity);
+                        // Animation de confirmation
+                        barcodeInput.classList.add('barcode-scan-flash');
+                        setTimeout(() => barcodeInput.classList.remove('barcode-scan-flash'), 500);
+                        barcodeInput.value = '';
+                        // Mettre à jour la recherche
+                        document.getElementById('productSearch').value = prod.name;
+                        filterProducts();
+                        // Notification sonore (optionnelle)
+                        try {
+                            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                            const oscillator = audioCtx.createOscillator();
+                            const gainNode = audioCtx.createGain();
+                            oscillator.connect(gainNode);
+                            gainNode.connect(audioCtx.destination);
+                            oscillator.frequency.value = 880;
+                            oscillator.type = 'sine';
+                            gainNode.gain.value = 0.1;
+                            oscillator.start();
+                            setTimeout(() => oscillator.stop(), 100);
+                        } catch(e) {}
+                    } catch(err) {
+                        alert('❌ Produit non trouvé avec ce code-barres');
+                        barcodeInput.classList.add('barcode-scan-flash');
+                        setTimeout(() => barcodeInput.classList.remove('barcode-scan-flash'), 500);
+                        barcodeInput.value = '';
+                    }
+                }
+            });
+            // Focus automatique sur le scan
+            barcodeInput.focus();
+        }
+
+        // ===== RESTE DU CODE =====
         let filteredProducts = [...allProducts];
 
         function renderProductGrid(products) {
             const grid = document.getElementById('productGrid');
             if (!grid) return;
             if (!products || products.length === 0) {
-                grid.innerHTML = '<div class="text-center text-muted-custom py-3">Aucun produit disponible</div>';
+                grid.innerHTML = '<div class="text-center text-muted-custom py-4">Aucun produit disponible</div>';
                 return;
             }
             grid.innerHTML = products.map(p => {
@@ -1125,7 +1204,7 @@ function updateElement(id, content) {
                 const disabled = p.quantity <= 0 ? 'style="opacity:0.5;cursor:not-allowed;"' : '';
                 const hasImage = p.image_url && p.image_url.startsWith('data:image');
                 return `
-                    <div class="product-card" onclick="${p.quantity > 0 ? `addProductToCart(${p.id}, '${p.name}', ${p.sell_price}, ${p.quantity})` : ''}" ${disabled}>
+                    <div class="product-card" onclick="${p.quantity > 0 ? `addProductToCart(${p.id}, '${p.name.replace(/'/g, "\\'")}', ${p.sell_price}, ${p.quantity})` : ''}" ${disabled}>
                         <span class="badge-stock ${stockStatus}">${stockLabel}</span>
                         <div class="product-image">
                             ${hasImage ? `<img src="${p.image_url}" alt="${p.name}">` : `<i class="bi bi-box-seam"></i>`}
@@ -1191,21 +1270,6 @@ function updateElement(id, content) {
         });
         document.addEventListener('click', (e) => { if (!clientInput.contains(e.target) && !clientSuggestions.contains(e.target)) clientSuggestions.style.display = 'none'; });
 
-        const barcodeInput = document.getElementById('barcodeInput');
-        if (barcodeInput) {
-            barcodeInput.addEventListener('change', async (e) => {
-                const code = e.target.value.trim();
-                if (code.length === 0) return;
-                try {
-                    const prod = await apiCall(`/products/barcode/${encodeURIComponent(code)}`);
-                    addProductToCart(prod.id, prod.name, prod.sell_price, prod.quantity);
-                    document.getElementById('productSearch').value = prod.name;
-                    filterProducts();
-                } catch(err) { alert('Produit non trouvé'); }
-                barcodeInput.value = '';
-            });
-        }
-
         const deferredCheck = document.getElementById('deferredPayment');
         const deferredFields = document.getElementById('deferredFields');
         if (deferredCheck && deferredFields) {
@@ -1217,22 +1281,25 @@ function updateElement(id, content) {
             const countEl = document.getElementById('cartCount');
             let total = 0;
             if (!cart.length) {
-                container.innerHTML = '<div class="text-center text-muted-custom py-3"><i class="bi bi-cart"></i> Panier vide</div>';
+                container.innerHTML = '<div class="text-center text-muted-custom py-4"><i class="bi bi-cart" style="font-size:2rem;"></i><p class="mb-0">Panier vide</p></div>';
                 document.getElementById('cartTotal').innerText = '0 FCFA';
                 if (countEl) countEl.innerText = '0';
                 return;
             }
             container.innerHTML = cart.map((item, idx) => {
                 total += item.total_price;
-                return `<div class="cart-item">
-                    <span><strong>${item.name}</strong> × ${item.quantity}</span>
-                    <span>${formatNumber(item.total_price)} FCFA</span>
-                    <div class="d-flex gap-1">
-                        <button class="btn btn-sm btn-outline-secondary" onclick="updateQty(${idx}, -1)"><i class="bi bi-dash"></i></button>
-                        <button class="btn btn-sm btn-outline-secondary" onclick="updateQty(${idx}, 1)"><i class="bi bi-plus"></i></button>
-                        <button class="btn btn-sm btn-danger" onclick="removeFromCart(${idx})"><i class="bi bi-x"></i></button>
+                return `
+                    <div class="cart-item">
+                        <span class="item-name">${item.name}</span>
+                        <div class="item-qty">
+                            <button onclick="updateQty(${idx}, -1)"><i class="bi bi-dash"></i></button>
+                            <span>${item.quantity}</span>
+                            <button onclick="updateQty(${idx}, 1)"><i class="bi bi-plus"></i></button>
+                        </div>
+                        <span class="item-price">${formatNumber(item.total_price)}</span>
+                        <span class="item-remove" onclick="removeFromCart(${idx})"><i class="bi bi-x-circle"></i></span>
                     </div>
-                </div>`;
+                `;
             }).join('');
             document.getElementById('cartTotal').innerText = formatNumber(total) + ' FCFA';
             if (countEl) countEl.innerText = cart.length;
@@ -1303,8 +1370,6 @@ function updateElement(id, content) {
                 due_date: due_date
             };
 
-            console.log('📦 Données envoyées:', requestData);
-
             try {
                 const result = await apiCall('/sales', 'POST', requestData);
                 alert(`✅ Vente enregistrée (N° ${result.sale_id}) - ${status === 'pending' ? 'Facture en attente' : 'Payée'}`);
@@ -1318,16 +1383,18 @@ function updateElement(id, content) {
                 clientInput.value = '';
                 selectedClient = null;
                 document.getElementById('productSearch').value = '';
+                document.getElementById('barcodeScan').value = '';
+                document.getElementById('barcodeScan').focus();
                 filterProducts();
             } catch(err) {
-                console.error('❌ Erreur complète:', err);
+                console.error('❌ Erreur:', err);
                 alert('❌ Erreur : ' + err.message);
             }
         };
 
         window.filterSales = async () => {
-            const client = document.getElementById('filterClient').value;
-            const date = document.getElementById('filterDate').value;
+            const client = document.getElementById('filterClient')?.value || '';
+            const date = document.getElementById('filterDate')?.value || '';
             let url = '/sales?';
             if (client) url += `client_name=${encodeURIComponent(client)}&`;
             if (date) url += `start_date=${date}&end_date=${date}`;
@@ -1400,12 +1467,38 @@ function updateElement(id, content) {
             } catch(err) { alert(err.message); }
         };
 
+        // ===== AJOUT DE L'HISTORIQUE DANS LA PARTIE VENTES =====
+        const historyHtml = `
+            <div class="card-modern mt-3">
+                <h6 class="card-title"><i class="bi bi-clock-history text-primary-custom me-2"></i>Historique ventes</h6>
+                <div class="row g-2 mb-3">
+                    <div class="col-md-5"><input type="text" id="filterClient" class="form-control form-control-sm" placeholder="Filtrer par client"></div>
+                    <div class="col-md-4"><input type="date" id="filterDate" class="form-control form-control-sm"></div>
+                    <div class="col-md-3">
+                        <button class="btn btn-sm btn-primary w-100" onclick="filterSales()"><i class="bi bi-search"></i> Rechercher</button>
+                    </div>
+                </div>
+                <div class="table-wrapper"><table class="table table-sm"><thead><tr><th>#</th><th>Client</th><th>Total</th><th>Statut</th><th>Date</th><th>Actions</th></tr></thead><tbody id="salesList"></tbody></table></div>
+            </div>
+        `;
+
+        // Ajouter l'historique après le layout
+        document.getElementById('pageContainer').insertAdjacentHTML('beforeend', historyHtml);
+
         renderProductGrid(allProducts);
         renderCart();
         loadSalesList();
+
+        // Focus sur le scan
+        setTimeout(() => {
+            const scanInput = document.getElementById('barcodeScan');
+            if (scanInput) scanInput.focus();
+        }, 300);
     }
 
-    // ===== AUTRES PAGES =====
+    // ========================================================================
+    // AUTRES PAGES (inchangées)
+    // ========================================================================
     async function renderInvoices() {
         let invoices = [];
         const html = `<div class="card-modern"><div class="row g-2 mb-3"><div class="col-md-4"><input type="text" id="searchClientName" class="form-control" placeholder="Nom du client"></div><div class="col-md-4"><input type="date" id="searchDate" class="form-control"></div><div class="col-md-4"><button class="btn btn-primary" onclick="searchInvoices()"><i class="bi bi-search"></i> Rechercher</button> <button class="btn btn-secondary" onclick="loadAllInvoices()"><i class="bi bi-arrow-counterclockwise"></i> Toutes</button></div></div><div id="invoicesList"></div></div>`;
@@ -1608,77 +1701,73 @@ function updateElement(id, content) {
             options: { responsive: true, plugins: { legend: { display: false } } }
         });
     }
-// ===== PARAMÈTRES (CORRIGÉ) =====
-async function renderSettings() {
-    try {
-        const settings = await apiCall('/settings');
-        const html = `
-            <div class="card-modern">
-                <h5><i class="bi bi-gear me-2"></i>Paramètres société</h5>
-                <div class="row g-3">
-                    <div class="col-md-6"><label class="form-label">Nom entreprise</label><input id="companyName" class="form-control" value="${settings.company_name || ''}"></div>
-                    <div class="col-md-6"><label class="form-label">Sous-titre</label><input id="companySubtitle" class="form-control" value="${settings.company_subtitle || ''}"></div>
-                    <div class="col-12"><label class="form-label">Activité</label><textarea id="companyActivity" class="form-control" rows="2">${settings.company_activity || ''}</textarea></div>
-                    <div class="col-md-6"><label class="form-label">Numéro RC</label><input id="companyRc" class="form-control" value="${settings.company_rc || ''}"></div>
-                    <div class="col-md-6"><label class="form-label">Adresse</label><input id="companyAddress" class="form-control" value="${settings.company_address || ''}"></div>
-                    <div class="col-md-4"><label class="form-label">Téléphone principal</label><input id="companyPhone" class="form-control" value="${settings.company_phone || ''}"></div>
-                    <div class="col-md-4"><label class="form-label">Téléphone secondaire</label><input id="companyPhone2" class="form-control" value="${settings.company_phone2 || ''}"></div>
-                    <div class="col-md-4"><label class="form-label">Email</label><input id="companyEmail" class="form-control" value="${settings.company_email || ''}"></div>
-                    <div class="col-md-6"><label class="form-label">URL du logo</label><input id="logoUrl" class="form-control" value="${settings.logo_url || ''}" placeholder="https://exemple.com/logo.png"></div>
-                    <div class="col-md-3"><label class="form-label">Taux TVA (%)</label><input id="taxRate" class="form-control" value="${settings.tax_rate || 20}"></div>
-                    <div class="col-md-3"><label class="form-label">Seuil stock bas</label><input id="lowStockAlert" class="form-control" value="${settings.low_stock_alert || 5}"></div>
-                    <div class="col-md-3"><label class="form-label">Devise</label><input id="currency" class="form-control" value="${settings.currency || 'FCFA'}"></div>
-                    <div class="col-12"><button class="btn btn-primary" id="saveSettingsBtn"><i class="bi bi-save me-1"></i>Enregistrer</button></div>
+
+    async function renderSettings() {
+        try {
+            const settings = await apiCall('/settings');
+            const html = `
+                <div class="card-modern">
+                    <h5><i class="bi bi-gear me-2"></i>Paramètres société</h5>
+                    <div class="row g-3">
+                        <div class="col-md-6"><label class="form-label">Nom entreprise</label><input id="companyName" class="form-control" value="${settings.company_name || ''}"></div>
+                        <div class="col-md-6"><label class="form-label">Sous-titre</label><input id="companySubtitle" class="form-control" value="${settings.company_subtitle || ''}"></div>
+                        <div class="col-12"><label class="form-label">Activité</label><textarea id="companyActivity" class="form-control" rows="2">${settings.company_activity || ''}</textarea></div>
+                        <div class="col-md-6"><label class="form-label">Numéro RC</label><input id="companyRc" class="form-control" value="${settings.company_rc || ''}"></div>
+                        <div class="col-md-6"><label class="form-label">Adresse</label><input id="companyAddress" class="form-control" value="${settings.company_address || ''}"></div>
+                        <div class="col-md-4"><label class="form-label">Téléphone principal</label><input id="companyPhone" class="form-control" value="${settings.company_phone || ''}"></div>
+                        <div class="col-md-4"><label class="form-label">Téléphone secondaire</label><input id="companyPhone2" class="form-control" value="${settings.company_phone2 || ''}"></div>
+                        <div class="col-md-4"><label class="form-label">Email</label><input id="companyEmail" class="form-control" value="${settings.company_email || ''}"></div>
+                        <div class="col-md-6"><label class="form-label">URL du logo</label><input id="logoUrl" class="form-control" value="${settings.logo_url || ''}" placeholder="https://exemple.com/logo.png"></div>
+                        <div class="col-md-3"><label class="form-label">Taux TVA (%)</label><input id="taxRate" class="form-control" value="${settings.tax_rate || 20}"></div>
+                        <div class="col-md-3"><label class="form-label">Seuil stock bas</label><input id="lowStockAlert" class="form-control" value="${settings.low_stock_alert || 5}"></div>
+                        <div class="col-md-3"><label class="form-label">Devise</label><input id="currency" class="form-control" value="${settings.currency || 'FCFA'}"></div>
+                        <div class="col-12"><button class="btn btn-primary" id="saveSettingsBtn"><i class="bi bi-save me-1"></i>Enregistrer</button></div>
+                    </div>
                 </div>
-            </div>
-        `;
-        document.getElementById('pageContainer').innerHTML = html;
-        
-        // Fonction saveSettings - CORRIGÉE avec vérification des éléments
-        window.saveSettings = async function() {
-            try {
-                // Vérification que tous les éléments existent
-                const getVal = (id) => {
-                    const el = document.getElementById(id);
-                    return el ? el.value : '';
-                };
-                
-                const data = {
-                    company_name: getVal('companyName'),
-                    company_subtitle: getVal('companySubtitle'),
-                    company_activity: getVal('companyActivity'),
-                    company_rc: getVal('companyRc'),
-                    company_address: getVal('companyAddress'),
-                    company_phone: getVal('companyPhone'),
-                    company_phone2: getVal('companyPhone2'),
-                    company_email: getVal('companyEmail'),
-                    logo_url: getVal('logoUrl'),
-                    tax_rate: parseFloat(getVal('taxRate')) || 20,
-                    low_stock_alert: parseInt(getVal('lowStockAlert')) || 5,
-                    currency: getVal('currency') || 'FCFA'
-                };
-                await apiCall('/settings', 'PUT', data);
-                alert('✅ Paramètres mis à jour');
-                renderSettings();
-            } catch(err) {
-                alert('❌ Erreur : ' + err.message);
+            `;
+            document.getElementById('pageContainer').innerHTML = html;
+            
+            window.saveSettings = async function() {
+                try {
+                    const getVal = (id) => {
+                        const el = document.getElementById(id);
+                        return el ? el.value : '';
+                    };
+                    
+                    const data = {
+                        company_name: getVal('companyName'),
+                        company_subtitle: getVal('companySubtitle'),
+                        company_activity: getVal('companyActivity'),
+                        company_rc: getVal('companyRc'),
+                        company_address: getVal('companyAddress'),
+                        company_phone: getVal('companyPhone'),
+                        company_phone2: getVal('companyPhone2'),
+                        company_email: getVal('companyEmail'),
+                        logo_url: getVal('logoUrl'),
+                        tax_rate: parseFloat(getVal('taxRate')) || 20,
+                        low_stock_alert: parseInt(getVal('lowStockAlert')) || 5,
+                        currency: getVal('currency') || 'FCFA'
+                    };
+                    await apiCall('/settings', 'PUT', data);
+                    alert('✅ Paramètres mis à jour');
+                    renderSettings();
+                } catch(err) {
+                    alert('❌ Erreur : ' + err.message);
+                }
+            };
+            
+            const saveBtn = document.getElementById('saveSettingsBtn');
+            if (saveBtn) {
+                const newBtn = saveBtn.cloneNode(true);
+                saveBtn.parentNode.replaceChild(newBtn, saveBtn);
+                newBtn.addEventListener('click', window.saveSettings);
             }
-        };
-        
-        // Écouteur d'événement pour le bouton avec vérification
-        const saveBtn = document.getElementById('saveSettingsBtn');
-        if (saveBtn) {
-            // Supprimer les anciens écouteurs
-            const newBtn = saveBtn.cloneNode(true);
-            saveBtn.parentNode.replaceChild(newBtn, saveBtn);
-            newBtn.addEventListener('click', window.saveSettings);
+        } catch(err) {
+            console.error('Erreur renderSettings:', err);
+            document.getElementById('pageContainer').innerHTML = `<div class="alert alert-danger">Erreur chargement paramètres : ${err.message}</div>`;
         }
-    } catch(err) {
-        console.error('Erreur renderSettings:', err);
-        document.getElementById('pageContainer').innerHTML = `<div class="alert alert-danger">Erreur chargement paramètres : ${err.message}</div>`;
     }
-}
-   
+
     async function renderHistory() {
         const history = await apiCall('/history');
         const html = `<div class="table-wrapper"><table class="table"><thead><tr><th>Type</th><th>Référence</th><th>Montant</th><th>Date</th></tr></thead><tbody>${history.map(h=>`<tr><td><span class="badge ${h.type==='sale'?'badge-success':'badge-info'}">${h.type}</span></td><td>${h.client_name || h.product_name || h.id}</td><td>${h.amount ? formatNumber(h.amount) + ' FCFA' : ''}</td><td>${new Date(h.date).toLocaleString()}</td></tr>`).join('')}</tbody></table></div>`;
