@@ -12,7 +12,7 @@ const compression = require('compression');
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
-app.use(compression()); // ✅ Compression pour accélérer
+app.use(compression());
 app.use(express.static(path.join(__dirname)));
 
 require('dotenv').config();
@@ -24,7 +24,7 @@ const DB_CONFIG = {
     database: process.env.DB_NAME || 'gestpro_db',
     port: parseInt(process.env.DB_PORT || '3306'),
     waitForConnections: true,
-    connectionLimit: 20, // ✅ Augmenté
+    connectionLimit: 20,
     connectTimeout: 10000,
     acquireTimeout: 10000,
 };
@@ -75,23 +75,24 @@ async function initAndStart() {
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )`);
 
-        await pool.query(`CREATE TABLE IF NOT EXISTS settings (
-            id INT PRIMARY KEY AUTO_INCREMENT,
-            user_id INT NOT NULL,
-            company_name VARCHAR(200),
-            company_subtitle VARCHAR(200),
-            company_activity TEXT,
-            company_rc VARCHAR(100),
-            company_address TEXT,
-            company_phone VARCHAR(50),
-            company_phone2 VARCHAR(50),
-            company_email VARCHAR(100),
-            logo_url TEXT,
-            tax_rate DECIMAL(5,2) DEFAULT 20.00,
-            low_stock_alert INT DEFAULT 5,
-            currency VARCHAR(10) DEFAULT 'FCFA',
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-        )`);
+       // Dans initAndStart(), remplacez la création de la table settings par :
+await pool.query(`CREATE TABLE IF NOT EXISTS settings (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    company_name VARCHAR(200),
+    company_subtitle VARCHAR(200),
+    company_activity TEXT,
+    company_rc VARCHAR(100),
+    company_address TEXT,
+    company_phone VARCHAR(50),
+    company_phone2 VARCHAR(50),
+    company_email VARCHAR(100),
+    logo_url TEXT,
+    tax_rate DECIMAL(5,2) DEFAULT 0.00,  -- ✅ Changé de 20.00 à 0.00
+    low_stock_alert INT DEFAULT 5,
+    currency VARCHAR(10) DEFAULT 'FCFA',
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+)`);
 
         await pool.query(`CREATE TABLE IF NOT EXISTS categories (
             id INT PRIMARY KEY AUTO_INCREMENT,
@@ -127,6 +128,8 @@ async function initAndStart() {
             reorder_level INT DEFAULT 5,
             buy_price DECIMAL(10,2) DEFAULT 0,
             sell_price DECIMAL(10,2) DEFAULT 0,
+            wholesale_price DECIMAL(10,2) DEFAULT 0,
+            wholesale_quantity INT DEFAULT 0,
             location VARCHAR(100),
             image_url TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -147,25 +150,23 @@ async function initAndStart() {
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )`);
-
-        await pool.query(`CREATE TABLE IF NOT EXISTS sales (
-            id INT PRIMARY KEY AUTO_INCREMENT,
-            user_id INT NOT NULL,
-            client_id INT,
-            sale_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            total_amount DECIMAL(10,2) NOT NULL,
-            remise_pct DECIMAL(5,2) DEFAULT 0,
-            acompte DECIMAL(10,2) DEFAULT 0,
-            tax DECIMAL(10,2) DEFAULT 0,
-            final_amount DECIMAL(10,2) NOT NULL,
-            payment_method ENUM('cash','card','transfer') DEFAULT 'cash',
-            status ENUM('completed','pending','cancelled') DEFAULT 'completed',
-            due_date DATE NULL,
-            notes TEXT,
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-            FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL
-        )`);
-
+await pool.query(`CREATE TABLE IF NOT EXISTS sales (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    client_id INT,
+    sale_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    total_amount DECIMAL(10,2) NOT NULL,
+    remise_pct DECIMAL(5,2) DEFAULT 0,
+    acompte DECIMAL(10,2) DEFAULT 0,
+    tax DECIMAL(10,2) DEFAULT 0,
+    final_amount DECIMAL(10,2) NOT NULL,
+    payment_method ENUM('cash','card','transfer') DEFAULT 'cash',
+    status ENUM('completed','pending','cancelled') DEFAULT 'completed',
+    due_date DATE NULL,
+    notes TEXT,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL
+)`);
         await pool.query(`CREATE TABLE IF NOT EXISTS sale_items (
             id INT PRIMARY KEY AUTO_INCREMENT,
             sale_id INT NOT NULL,
@@ -174,7 +175,7 @@ async function initAndStart() {
             unit_price DECIMAL(10,2) NOT NULL,
             total_price DECIMAL(10,2) NOT NULL,
             FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE,
-            FOREIGN KEY (product_id) REFERENCES products(id)
+            FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
         )`);
 
         await pool.query(`CREATE TABLE IF NOT EXISTS payments (
@@ -241,7 +242,115 @@ async function initAndStart() {
             total_price DECIMAL(10,2) NOT NULL,
             FOREIGN KEY (proforma_id) REFERENCES proforma_invoices(id) ON DELETE CASCADE
         )`);
+// Dans initAndStart(), après la création des tables existantes, ajoutez :
 
+// ===== TABLE DES PERMISSIONS =====
+await pool.query(`CREATE TABLE IF NOT EXISTS permissions (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    name VARCHAR(50) NOT NULL UNIQUE,
+    description VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)`);
+
+// ===== TABLE DES SOUS-COMPTES =====
+await pool.query(`CREATE TABLE IF NOT EXISTS sub_users (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    parent_id INT NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    email VARCHAR(100) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (parent_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE(email)
+)`);
+
+// ===== TABLE DES PERMISSIONS DES SOUS-COMPTES =====
+await pool.query(`CREATE TABLE IF NOT EXISTS sub_user_permissions (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    sub_user_id INT NOT NULL,
+    permission_id INT NOT NULL,
+    FOREIGN KEY (sub_user_id) REFERENCES sub_users(id) ON DELETE CASCADE,
+    FOREIGN KEY (permission_id) REFERENCES permissions(id) ON DELETE CASCADE,
+    UNIQUE(sub_user_id, permission_id)
+)`);
+
+// ===== TABLE D'AUDIT DES SOUS-COMPTES =====
+await pool.query(`CREATE TABLE IF NOT EXISTS sub_user_audit (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    sub_user_id INT NOT NULL,
+    action VARCHAR(50) NOT NULL,
+    details JSON,
+    ip_address VARCHAR(45),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (sub_user_id) REFERENCES sub_users(id) ON DELETE CASCADE
+)`);
+// ===== INSERTION DES PERMISSIONS (CORRIGÉ AVEC DOUBLE APOSTROPHE) =====
+try {
+    await pool.query(`INSERT IGNORE INTO permissions (name, description) VALUES 
+        ('dashboard', 'Tableau de bord'),
+        ('products_view', 'Voir les produits'),
+        ('products_create', 'Créer des produits'),
+        ('products_edit', 'Modifier des produits'),
+        ('products_delete', 'Supprimer des produits'),
+        ('sales_view', 'Voir les ventes'),
+        ('sales_create', 'Créer des ventes'),
+        ('sales_edit', 'Modifier des ventes'),
+        ('sales_delete', 'Supprimer des ventes'),
+        ('clients_view', 'Voir les clients'),
+        ('clients_create', 'Créer des clients'),
+        ('clients_edit', 'Modifier des clients'),
+        ('clients_delete', 'Supprimer des clients'),
+        ('invoices_view', 'Voir les factures'),
+        ('invoices_create', 'Créer des factures'),
+        ('invoices_pay', 'Payer les factures'),
+        ('cash_view', 'Voir la caisse'),
+        ('cash_manage', 'Gérer la caisse'),
+        ('inventory_view', 'Voir l\\\'inventaire'),
+        ('inventory_manage', 'Gérer l\\\'inventaire'),
+        ('reports_view', 'Voir les rapports'),
+        ('settings_view', 'Voir les paramètres'),
+        ('settings_edit', 'Modifier les paramètres'),
+        ('sub_users_manage', 'Gérer l\\\'équipe')
+    `);
+    // Dans initAndStart(), après la création des tables, ajoutez :
+
+// ===== VÉRIFICATION ET AJOUT DES COLONNES MANQUANTES =====
+console.log('🔍 Vérification des colonnes de la table sales...');
+
+const columnsToAdd = [
+    { name: 'status', query: "ALTER TABLE sales ADD COLUMN status ENUM('completed','pending','cancelled') DEFAULT 'completed'" },
+    { name: 'remise_pct', query: "ALTER TABLE sales ADD COLUMN remise_pct DECIMAL(5,2) DEFAULT 0" },
+    { name: 'acompte', query: "ALTER TABLE sales ADD COLUMN acompte DECIMAL(10,2) DEFAULT 0" },
+    { name: 'tax', query: "ALTER TABLE sales ADD COLUMN tax DECIMAL(10,2) DEFAULT 0" },
+    { name: 'payment_method', query: "ALTER TABLE sales ADD COLUMN payment_method ENUM('cash','card','transfer') DEFAULT 'cash'" },
+    { name: 'due_date', query: "ALTER TABLE sales ADD COLUMN due_date DATE NULL" },
+    { name: 'notes', query: "ALTER TABLE sales ADD COLUMN notes TEXT" }
+];
+
+for (const col of columnsToAdd) {
+    try {
+        const [rows] = await pool.query(`SHOW COLUMNS FROM sales LIKE '${col.name}'`);
+        if (rows.length === 0) {
+            await pool.query(col.query);
+            console.log(`✅ Colonne ${col.name} ajoutée`);
+        }
+    } catch(e) {
+        console.log(`⚠️ Erreur pour ${col.name}:`, e.message);
+    }
+}
+
+// Mettre à jour les statuts existants
+try {
+    await pool.query(`UPDATE sales SET status = 'completed' WHERE status IS NULL`);
+    console.log('✅ Statuts des ventes mis à jour');
+} catch(e) {
+    console.log('⚠️ Erreur mise à jour statuts:', e.message);
+}
+    console.log('✅ Permissions insérées avec succès');
+} catch (err) {
+    console.error('❌ Erreur insertion permissions:', err.message);
+}
         // Ajout des colonnes manquantes
         try { await pool.query(`ALTER TABLE sales ADD COLUMN remise_pct DECIMAL(5,2) DEFAULT 0`); } catch(e) {}
         try { await pool.query(`ALTER TABLE sales ADD COLUMN acompte DECIMAL(10,2) DEFAULT 0`); } catch(e) {}
@@ -252,8 +361,10 @@ async function initAndStart() {
         try { await pool.query(`ALTER TABLE settings ADD COLUMN company_rc VARCHAR(100)`); } catch(e) {}
         try { await pool.query(`ALTER TABLE settings ADD COLUMN company_phone2 VARCHAR(50)`); } catch(e) {}
         try { await pool.query(`ALTER TABLE products ADD COLUMN image_url TEXT`); } catch(e) {}
+        try { await pool.query(`ALTER TABLE products ADD COLUMN wholesale_price DECIMAL(10,2) DEFAULT 0`); } catch(e) {}
+        try { await pool.query(`ALTER TABLE products ADD COLUMN wholesale_quantity INT DEFAULT 0`); } catch(e) {}
 
-        // ✅ AJOUT DES INDEX POUR ACCÉLÉRER LES REQUÊTES
+        // ✅ AJOUT DES INDEX
         try { await pool.query(`CREATE INDEX idx_sales_user_id ON sales(user_id)`); } catch(e) {}
         try { await pool.query(`CREATE INDEX idx_sales_sale_date ON sales(sale_date)`); } catch(e) {}
         try { await pool.query(`CREATE INDEX idx_sales_status ON sales(status)`); } catch(e) {}
@@ -376,7 +487,7 @@ app.get('/api/products', authenticate, async (req, res) => {
 });
 
 app.post('/api/products', authenticate, async (req, res) => {
-    const { sku, barcode, name, description, category_id, category_name, supplier_id, quantity, unit, reorder_level, buy_price, sell_price, location, image_url } = req.body;
+    const { sku, barcode, name, description, category_id, category_name, supplier_id, quantity, unit, reorder_level, buy_price, sell_price, wholesale_price, wholesale_quantity, location, image_url } = req.body;
     if (!sku || !name) return res.status(400).json({ error: 'SKU et nom requis' });
     const connection = await pool.getConnection();
     try {
@@ -393,9 +504,9 @@ app.post('/api/products', authenticate, async (req, res) => {
         }
         const supId = supplier_id ? parseInt(supplier_id) : null;
         const [result] = await connection.query(`
-            INSERT INTO products (user_id, sku, barcode, name, description, category_id, supplier_id, quantity, unit, reorder_level, buy_price, sell_price, location, image_url)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-            [req.user.id, sku, barcode || null, name, description || '', finalCatId || null, supId, quantity || 0, unit || 'pièce', reorder_level || 5, buy_price || 0, sell_price || 0, location || null, image_url || null]
+            INSERT INTO products (user_id, sku, barcode, name, description, category_id, supplier_id, quantity, unit, reorder_level, buy_price, sell_price, wholesale_price, wholesale_quantity, location, image_url)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+            [req.user.id, sku, barcode || null, name, description || '', finalCatId || null, supId, quantity || 0, unit || 'pièce', reorder_level || 5, buy_price || 0, sell_price || 0, wholesale_price || 0, wholesale_quantity || 0, location || null, image_url || null]
         );
         await connection.commit();
         res.status(201).json({ id: result.insertId });
@@ -409,7 +520,7 @@ app.post('/api/products', authenticate, async (req, res) => {
 });
 
 app.put('/api/products/:id', authenticate, async (req, res) => {
-    const { sku, barcode, name, description, category_id, category_name, supplier_id, quantity, unit, reorder_level, buy_price, sell_price, location, image_url } = req.body;
+    const { sku, barcode, name, description, category_id, category_name, supplier_id, quantity, unit, reorder_level, buy_price, sell_price, wholesale_price, wholesale_quantity, location, image_url } = req.body;
     const connection = await pool.getConnection();
     try {
         await connection.beginTransaction();
@@ -425,9 +536,9 @@ app.put('/api/products/:id', authenticate, async (req, res) => {
         }
         const supId = supplier_id ? parseInt(supplier_id) : null;
         await connection.query(`
-            UPDATE products SET sku=?, barcode=?, name=?, description=?, category_id=?, supplier_id=?, quantity=?, unit=?, reorder_level=?, buy_price=?, sell_price=?, location=?, image_url=?
+            UPDATE products SET sku=?, barcode=?, name=?, description=?, category_id=?, supplier_id=?, quantity=?, unit=?, reorder_level=?, buy_price=?, sell_price=?, wholesale_price=?, wholesale_quantity=?, location=?, image_url=?
             WHERE id=? AND user_id=?`,
-            [sku, barcode, name, description, finalCatId || null, supId, quantity, unit, reorder_level, buy_price, sell_price, location, image_url || null, req.params.id, req.user.id]
+            [sku, barcode, name, description, finalCatId || null, supId, quantity, unit, reorder_level, buy_price, sell_price, wholesale_price || 0, wholesale_quantity || 0, location, image_url || null, req.params.id, req.user.id]
         );
         await connection.commit();
         res.json({ message: 'Mis à jour' });
@@ -480,7 +591,8 @@ app.post('/api/sales', authenticate, async (req, res) => {
         acompte = 0, 
         payment_method = 'cash', 
         status = 'completed', 
-        due_date = null 
+        due_date = null,
+        is_wholesale = false
     } = req.body;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -527,11 +639,15 @@ app.post('/api/sales', authenticate, async (req, res) => {
             subtotal += item.total_price;
         }
 
+        // ✅ Récupérer le taux de TVA depuis la base (même si 0%)
         const [settings] = await connection.query(
             'SELECT tax_rate FROM settings WHERE user_id = ?', 
             [req.user.id]
         );
-        const tax_rate = settings[0]?.tax_rate || 20;
+        // ✅ Utiliser 0 si null, undefined ou 0
+        const tax_rate = settings[0]?.tax_rate !== null && settings[0]?.tax_rate !== undefined 
+            ? parseFloat(settings[0].tax_rate) 
+            : 0;
         const tax = subtotal * (tax_rate / 100);
         const remise_valeur = (remise_pct || 0) / 100 * subtotal;
         const total_apres_remise = subtotal - remise_valeur;
@@ -539,9 +655,9 @@ app.post('/api/sales', authenticate, async (req, res) => {
 
         const finalStatus = status === 'pending' ? 'pending' : 'completed';
         const [saleResult] = await connection.query(
-            `INSERT INTO sales (user_id, client_id, total_amount, remise_pct, acompte, tax, final_amount, payment_method, status, due_date)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [req.user.id, client_id, subtotal, remise_pct || 0, acompte || 0, tax, final_amount, payment_method || 'cash', finalStatus, due_date || null]
+            `INSERT INTO sales (user_id, client_id, total_amount, remise_pct, acompte, tax, final_amount, payment_method, status, due_date, notes)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [req.user.id, client_id, subtotal, remise_pct || 0, acompte || 0, tax, final_amount, payment_method || 'cash', finalStatus, due_date || null, is_wholesale ? 'VENTE EN GROS' : null]
         );
         const sale_id = saleResult.insertId;
 
@@ -563,9 +679,9 @@ app.post('/api/sales', authenticate, async (req, res) => {
                 [newQty, item.product_id]
             );
             await connection.query(
-                `INSERT INTO stock_movements (product_id, user_id, type, quantity_change, quantity_before, quantity_after, reference)
-                 VALUES (?, ?, 'sale', ?, ?, ?, ?)`,
-                [item.product_id, req.user.id, -item.quantity, oldQty, newQty, `VENTE #${sale_id}`]
+                `INSERT INTO stock_movements (product_id, user_id, type, quantity_change, quantity_before, quantity_after, reference, notes)
+                 VALUES (?, ?, 'sale', ?, ?, ?, ?, ?)`,
+                [item.product_id, req.user.id, -item.quantity, oldQty, newQty, `VENTE #${sale_id}`, is_wholesale ? 'Vente en gros' : null]
             );
         }
 
@@ -660,6 +776,7 @@ app.put('/api/sales/:id', authenticate, async (req, res) => {
     }
 });
 
+// ========== ROUTE PAIEMENT CORRIGÉE ==========
 app.post('/api/sales/:id/payment', authenticate, async (req, res) => {
     const { amount, payment_method } = req.body;
     const saleId = req.params.id;
@@ -670,24 +787,37 @@ app.post('/api/sales/:id/payment', authenticate, async (req, res) => {
         if (saleRows.length === 0) return res.status(404).json({ error: 'Facture non trouvée' });
         const sale = saleRows[0];
         if (sale.status === 'completed') return res.status(400).json({ error: 'Cette facture est déjà réglée' });
+        
         const [paidRows] = await connection.query('SELECT COALESCE(SUM(amount),0) as total_paid FROM payments WHERE sale_id=?', [saleId]);
         const totalPaid = parseFloat(paidRows[0].total_paid);
-        const remaining = sale.final_amount - totalPaid;
-        if (amount > remaining) return res.status(400).json({ error: `Le montant dépasse le reste à payer (${remaining} FCFA)` });
-        await connection.query('INSERT INTO payments (sale_id, amount, payment_method) VALUES (?, ?, ?)', [saleId, amount, payment_method || 'cash']);
-        await connection.query('INSERT INTO cash_register (user_id, transaction_type, amount, description, reference_id) VALUES (?, "deposit", ?, ?, ?)', [req.user.id, amount, `Règlement facture #${saleId}`, saleId]);
-        const newTotalPaid = totalPaid + amount;
+        const remaining = parseFloat(sale.final_amount) - totalPaid;
+        const paymentAmount = parseFloat(amount);
+        
+        if (paymentAmount > remaining) {
+            return res.status(400).json({ error: `Le montant dépasse le reste à payer (${formatNumber(remaining)} FCFA)` });
+        }
+        
+        await connection.query('INSERT INTO payments (sale_id, amount, payment_method) VALUES (?, ?, ?)', [saleId, paymentAmount, payment_method || 'cash']);
+        await connection.query(`INSERT INTO cash_register (user_id, transaction_type, amount, description, reference_id) VALUES (?, 'deposit', ?, ?, ?)`, [req.user.id, paymentAmount, `Règlement facture #${saleId}`, saleId]);
+        
+        const newTotalPaid = totalPaid + paymentAmount;
         let newStatus = sale.status;
-        if (newTotalPaid >= sale.final_amount - 0.01) {
+        if (newTotalPaid >= parseFloat(sale.final_amount) - 0.01) {
             await connection.query('UPDATE sales SET status = "completed" WHERE id = ?', [saleId]);
             newStatus = 'completed';
         }
+        
         await connection.commit();
-        res.json({ message: 'Règlement enregistré', remaining: sale.final_amount - newTotalPaid, status: newStatus });
+        res.json({ 
+            message: '✅ Règlement enregistré', 
+            remaining: parseFloat(sale.final_amount) - newTotalPaid, 
+            status: newStatus,
+            paid: newTotalPaid
+        });
     } catch(err) {
         await connection.rollback();
         console.error('Erreur paiement:', err);
-        res.status(500).json({ error: 'Erreur interne lors du règlement' });
+        res.status(500).json({ error: 'Erreur interne lors du règlement: ' + err.message });
     } finally {
         connection.release();
     }
@@ -746,7 +876,7 @@ app.get('/api/inventory/global', authenticate, async (req, res) => {
     res.json(rows);
 });
 
-// ========== ROUTES RAPPORTS (OPTIMISÉES) ==========
+// ========== ROUTES RAPPORTS ==========
 app.get('/api/reports/dashboard', authenticate, async (req, res) => {
     try {
         const [totalProducts] = await pool.query('SELECT COUNT(*) as count FROM products WHERE user_id=?', [req.user.id]);
@@ -772,7 +902,6 @@ app.get('/api/reports/dashboard', authenticate, async (req, res) => {
     }
 });
 
-// ✅ ROUTE RAPPORTS CORRIGÉE
 app.get('/api/reports/sales-by-period', authenticate, async (req, res) => {
     const { period } = req.query;
     let groupBy;
@@ -804,7 +933,6 @@ app.get('/api/reports/sales-by-period', authenticate, async (req, res) => {
             LIMIT ?
         `;
         const [rows] = await pool.query(query, [req.user.id, limit]);
-        // Inverser pour avoir l'ordre chronologique
         res.json(rows.reverse());
     } catch (err) {
         console.error('❌ Erreur sales-by-period:', err);
@@ -812,10 +940,13 @@ app.get('/api/reports/sales-by-period', authenticate, async (req, res) => {
     }
 });
 
-// ========== ROUTES PARAMÈTRES ==========
+// ========== ROUTES PARAMÈTRES (CORRIGÉ) ==========
+
+// ✅ GET : Récupérer les paramètres
 app.get('/api/settings', authenticate, async (req, res) => {
     try {
         let [rows] = await pool.query('SELECT * FROM settings WHERE user_id=?', [req.user.id]);
+
         if (rows.length === 0) {
             await pool.query(
                 `INSERT INTO settings (user_id, company_name, company_subtitle, company_activity, company_rc, company_address, company_phone, company_phone2, company_email, logo_url, tax_rate, low_stock_alert, currency) 
@@ -824,6 +955,7 @@ app.get('/api/settings', authenticate, async (req, res) => {
             );
             [rows] = await pool.query('SELECT * FROM settings WHERE user_id=?', [req.user.id]);
         }
+
         const settings = rows[0] || {};
         res.json({
             company_name: settings.company_name || 'Mon Entreprise',
@@ -835,22 +967,62 @@ app.get('/api/settings', authenticate, async (req, res) => {
             company_phone2: settings.company_phone2 || '',
             company_email: settings.company_email || '',
             logo_url: settings.logo_url || '',
-            tax_rate: settings.tax_rate || 20,
-            low_stock_alert: settings.low_stock_alert || 5,
+            tax_rate: settings.tax_rate !== null && settings.tax_rate !== undefined 
+                ? parseFloat(settings.tax_rate) 
+                : 20,
+            low_stock_alert: parseInt(settings.low_stock_alert) || 5,
             currency: settings.currency || 'FCFA'
         });
-    } catch(err) {
-        console.error('Erreur settings:', err);
-        res.status(500).json({ error: 'Erreur chargement paramètres' });
+    } catch (err) {
+        console.error('❌ Erreur GET /settings:', err);
+        res.status(500).json({ error: 'Erreur lors du chargement des paramètres.' });
     }
 });
+// ========== ROUTES PARAMÈTRES (CORRIGÉ DÉFINITIF) ==========
 
+// ✅ PUT : Mettre à jour les paramètres - PERMET 0%
 app.put('/api/settings', authenticate, async (req, res) => {
-    const { company_name, company_subtitle, company_activity, company_rc, company_address, company_phone, company_phone2, company_email, logo_url, tax_rate, low_stock_alert, currency } = req.body;
-    await pool.query('UPDATE settings SET company_name=?, company_subtitle=?, company_activity=?, company_rc=?, company_address=?, company_phone=?, company_phone2=?, company_email=?, logo_url=?, tax_rate=?, low_stock_alert=?, currency=? WHERE user_id=?', [company_name, company_subtitle, company_activity, company_rc, company_address, company_phone, company_phone2, company_email, logo_url, tax_rate, low_stock_alert, currency, req.user.id]);
-    res.json({ message: 'Paramètres mis à jour' });
-});
+    const {
+        company_name, company_subtitle, company_activity, company_rc,
+        company_address, company_phone, company_phone2, company_email,
+        logo_url, tax_rate, low_stock_alert, currency
+    } = req.body;
 
+    // ✅ Gestion du taux de TVA - Permet 0
+    let taxRateToSave;
+    if (tax_rate === undefined || tax_rate === null || tax_rate === '') {
+        taxRateToSave = 0; // ✅ Changé de 20 à 0 par défaut
+    } else {
+        taxRateToSave = parseFloat(tax_rate);
+        if (isNaN(taxRateToSave)) {
+            return res.status(400).json({ error: 'Le taux de TVA doit être un nombre valide.' });
+        }
+        // ✅ On conserve 0 si c'est 0
+    }
+
+    try {
+        await pool.query(
+            `UPDATE settings SET 
+                company_name = ?, company_subtitle = ?, company_activity = ?, company_rc = ?, 
+                company_address = ?, company_phone = ?, company_phone2 = ?, company_email = ?, 
+                logo_url = ?, tax_rate = ?, low_stock_alert = ?, currency = ? 
+             WHERE user_id = ?`,
+            [
+                company_name, company_subtitle, company_activity, company_rc,
+                company_address, company_phone, company_phone2, company_email,
+                logo_url, taxRateToSave,
+                parseInt(low_stock_alert) || 5,
+                currency || 'FCFA',
+                req.user.id
+            ]
+        );
+        console.log(`✅ Taux de TVA mis à jour : ${taxRateToSave}%`);
+        res.json({ message: 'Paramètres mis à jour avec succès' });
+    } catch (err) {
+        console.error('❌ Erreur PUT /settings:', err);
+        res.status(500).json({ error: 'Erreur lors de la mise à jour des paramètres.' });
+    }
+});
 // ========== ROUTE HISTORIQUE ==========
 app.get('/api/history', authenticate, async (req, res) => {
     const [sales] = await pool.query(`SELECT 'sale' as type, s.id, s.final_amount as amount, s.sale_date as date, c.name as client_name, s.status FROM sales s LEFT JOIN clients c ON s.client_id = c.id WHERE s.user_id = ? ORDER BY s.sale_date DESC LIMIT 50`, [req.user.id]);
@@ -881,9 +1053,16 @@ app.post('/api/proforma', authenticate, async (req, res) => {
             item.total_price = item.quantity * item.unit_price;
             subtotal += item.total_price;
         }
-        const [settings] = await connection.query('SELECT tax_rate FROM settings WHERE user_id = ?', [req.user.id]);
-        const tax_rate = settings[0]?.tax_rate || 20;
-        const tax = subtotal * (tax_rate / 100);
+        // Dans la route POST /api/sales, trouvez la partie du calcul de la TVA :
+const [settings] = await connection.query(
+    'SELECT tax_rate FROM settings WHERE user_id = ?', 
+    [req.user.id]
+);
+// ✅ Utiliser 0 si null ou undefined
+const tax_rate = settings[0]?.tax_rate !== null && settings[0]?.tax_rate !== undefined 
+    ? parseFloat(settings[0].tax_rate) 
+    : 0;  // ✅ Changé de 20 à 0
+const tax = subtotal * (tax_rate / 100);
         const remise_valeur = (remise_pct || 0) / 100 * subtotal;
         const total_apres_remise = subtotal - remise_valeur;
         const total = total_apres_remise + tax - (acompte || 0);
@@ -1070,7 +1249,7 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         doc.font('Helvetica-Bold');
         doc.text(`Sous-total : ${sale.total_amount.toLocaleString()} ${company.currency}`, 350, rowY);
         rowY += 15;
-        doc.text(`TVA (20%) : ${sale.tax.toLocaleString()} ${company.currency}`, 350, rowY);
+        doc.text(`TVA (${company.tax_rate || 20}%) : ${sale.tax.toLocaleString()} ${company.currency}`, 350, rowY);
         rowY += 15;
         if (sale.remise_pct && sale.remise_pct > 0) {
             const remise_valeur = (sale.remise_pct / 100) * sale.total_amount;
@@ -1137,7 +1316,7 @@ app.get('/api/sales/:id/order', authenticate, async (req, res) => {
         doc.font('Helvetica-Bold');
         doc.text(`Sous-total : ${sale.total_amount.toLocaleString()} ${company.currency}`, 350, rowY);
         rowY += 15;
-        doc.text(`TVA (20%) : ${sale.tax.toLocaleString()} ${company.currency}`, 350, rowY);
+        doc.text(`TVA (${company.tax_rate || 20}%) : ${sale.tax.toLocaleString()} ${company.currency}`, 350, rowY);
         rowY += 15;
         if (sale.remise_pct && sale.remise_pct > 0) {
             const remise_valeur = (sale.remise_pct / 100) * sale.total_amount;
@@ -1209,8 +1388,620 @@ app.get('/api/sales/:id/delivery', authenticate, async (req, res) => {
         res.status(500).json({ error: 'Erreur génération bordereau de livraison' });
     }
 });
+// ========== ROUTES SOUS-COMPTES ==========
 
-// ========== SERVEUR FRONTEND ==========
+// ✅ GET : Récupérer tous les sous-comptes d'un parent
+app.get('/api/sub-users', authenticate, async (req, res) => {
+    try {
+        const [rows] = await pool.query(
+            `SELECT id, name, email, is_active, created_at 
+             FROM sub_users 
+             WHERE parent_id = ? 
+             ORDER BY created_at DESC`,
+            [req.user.id]
+        );
+        res.json(rows);
+    } catch (err) {
+        console.error('❌ Erreur GET /sub-users:', err);
+        res.status(500).json({ error: 'Erreur lors du chargement des sous-comptes' });
+    }
+});
+
+// ✅ GET : Récupérer les permissions d'un sous-compte
+app.get('/api/sub-users/:id/permissions', authenticate, async (req, res) => {
+    try {
+        // Vérifier que le sous-compte appartient bien au parent
+        const [check] = await pool.query(
+            'SELECT id FROM sub_users WHERE id = ? AND parent_id = ?',
+            [req.params.id, req.user.id]
+        );
+        if (check.length === 0) {
+            return res.status(403).json({ error: 'Accès non autorisé' });
+        }
+
+        const [rows] = await pool.query(
+            `SELECT p.id, p.name, p.description, 
+                    CASE WHEN sp.id IS NOT NULL THEN 1 ELSE 0 END as has_permission
+             FROM permissions p
+             LEFT JOIN sub_user_permissions sp ON p.id = sp.permission_id AND sp.sub_user_id = ?
+             ORDER BY p.name`,
+            [req.params.id]
+        );
+        res.json(rows);
+    } catch (err) {
+        console.error('❌ Erreur GET /sub-users/permissions:', err);
+        res.status(500).json({ error: 'Erreur lors du chargement des permissions' });
+    }
+});
+
+// ✅ POST : Créer un sous-compte
+app.post('/api/sub-users', authenticate, async (req, res) => {
+    const { name, email, password, permissions = [] } = req.body;
+    
+    if (!name || !email || !password || password.length < 6) {
+        return res.status(400).json({ error: 'Tous les champs sont requis (mot de passe min 6)' });
+    }
+
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        // Vérifier si l'email existe déjà
+        const [existing] = await connection.query(
+            'SELECT id FROM users WHERE email = ? UNION SELECT id FROM sub_users WHERE email = ?',
+            [email, email]
+        );
+        if (existing.length > 0) {
+            return res.status(400).json({ error: 'Cet email est déjà utilisé' });
+        }
+
+        const hashedPassword = await bcrypt.hash(password, 10);
+        
+        const [result] = await connection.query(
+            `INSERT INTO sub_users (parent_id, name, email, password_hash) 
+             VALUES (?, ?, ?, ?)`,
+            [req.user.id, name, email, hashedPassword]
+        );
+        
+        const subUserId = result.insertId;
+
+        // Ajouter les permissions
+        if (permissions.length > 0) {
+            const values = permissions.map(p => [subUserId, p]);
+            await connection.query(
+                'INSERT INTO sub_user_permissions (sub_user_id, permission_id) VALUES ?',
+                [values]
+            );
+        }
+
+        // Journal d'audit
+        await connection.query(
+            `INSERT INTO sub_user_audit (sub_user_id, action, details) 
+             VALUES (?, 'created', ?)`,
+            [subUserId, JSON.stringify({ name, email, permissions })]
+        );
+
+        await connection.commit();
+        res.status(201).json({ 
+            id: subUserId, 
+            message: 'Sous-compte créé avec succès' 
+        });
+    } catch (err) {
+        await connection.rollback();
+        console.error('❌ Erreur POST /sub-users:', err);
+        res.status(500).json({ error: 'Erreur lors de la création du sous-compte' });
+    } finally {
+        connection.release();
+    }
+});
+
+// ✅ PUT : Mettre à jour un sous-compte
+app.put('/api/sub-users/:id', authenticate, async (req, res) => {
+    const { name, email, is_active, permissions = [] } = req.body;
+    const subUserId = req.params.id;
+
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        // Vérifier que le sous-compte appartient au parent
+        const [check] = await connection.query(
+            'SELECT id FROM sub_users WHERE id = ? AND parent_id = ?',
+            [subUserId, req.user.id]
+        );
+        if (check.length === 0) {
+            return res.status(403).json({ error: 'Accès non autorisé' });
+        }
+
+        // Mettre à jour les infos
+        await connection.query(
+            `UPDATE sub_users SET name = ?, email = ?, is_active = ? 
+             WHERE id = ? AND parent_id = ?`,
+            [name, email, is_active === undefined ? true : is_active, subUserId, req.user.id]
+        );
+
+        // Mettre à jour les permissions
+        await connection.query(
+            'DELETE FROM sub_user_permissions WHERE sub_user_id = ?',
+            [subUserId]
+        );
+        
+        if (permissions.length > 0) {
+            const values = permissions.map(p => [subUserId, p]);
+            await connection.query(
+                'INSERT INTO sub_user_permissions (sub_user_id, permission_id) VALUES ?',
+                [values]
+            );
+        }
+
+        // Journal d'audit
+        await connection.query(
+            `INSERT INTO sub_user_audit (sub_user_id, action, details) 
+             VALUES (?, 'updated', ?)`,
+            [subUserId, JSON.stringify({ name, email, is_active, permissions })]
+        );
+
+        await connection.commit();
+        res.json({ message: 'Sous-compte mis à jour avec succès' });
+    } catch (err) {
+        await connection.rollback();
+        console.error('❌ Erreur PUT /sub-users:', err);
+        res.status(500).json({ error: 'Erreur lors de la mise à jour du sous-compte' });
+    } finally {
+        connection.release();
+    }
+});
+
+// ✅ DELETE : Supprimer un sous-compte
+app.delete('/api/sub-users/:id', authenticate, async (req, res) => {
+    const subUserId = req.params.id;
+
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        const [check] = await connection.query(
+            'SELECT id, name, email FROM sub_users WHERE id = ? AND parent_id = ?',
+            [subUserId, req.user.id]
+        );
+        if (check.length === 0) {
+            return res.status(403).json({ error: 'Accès non autorisé' });
+        }
+
+        // Journal d'audit avant suppression
+        await connection.query(
+            `INSERT INTO sub_user_audit (sub_user_id, action, details) 
+             VALUES (?, 'deleted', ?)`,
+            [subUserId, JSON.stringify(check[0])]
+        );
+
+        await connection.query(
+            'DELETE FROM sub_users WHERE id = ? AND parent_id = ?',
+            [subUserId, req.user.id]
+        );
+
+        await connection.commit();
+        res.json({ message: 'Sous-compte supprimé avec succès' });
+    } catch (err) {
+        await connection.rollback();
+        console.error('❌ Erreur DELETE /sub-users:', err);
+        res.status(500).json({ error: 'Erreur lors de la suppression du sous-compte' });
+    } finally {
+        connection.release();
+    }
+});
+
+// ✅ POST : Login pour sous-compte
+app.post('/api/sub-login', async (req, res) => {
+    const { email, password } = req.body;
+    try {
+        const [rows] = await pool.query(
+            `SELECT su.*, u.id as parent_user_id, u.name as parent_name 
+             FROM sub_users su 
+             JOIN users u ON su.parent_id = u.id 
+             WHERE su.email = ? AND su.is_active = 1`,
+            [email]
+        );
+        
+        if (rows.length === 0) {
+            return res.status(401).json({ error: 'Identifiants invalides ou compte désactivé' });
+        }
+        
+        const subUser = rows[0];
+        const valid = await bcrypt.compare(password, subUser.password_hash);
+        if (!valid) {
+            return res.status(401).json({ error: 'Identifiants invalides' });
+        }
+
+        // Récupérer les permissions
+        const [permissions] = await pool.query(
+            `SELECT p.name 
+             FROM sub_user_permissions sp 
+             JOIN permissions p ON sp.permission_id = p.id 
+             WHERE sp.sub_user_id = ?`,
+            [subUser.id]
+        );
+
+        // Journal d'audit
+        await pool.query(
+            `INSERT INTO sub_user_audit (sub_user_id, action, details, ip_address) 
+             VALUES (?, 'login', ?, ?)`,
+            [subUser.id, JSON.stringify({ login: true }), req.ip]
+        );
+
+        const token = jwt.sign({ 
+            userId: subUser.parent_user_id, 
+            subUserId: subUser.id,
+            isSubUser: true,
+            email: subUser.email,
+            permissions: permissions.map(p => p.name)
+        }, JWT_SECRET, { expiresIn: '7d' });
+
+        res.json({ 
+            token, 
+            user: {
+                id: subUser.id,
+                name: subUser.name,
+                email: subUser.email,
+                role: 'sub_user',
+                parent_name: subUser.parent_name,
+                permissions: permissions.map(p => p.name)
+            }
+        });
+    } catch (err) {
+        console.error('❌ Erreur sub-login:', err);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// ✅ GET : Récupérer les permissions disponibles
+app.get('/api/permissions', authenticate, async (req, res) => {
+    try {
+        const [rows] = await pool.query(
+            'SELECT id, name, description FROM permissions ORDER BY name'
+        );
+        res.json(rows);
+    } catch (err) {
+        console.error('❌ Erreur GET /permissions:', err);
+        res.status(500).json({ error: 'Erreur lors du chargement des permissions' });
+    }
+});
+// ========== MIDDLEWARE DE VÉRIFICATION DES PERMISSIONS ==========
+const checkPermission = (permissionName) => {
+    return async (req, res, next) => {
+        try {
+            // Si c'est un admin (parent), on autorise tout
+            if (req.user && req.user.role === 'admin') {
+                return next();
+            }
+
+            // Si c'est un sous-utilisateur
+            const subUserId = req.user?.subUserId;
+            if (!subUserId) {
+                return res.status(403).json({ error: 'Accès non autorisé' });
+            }
+
+            const [rows] = await pool.query(
+                `SELECT 1 FROM sub_user_permissions sp 
+                 JOIN permissions p ON sp.permission_id = p.id 
+                 WHERE sp.sub_user_id = ? AND p.name = ?`,
+                [subUserId, permissionName]
+            );
+
+            if (rows.length === 0) {
+                return res.status(403).json({ error: `Permission manquante: ${permissionName}` });
+            }
+
+            next();
+        } catch (err) {
+            console.error('❌ Erreur checkPermission:', err);
+            res.status(500).json({ error: 'Erreur serveur' });
+        }
+    };
+};
+// ========== ROUTE FICHE CLIENT DÉTAILLÉE ==========
+app.get('/api/clients/:id/details', authenticate, async (req, res) => {
+    const clientId = req.params.id;
+    
+    try {
+        // 1. Informations du client
+        const [client] = await pool.query(
+            'SELECT * FROM clients WHERE id = ? AND user_id = ?',
+            [clientId, req.user.id]
+        );
+        if (client.length === 0) {
+            return res.status(404).json({ error: 'Client non trouvé' });
+        }
+        
+        // 2. Historique des ventes
+        const [sales] = await pool.query(
+            `SELECT s.*, 
+                    (SELECT COUNT(*) FROM payments WHERE sale_id = s.id) as payment_count,
+                    (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE sale_id = s.id) as total_paid
+             FROM sales s 
+             WHERE s.client_id = ? AND s.user_id = ?
+             ORDER BY s.sale_date DESC LIMIT 50`,
+            [clientId, req.user.id]
+        );
+        
+        // 3. Statistiques
+        const [stats] = await pool.query(
+            `SELECT 
+                COUNT(*) as total_orders,
+                COALESCE(SUM(final_amount), 0) as total_spent,
+                COALESCE(AVG(final_amount), 0) as avg_order,
+                COALESCE(SUM(CASE WHEN status = 'pending' THEN final_amount - acompte END), 0) as total_debt,
+                COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending_orders
+             FROM sales 
+             WHERE client_id = ? AND user_id = ?`,
+            [clientId, req.user.id]
+        );
+        
+        // 4. Dernière commande
+        const [lastOrder] = await pool.query(
+            `SELECT * FROM sales 
+             WHERE client_id = ? AND user_id = ? 
+             ORDER BY sale_date DESC LIMIT 1`,
+            [clientId, req.user.id]
+        );
+        
+        res.json({
+            client: client[0],
+            stats: stats[0],
+            sales: sales,
+            lastOrder: lastOrder[0] || null
+        });
+    } catch (err) {
+        console.error('❌ Erreur client details:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ========== ROUTE AJOUTER UN CRÉDIT CLIENT ==========
+app.post('/api/clients/:id/credit', authenticate, async (req, res) => {
+    const clientId = req.params.id;
+    const { amount, description } = req.body;
+    
+    try {
+        await pool.query(
+            `INSERT INTO cash_register (user_id, transaction_type, amount, description, reference_id) 
+             VALUES (?, 'deposit', ?, ?, ?)`,
+            [req.user.id, amount, description || `Crédit client #${clientId}`, clientId]
+        );
+        res.json({ message: 'Crédit ajouté avec succès' });
+    } catch (err) {
+        console.error('❌ Erreur ajout crédit:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+// ========== ROUTES OPÉRATIONS CLIENT ==========
+
+// ✅ GET : Récupérer le solde et les opérations d'un client
+app.get('/api/clients/:id/operations', authenticate, async (req, res) => {
+    const clientId = req.params.id;
+    
+    try {
+        // Vérifier que le client appartient à l'utilisateur
+        const [clientCheck] = await pool.query(
+            'SELECT id FROM clients WHERE id = ? AND user_id = ?',
+            [clientId, req.user.id]
+        );
+        if (clientCheck.length === 0) {
+            return res.status(404).json({ error: 'Client non trouvé' });
+        }
+
+        // Récupérer les opérations
+        const [operations] = await pool.query(
+            `SELECT * FROM cash_register 
+             WHERE user_id = ? AND reference_id = ? 
+               AND transaction_type IN ('deposit', 'withdrawal', 'payment')
+             ORDER BY created_at DESC`,
+            [req.user.id, clientId]
+        );
+
+        // Calculer le solde
+        const [balance] = await pool.query(
+            `SELECT 
+                COALESCE(SUM(CASE WHEN transaction_type = 'deposit' OR transaction_type = 'payment' THEN amount ELSE -amount END), 0) as balance
+             FROM cash_register 
+             WHERE user_id = ? AND reference_id = ? 
+               AND transaction_type IN ('deposit', 'withdrawal', 'payment')`,
+            [req.user.id, clientId]
+        );
+
+        // Dette du client (factures impayées)
+        const [debt] = await pool.query(
+            `SELECT COALESCE(SUM(final_amount), 0) as total_debt 
+             FROM sales 
+             WHERE client_id = ? AND status = 'pending'`,
+            [clientId]
+        );
+
+        res.json({
+            operations: operations,
+            balance: balance[0].balance || 0,
+            debt: debt[0].total_debt || 0
+        });
+    } catch (err) {
+        console.error('❌ Erreur GET /clients/:id/operations:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ✅ POST : Ajouter un dépôt client
+app.post('/api/clients/:id/deposit', authenticate, async (req, res) => {
+    const clientId = req.params.id;
+    const { amount, description, payment_method = 'cash' } = req.body;
+
+    if (!amount || amount <= 0) {
+        return res.status(400).json({ error: 'Montant invalide' });
+    }
+
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        // Vérifier que le client existe
+        const [client] = await connection.query(
+            'SELECT id, name FROM clients WHERE id = ? AND user_id = ?',
+            [clientId, req.user.id]
+        );
+        if (client.length === 0) {
+            return res.status(404).json({ error: 'Client non trouvé' });
+        }
+
+        // Ajouter l'opération dans cash_register
+        await connection.query(
+            `INSERT INTO cash_register 
+             (user_id, transaction_type, amount, description, reference_id) 
+             VALUES (?, 'deposit', ?, ?, ?)`,
+            [req.user.id, amount, description || `Dépôt de ${client[0].name}`, clientId]
+        );
+
+        await connection.commit();
+        res.status(201).json({ 
+            message: '✅ Dépôt enregistré',
+            client: client[0].name,
+            amount: amount
+        });
+    } catch (err) {
+        await connection.rollback();
+        console.error('❌ Erreur POST /clients/:id/deposit:', err);
+        res.status(500).json({ error: err.message });
+    } finally {
+        connection.release();
+    }
+});
+
+// ✅ POST : Retrait client (débit)
+app.post('/api/clients/:id/withdrawal', authenticate, async (req, res) => {
+    const clientId = req.params.id;
+    const { amount, description } = req.body;
+
+    if (!amount || amount <= 0) {
+        return res.status(400).json({ error: 'Montant invalide' });
+    }
+
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        // Vérifier que le client existe
+        const [client] = await connection.query(
+            'SELECT id, name FROM clients WHERE id = ? AND user_id = ?',
+            [clientId, req.user.id]
+        );
+        if (client.length === 0) {
+            return res.status(404).json({ error: 'Client non trouvé' });
+        }
+
+        // Vérifier le solde
+        const [balance] = await connection.query(
+            `SELECT COALESCE(SUM(CASE WHEN transaction_type = 'deposit' OR transaction_type = 'payment' THEN amount ELSE -amount END), 0) as balance
+             FROM cash_register 
+             WHERE user_id = ? AND reference_id = ? 
+               AND transaction_type IN ('deposit', 'withdrawal', 'payment')`,
+            [req.user.id, clientId]
+        );
+
+        if (balance[0].balance < amount) {
+            return res.status(400).json({ 
+                error: `Solde insuffisant (${formatNumber(balance[0].balance)} FCFA disponible)` 
+            });
+        }
+
+        // Ajouter le retrait
+        await connection.query(
+            `INSERT INTO cash_register 
+             (user_id, transaction_type, amount, description, reference_id) 
+             VALUES (?, 'withdrawal', ?, ?, ?)`,
+            [req.user.id, amount, description || `Retrait de ${client[0].name}`, clientId]
+        );
+
+        await connection.commit();
+        res.status(201).json({ 
+            message: '✅ Retrait enregistré',
+            client: client[0].name,
+            amount: amount,
+            new_balance: balance[0].balance - amount
+        });
+    } catch (err) {
+        await connection.rollback();
+        console.error('❌ Erreur POST /clients/:id/withdrawal:', err);
+        res.status(500).json({ error: err.message });
+    } finally {
+        connection.release();
+    }
+});
+
+// ✅ POST : Payer une facture avec le compte client
+app.post('/api/clients/:id/pay-invoice', authenticate, async (req, res) => {
+    const clientId = req.params.id;
+    const { sale_id } = req.body;
+
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        // Vérifier la vente
+        const [sale] = await connection.query(
+            'SELECT * FROM sales WHERE id = ? AND client_id = ? AND status = "pending"',
+            [sale_id, clientId]
+        );
+        if (sale.length === 0) {
+            return res.status(404).json({ error: 'Facture non trouvée ou déjà payée' });
+        }
+
+        const amount = sale[0].final_amount;
+
+        // Vérifier le solde client
+        const [balance] = await connection.query(
+            `SELECT COALESCE(SUM(CASE WHEN transaction_type = 'deposit' OR transaction_type = 'payment' THEN amount ELSE -amount END), 0) as balance
+             FROM cash_register 
+             WHERE user_id = ? AND reference_id = ? 
+               AND transaction_type IN ('deposit', 'withdrawal', 'payment')`,
+            [req.user.id, clientId]
+        );
+
+        if (balance[0].balance < amount) {
+            return res.status(400).json({ 
+                error: `Solde insuffisant (${formatNumber(balance[0].balance)} FCFA disponible)` 
+            });
+        }
+
+        // Enregistrer le paiement
+        await connection.query(
+            'INSERT INTO payments (sale_id, amount, payment_method) VALUES (?, ?, "client_account")',
+            [sale_id, amount]
+        );
+
+        // Mettre à jour la vente
+        await connection.query(
+            'UPDATE sales SET status = "completed" WHERE id = ?',
+            [sale_id]
+        );
+
+        // Ajouter la transaction
+        await connection.query(
+            `INSERT INTO cash_register 
+             (user_id, transaction_type, amount, description, reference_id) 
+             VALUES (?, 'payment', ?, ?, ?)`,
+            [req.user.id, amount, `Paiement facture #${sale_id}`, clientId]
+        );
+
+        await connection.commit();
+        res.json({ 
+            message: '✅ Facture payée avec le compte client',
+            remaining_balance: balance[0].balance - amount
+        });
+    } catch (err) {
+        await connection.rollback();
+        console.error('❌ Erreur POST /clients/:id/pay-invoice:', err);
+        res.status(500).json({ error: err.message });
+    } finally {
+        connection.release();
+    }
+});
 app.use((req, res, next) => {
     if (req.path.startsWith('/api')) return next();
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
