@@ -357,12 +357,23 @@ function formatNumber(number) {
     const num = parseFloat(number);
     return num.toLocaleString('fr-FR').replace(/\s/g, ' ').replace(/,/g, ' ');
 }
-
 async function apiCall(endpoint, method = 'GET', body = null) {
     try {
-        const headers = { 'Content-Type': 'application/json' };
+        const headers = { 
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+        };
         if (token) headers['Authorization'] = `Bearer ${token}`;
-        const res = await fetch(`/api${endpoint}`, { 
+        
+        // ✅ Ajouter un timestamp pour éviter le cache
+        let url = `/api${endpoint}`;
+        if (method === 'GET' && !url.includes('_t=')) {
+            url += (url.includes('?') ? '&' : '?') + '_t=' + Date.now();
+        }
+        
+        const res = await fetch(url, { 
             method, 
             headers, 
             body: body ? JSON.stringify(body) : undefined 
@@ -379,7 +390,6 @@ async function apiCall(endpoint, method = 'GET', body = null) {
         throw err;
     }
 }
-
 // ========================================================================
 // AUTH
 // ========================================================================
@@ -441,7 +451,56 @@ function showApp() {
         });
     });
 }
+// ===== SYNCHRONISATION ENTRE APPAREILS =====
+let syncChannel = null;
+try {
+    syncChannel = new BroadcastChannel('gestpro-sync');
+    syncChannel.onmessage = function(event) {
+        if (event.data.action === 'refresh') {
+            const currentPage = document.querySelector('.sidebar .nav-link.active')?.dataset?.page || 'dashboard';
+            loadPage(currentPage);
+        }
+    };
+} catch(e) {}
 
+function notifyOtherDevices() {
+    if (syncChannel) {
+        syncChannel.postMessage({ action: 'refresh', timestamp: Date.now() });
+    }
+}
+
+// Recharger quand l'onglet revient
+document.addEventListener('visibilitychange', function() {
+    if (!document.hidden) {
+        const currentPage = document.querySelector('.sidebar .nav-link.active')?.dataset?.page || 'dashboard';
+        loadPage(currentPage);
+    }
+});
+
+// Fonction pour notifier les autres appareils
+function notifyOtherDevices(action = 'refresh', data = {}) {
+    if (syncChannel) {
+        syncChannel.postMessage({ 
+            action: action, 
+            timestamp: Date.now(),
+            user: currentUser?.name,
+            ...data
+        });
+        console.log('📡 Notification envoyée aux autres appareils');
+    }
+}
+
+// ✅ Recharger quand l'utilisateur revient sur l'onglet
+document.addEventListener('visibilitychange', function() {
+    if (!document.hidden) {
+        console.log('👁️ Onglet visible, rechargement des données...');
+        const currentPage = document.querySelector('.sidebar .nav-link.active')?.dataset?.page || 'dashboard';
+        // Ne recharger que si on est sur une page qui affiche des données
+        if (['dashboard', 'products', 'sales', 'invoices', 'clients', 'inventory', 'reports'].includes(currentPage)) {
+            loadPage(currentPage);
+        }
+    }
+});
 async function loadPage(page) {
     const titles = {
         dashboard: 'Tableau de bord', products: 'Produits', sales: 'Ventes',
@@ -908,7 +967,41 @@ window.removeImage = function() {
     document.getElementById('imagePreviewContainer').style.display = 'none';
     document.getElementById('prodImage').value = '';
 };
-
+// ===== DÉSACTIVATION DU CACHE =====
+async function apiCall(endpoint, method = 'GET', body = null) {
+    try {
+        const headers = { 
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+        };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        
+        // Ajouter un timestamp pour éviter le cache
+        let url = `/api${endpoint}`;
+        if (method === 'GET') {
+            const separator = url.includes('?') ? '&' : '?';
+            url += separator + '_t=' + Date.now();
+        }
+        
+        const res = await fetch(url, { 
+            method, 
+            headers, 
+            body: body ? JSON.stringify(body) : undefined 
+        });
+        if (res.status === 401) { 
+            logout(); 
+            throw new Error('Session expirée'); 
+        }
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Erreur serveur');
+        return data;
+    } catch(err) {
+        console.error('API Error:', err);
+        throw err;
+    }
+}
 async function renderProducts() {
     try {
         let categories = [];
@@ -985,31 +1078,33 @@ async function renderProducts() {
         const catSelect = document.getElementById('prodCategorySelect');
         if (catName && catSelect) { catName.oninput = () => catSelect.value = ''; catSelect.onchange = () => { if (catSelect.value) catName.value = ''; }; }
 
-        window.searchProducts = async (lowStock = false) => {
-            const q = document.getElementById('searchProduct')?.value || '';
-            let url = `/products/search?${q ? 'q='+encodeURIComponent(q)+'&' : ''}${lowStock ? 'lowStock=true' : ''}`;
-            try {
-                const prods = await apiCall(url);
-                const tbody = document.getElementById('productsTable');
-                if (!tbody) return;
-                if (!prods.length) { tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted">Aucun produit trouvé</td></tr>'; return; }
-                tbody.innerHTML = prods.map(p => `
-                    <tr class="${p.quantity <= p.reorder_level ? 'table-warning' : ''}">
-                        <td>${p.barcode || '-'}</td>
-                        <td><strong>${p.name}</strong></td>
-                        <td>${p.category_name || '-'}</td>
-                        <td>${p.quantity} ${p.unit}</td>
-                        <td>${formatNumber(p.sell_price)} FCFA</td>
-                        <td>${p.wholesale_price > 0 ? formatNumber(p.wholesale_price) + ' FCFA (x'+p.wholesale_quantity+')' : '-'}</td>
-                        <td>
-                            <button class="btn btn-sm btn-warning me-1" onclick="editProduct(${p.id})"><i class="bi bi-pencil"></i></button>
-                            <button class="btn btn-sm btn-danger" onclick="deleteProduct(${p.id})"><i class="bi bi-trash"></i></button>
-                        </td>
-                    </tr>
-                `).join('');
-            } catch(err) { console.error(err); const tbody = document.getElementById('productsTable'); if(tbody) tbody.innerHTML = `<tr><td colspan="7" class="text-danger">Erreur : ${err.message}</td></tr>`; }
-        };
-
+       window.searchProducts = async (lowStock = false) => {
+    const q = document.getElementById('searchProduct')?.value || '';
+    // ✅ Ajout du timestamp pour éviter le cache
+    let url = `/products/search?${q ? 'q='+encodeURIComponent(q)+'&' : ''}${lowStock ? 'lowStock=true&' : ''}_t=` + Date.now();
+    try {
+        const prods = await apiCall(url);
+        const tbody = document.getElementById('productsTable');
+        if (!tbody) return;
+        if (!prods.length) { 
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted">Aucun produit trouvé</td></tr>'; 
+            return; 
+        }
+        tbody.innerHTML = prods.map(p => `
+            <tr class="${p.quantity <= p.reorder_level ? 'table-warning' : ''}">
+                <td>${p.barcode || '-'}</td>
+                <td><strong>${p.name}</strong></td>
+                <td>${p.category_name || '-'}</td>
+                <td>${p.quantity} ${p.unit}</td>
+                <td>${formatNumber(p.sell_price)} FCFA</td>
+                <td>
+                    <button class="btn btn-sm btn-warning me-1" onclick="editProduct(${p.id})"><i class="bi bi-pencil"></i></button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteProduct(${p.id})"><i class="bi bi-trash"></i></button>
+                </td>
+            </tr>
+        `).join('');
+    } catch(err) { console.error(err); const tbody = document.getElementById('productsTable'); if(tbody) tbody.innerHTML = `<tr><td colspan="6" class="text-danger">Erreur : ${err.message}</td></tr>`; }
+};
         window.showProductModal = function() {
             document.getElementById('prodId').value = '';
             document.getElementById('prodName').value = '';
@@ -1029,43 +1124,88 @@ async function renderProducts() {
             new bootstrap.Modal(document.getElementById('productModal')).show();
         };
 
-        window.editProduct = async function(id) {
-            try {
-                const products = await apiCall('/products');
-                const p = products.find(x => x.id == id);
-                if (!p) return alert('Produit non trouvé');
-                document.getElementById('prodId').value = p.id;
-                document.getElementById('prodName').value = p.name;
-                document.getElementById('prodQuantity').value = p.quantity;
-                document.getElementById('prodBarcode').value = p.barcode || '';
-                document.getElementById('prodBuyPrice').value = p.buy_price;
-                document.getElementById('prodSellPrice').value = p.sell_price;
-                document.getElementById('prodWholesalePrice').value = p.wholesale_price || 0;
-                document.getElementById('prodWholesaleQty').value = p.wholesale_quantity || 5;
-                document.getElementById('prodUnit').value = p.unit;
-                document.getElementById('prodCategoryName').value = '';
-                document.getElementById('prodCategorySelect').value = p.category_id || '';
-                if (p.image_url) {
-                    selectedImageData = p.image_url;
-                    document.getElementById('imagePreview').src = p.image_url;
-                    document.getElementById('imagePreviewContainer').style.display = 'block';
-                } else {
-                    document.getElementById('imagePreview').src = '';
-                    document.getElementById('imagePreviewContainer').style.display = 'none';
-                    selectedImageData = null;
-                }
-                new bootstrap.Modal(document.getElementById('productModal')).show();
-            } catch(e) {
-                alert('Erreur chargement: ' + e.message);
-            }
-        };
-
-        window.deleteProduct = async (id) => {
-            if(confirm('Supprimer définitivement ce produit ?')) {
-                await apiCall(`/products/${id}`, 'DELETE');
-                searchProducts();
-            }
-        };
+       // ===== MODIFIER PRODUIT =====
+window.editProduct = async function(id) {
+    const numericId = parseInt(id);
+    if (isNaN(numericId)) {
+        alert('❌ ID de produit invalide');
+        return;
+    }
+    
+    try {
+        // ✅ Forcer le rechargement des produits avec paramètre anti-cache
+        const products = await apiCall('/products?_t=' + Date.now());
+        console.log('🔍 Recherche du produit ID:', numericId);
+        console.log('📦 Produits disponibles:', products.map(p => ({id: p.id, name: p.name})));
+        
+        // ✅ Comparaison stricte en nombre
+        const p = products.find(x => parseInt(x.id) === numericId);
+        if (!p) {
+            alert(`❌ Produit non trouvé (ID: ${numericId})`);
+            console.error('❌ Produit introuvable. Liste des IDs:', products.map(x => x.id));
+            return;
+        }
+        
+        console.log('✅ Produit trouvé:', p);
+        
+        // Remplir le formulaire
+        document.getElementById('prodId').value = p.id;
+        document.getElementById('prodName').value = p.name;
+        document.getElementById('prodQuantity').value = p.quantity;
+        document.getElementById('prodBarcode').value = p.barcode || '';
+        document.getElementById('prodBuyPrice').value = p.buy_price;
+        document.getElementById('prodSellPrice').value = p.sell_price;
+        document.getElementById('prodWholesalePrice').value = p.wholesale_price || 0;
+        document.getElementById('prodWholesaleQty').value = p.wholesale_quantity || 5;
+        document.getElementById('prodUnit').value = p.unit;
+        document.getElementById('prodCategoryName').value = '';
+        document.getElementById('prodCategorySelect').value = p.category_id || '';
+        
+        if (p.image_url) {
+            selectedImageData = p.image_url;
+            document.getElementById('imagePreview').src = p.image_url;
+            document.getElementById('imagePreviewContainer').style.display = 'block';
+        } else {
+            document.getElementById('imagePreview').src = '';
+            document.getElementById('imagePreviewContainer').style.display = 'none';
+            selectedImageData = null;
+        }
+        
+        new bootstrap.Modal(document.getElementById('productModal')).show();
+        
+    } catch(e) {
+        alert('❌ Erreur chargement: ' + e.message);
+        console.error(e);
+    }
+};
+// ===== SUPPRIMER PRODUIT =====
+window.deleteProduct = async (id) => {
+    const numericId = parseInt(id);
+    if (isNaN(numericId)) {
+        alert('ID invalide');
+        return;
+    }
+    
+    // ✅ Vérifier d'abord que le produit existe
+    try {
+        const products = await apiCall('/products?_t=' + Date.now());
+        const product = products.find(p => parseInt(p.id) === numericId);
+        if (!product) {
+            alert('❌ Ce produit n\'existe plus. Rafraîchissez la page.');
+            searchProducts();
+            return;
+        }
+        
+        if (!confirm(`Supprimer définitivement "${product.name}" ?`)) return;
+        
+        await apiCall(`/products/${numericId}`, 'DELETE');
+        alert('✅ Produit supprimé');
+        searchProducts();
+        renderDashboard();
+    } catch(err) {
+        alert('❌ Erreur: ' + err.message);
+    }
+};
 
         const saveBtn = document.getElementById('saveProductBtn');
         if(saveBtn) {
@@ -1111,20 +1251,24 @@ async function renderProducts() {
                     image_url: selectedImageData || null
                 };
 
-                try {
-                    if (id) {
-                        await apiCall(`/products/${id}`, 'PUT', productData);
-                        alert('✅ Produit modifié avec succès');
-                    } else {
-                        await apiCall('/products', 'POST', productData);
-                        alert('✅ Produit créé avec succès');
-                    }
-                    bootstrap.Modal.getInstance(document.getElementById('productModal')).hide();
-                    searchProducts();
-                    if (typeof renderDashboard === 'function') renderDashboard();
-                } catch(err) {
-                    alert('❌ Erreur: ' + err.message);
-                }
+                
+               // Dans saveProductBtn (après création ou modification)
+// Dans la fonction du bouton saveProductBtn, après création/modification :
+try {
+    if (id) {
+        await apiCall(`/products/${id}`, 'PUT', productData);
+        alert('✅ Produit modifié avec succès');
+    } else {
+        await apiCall('/products', 'POST', productData);
+        alert('✅ Produit créé avec succès');
+    }
+    bootstrap.Modal.getInstance(document.getElementById('productModal')).hide();
+    searchProducts();
+    notifyOtherDevices();  // ← Ajouter cette ligne
+    if (typeof renderDashboard === 'function') renderDashboard();
+} catch(err) {
+    alert('❌ Erreur: ' + err.message);
+}
             });
         }
         await searchProducts();
@@ -1135,7 +1279,16 @@ async function renderProducts() {
 // VENTES - AVEC PRIX EN GROS ET PAIEMENT DES FACTURES
 // ========================================================================
 async function renderSales() {
-    let allProducts = await apiCall('/products');
+    // ✅ FORCER LE RECHARGEMENT COMPLET
+    let allProducts = await apiCall('/products?_t=' + Date.now());
+    console.log('📦 Produits chargés:', allProducts.length);
+    
+    // Si aucun produit, afficher un message d'avertissement
+    if (allProducts.length === 0) {
+        console.warn('⚠️ Aucun produit trouvé !');
+        // Option : afficher un message dans l'interface
+    }
+    
     let cart = [];
     let clientsList = [];
     async function loadClients() { const res = await fetch(`/api/clients?search=`, { headers: { 'Authorization': `Bearer ${token}` } }); clientsList = await res.json(); }
@@ -1351,21 +1504,20 @@ async function renderSales() {
             `;
         }).join('');
     }
-
-    window.filterProducts = () => {
-        const searchTerm = document.getElementById('productSearch').value.toLowerCase().trim();
-        if (!searchTerm) {
-            filteredProducts = [...allProducts];
-        } else {
-            filteredProducts = allProducts.filter(p =>
-                p.name.toLowerCase().includes(searchTerm) ||
-                p.sku.toLowerCase().includes(searchTerm) ||
-                (p.barcode && p.barcode.toLowerCase().includes(searchTerm))
-            );
-        }
-        renderProductGrid(filteredProducts);
-    };
-
+window.filterProducts = () => {
+    const searchTerm = document.getElementById('productSearch').value.toLowerCase().trim();
+    // ✅ Utiliser allProducts (déjà chargé) avec rechargement forcé
+    if (!searchTerm) {
+        filteredProducts = [...allProducts];
+    } else {
+        filteredProducts = allProducts.filter(p =>
+            p.name.toLowerCase().includes(searchTerm) ||
+            p.sku.toLowerCase().includes(searchTerm) ||
+            (p.barcode && p.barcode.toLowerCase().includes(searchTerm))
+        );
+    }
+    renderProductGrid(filteredProducts);
+};
     window.addProductToCart = (productId, productName, sellPrice, stock, wholesalePrice = 0, wholesaleQty = 5) => {
         const existing = cart.find(i => i.product_id === productId);
         const useWholesale = isWholesaleMode && wholesalePrice > 0;

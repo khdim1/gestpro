@@ -396,6 +396,13 @@ const authenticate = async (req, res, next) => {
     }
 };
 
+// ===== DÉSACTIVER LE CACHE POUR TOUTES LES RÉPONSES API =====
+app.use('/api', (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    next();
+});
 // ========== ROUTES AUTH ==========
 app.post('/api/register', async (req, res) => {
     const { name, email, password } = req.body;
@@ -477,15 +484,30 @@ app.delete('/api/categories/:id', authenticate, async (req, res) => {
     res.json({ message: 'OK' });
 });
 
-// ========== ROUTES PRODUITS ==========
+// ========== ROUTES PRODUITS (SANS LIMITE) ==========
 app.get('/api/products', authenticate, async (req, res) => {
+    // ✅ Supprimer LIMIT 500 pour voir tous les produits
     const [rows] = await pool.query(
-        'SELECT p.*, c.name as category_name FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE p.user_id = ? ORDER BY p.name LIMIT 500',
+        'SELECT p.*, c.name as category_name FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE p.user_id = ? ORDER BY p.name',
         [req.user.id]
     );
     res.json(rows);
 });
-
+app.get('/api/products/search', authenticate, async (req, res) => {
+    const { q, lowStock } = req.query;
+    let query = 'SELECT p.*, c.name as category_name FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE p.user_id = ?';
+    const params = [req.user.id];
+    if (q) {
+        query += ' AND (p.name LIKE ? OR p.sku LIKE ? OR p.barcode LIKE ?)';
+        params.push(`%${q}%`, `%${q}%`, `%${q}%`);
+    }
+    if (lowStock === 'true') {
+        query += ' AND p.quantity <= p.reorder_level';
+    }
+    query += ' ORDER BY p.name'; // ✅ Supprimer LIMIT 200
+    const [rows] = await pool.query(query, params);
+    res.json(rows);
+});
 app.post('/api/products', authenticate, async (req, res) => {
     const { sku, barcode, name, description, category_id, category_name, supplier_id, quantity, unit, reorder_level, buy_price, sell_price, wholesale_price, wholesale_quantity, location, image_url } = req.body;
     if (!sku || !name) return res.status(400).json({ error: 'SKU et nom requis' });
@@ -518,42 +540,99 @@ app.post('/api/products', authenticate, async (req, res) => {
         connection.release();
     }
 });
-
+// ===== ROUTE MODIFICATION PRODUIT (CORRIGÉE DÉFINITIVEMENT) =====
 app.put('/api/products/:id', authenticate, async (req, res) => {
-    const { sku, barcode, name, description, category_id, category_name, supplier_id, quantity, unit, reorder_level, buy_price, sell_price, wholesale_price, wholesale_quantity, location, image_url } = req.body;
-    const connection = await pool.getConnection();
-    try {
-        await connection.beginTransaction();
-        let finalCatId = category_id;
-        if (category_name && category_name.trim() !== '') {
-            let [cat] = await connection.query('SELECT id FROM categories WHERE user_id=? AND name=?', [req.user.id, category_name]);
-            if (cat.length === 0) {
-                const [catResult] = await connection.query('INSERT INTO categories (user_id, name) VALUES (?,?)', [req.user.id, category_name]);
-                finalCatId = catResult.insertId;
-            } else {
-                finalCatId = cat[0].id;
-            }
-        }
-        const supId = supplier_id ? parseInt(supplier_id) : null;
-        await connection.query(`
-            UPDATE products SET sku=?, barcode=?, name=?, description=?, category_id=?, supplier_id=?, quantity=?, unit=?, reorder_level=?, buy_price=?, sell_price=?, wholesale_price=?, wholesale_quantity=?, location=?, image_url=?
-            WHERE id=? AND user_id=?`,
-            [sku, barcode, name, description, finalCatId || null, supId, quantity, unit, reorder_level, buy_price, sell_price, wholesale_price || 0, wholesale_quantity || 0, location, image_url || null, req.params.id, req.user.id]
+    const productId = parseInt(req.params.id);
+    const userId = req.user.id;
+    
+    console.log(`🔍 Modification produit ID: ${productId} par utilisateur ${userId}`);
+    
+    // ✅ 1. Vérifier que le produit existe et appartient à l'utilisateur
+    const [existing] = await pool.query(
+        'SELECT id, name, user_id FROM products WHERE id = ? AND user_id = ?',
+        [productId, userId]
+    );
+    
+    if (existing.length === 0) {
+        console.log(`❌ Produit ${productId} non trouvé pour l'utilisateur ${userId}`);
+        return res.status(404).json({ 
+            error: 'Produit non trouvé',
+            details: `ID: ${productId}, User: ${userId}`
+        });
+    }
+    
+    console.log(`✅ Produit trouvé: ${existing[0].name} (ID: ${productId})`);
+    
+    // Récupérer les données du corps
+    const { 
+        sku, barcode, name, description, category_id, category_name, 
+        supplier_id, quantity, unit, reorder_level, buy_price, 
+        sell_price, wholesale_price, wholesale_quantity, location, image_url 
+    } = req.body;
+    
+    // ✅ 2. Gérer la catégorie
+    let finalCatId = category_id;
+    if (category_name && category_name.trim() !== '') {
+        let [cat] = await pool.query(
+            'SELECT id FROM categories WHERE user_id=? AND name=?',
+            [userId, category_name]
         );
-        await connection.commit();
+        if (cat.length === 0) {
+            const [catResult] = await pool.query(
+                'INSERT INTO categories (user_id, name) VALUES (?,?)',
+                [userId, category_name]
+            );
+            finalCatId = catResult.insertId;
+        } else {
+            finalCatId = cat[0].id;
+        }
+    }
+    
+    const supId = supplier_id ? parseInt(supplier_id) : null;
+    
+    try {
+        // ✅ 3. Mettre à jour
+        await pool.query(`
+            UPDATE products SET 
+                sku=?, barcode=?, name=?, description=?, category_id=?, 
+                supplier_id=?, quantity=?, unit=?, reorder_level=?, 
+                buy_price=?, sell_price=?, wholesale_price=?, wholesale_quantity=?, 
+                location=?, image_url=?
+            WHERE id=? AND user_id=?
+        `, [
+            sku, barcode || null, name, description || '', finalCatId || null,
+            supId, quantity || 0, unit || 'pièce', reorder_level || 5,
+            buy_price || 0, sell_price || 0, wholesale_price || 0, wholesale_quantity || 0,
+            location || null, image_url || null,
+            productId, userId
+        ]);
+        
+        console.log(`✅ Produit ${productId} mis à jour avec succès`);
         res.json({ message: 'Mis à jour' });
     } catch (err) {
-        await connection.rollback();
+        console.error('❌ Erreur mise à jour:', err);
         res.status(500).json({ error: 'Erreur serveur: ' + err.message });
-    } finally {
-        connection.release();
     }
 });
 
+// ===== ROUTE DELETE PRODUITS (CORRIGÉE) =====
 app.delete('/api/products/:id', authenticate, async (req, res) => {
-    await pool.query('DELETE FROM products WHERE id=? AND user_id=?', [req.params.id, req.user.id]);
-    res.json({ message: 'Supprimé' });
+    const productId = parseInt(req.params.id);
+    const userId = req.user.id;
+    
+    const [existing] = await pool.query(
+        'SELECT id FROM products WHERE id = ? AND user_id = ?',
+        [productId, userId]
+    );
+    
+    if (existing.length === 0) {
+        return res.status(404).json({ error: 'Produit non trouvé' });
+    }
+    
+    await pool.query('DELETE FROM products WHERE id = ? AND user_id = ?', [productId, userId]);
+    res.json({ message: 'Produit supprimé' });
 });
+
 
 app.get('/api/products/barcode/:code', authenticate, async (req, res) => {
     const [rows] = await pool.query('SELECT * FROM products WHERE user_id=? AND barcode=?', [req.user.id, req.params.code]);
@@ -561,21 +640,6 @@ app.get('/api/products/barcode/:code', authenticate, async (req, res) => {
     res.json(rows[0]);
 });
 
-app.get('/api/products/search', authenticate, async (req, res) => {
-    const { q, lowStock } = req.query;
-    let query = 'SELECT p.*, c.name as category_name FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE p.user_id = ?';
-    const params = [req.user.id];
-    if (q) {
-        query += ' AND (p.name LIKE ? OR p.sku LIKE ? OR p.barcode LIKE ?)';
-        params.push(`%${q}%`, `%${q}%`, `%${q}%`);
-    }
-    if (lowStock === 'true') {
-        query += ' AND p.quantity <= p.reorder_level';
-    }
-    query += ' ORDER BY p.name LIMIT 200';
-    const [rows] = await pool.query(query, params);
-    res.json(rows);
-});
 
 // ========== ROUTES VENTES ==========
 app.post('/api/sales', authenticate, async (req, res) => {
@@ -718,7 +782,7 @@ app.post('/api/sales', authenticate, async (req, res) => {
 });
 
 app.get('/api/sales', authenticate, async (req, res) => {
-    const { client_name, status, start_date, end_date, page = 1, limit = 50 } = req.query;
+    const { client_name, status, start_date, end_date, page = 1, limit = 100 } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
     
     let query = `SELECT s.*, c.name as client_name FROM sales s LEFT JOIN clients c ON s.client_id = c.id WHERE s.user_id = ?`;
