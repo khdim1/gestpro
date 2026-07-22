@@ -1418,6 +1418,7 @@ async function drawCompanyHeader(doc, company, startY = 45) {
     
     return startY + headerHeight + 20;
 }
+// ========== FACTURE ÉCONOMIQUE (NET À PAYER SUR UNE LIGNE) ==========
 app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
     try {
         const saleId = req.params.id;
@@ -1427,7 +1428,9 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
             LEFT JOIN clients c ON s.client_id = c.id 
             WHERE s.id = ? AND s.user_id = ?
         `, [saleId, req.user.id]);
-        if (saleRows.length === 0) return res.status(404).json({ error: 'Vente non trouvée' });
+        if (saleRows.length === 0) {
+            return res.status(404).json({ error: 'Vente non trouvée' });
+        }
         const sale = saleRows[0];
 
         const [items] = await pool.query(`
@@ -1440,24 +1443,21 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         const [settingsRows] = await pool.query('SELECT * FROM settings WHERE user_id = ?', [req.user.id]);
         const company = settingsRows[0] || { company_name: 'Mon Entreprise', currency: 'FCFA' };
 
-       const taxRate = sale.tax_rate !== null && sale.tax_rate !== undefined 
-    ? parseFloat(sale.tax_rate) 
-    : parseFloat(company.tax_rate || 0);
+        const taxRate = sale.tax_rate !== null && sale.tax_rate !== undefined 
+            ? parseFloat(sale.tax_rate) 
+            : parseFloat(company.tax_rate || 0);
 
         const doc = new PDFDocument({ margin: 50, size: 'A4' });
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename=facture_${saleId}.pdf`);
         doc.pipe(res);
 
-        // En-tête
         let y = await drawCompanyHeader(doc, company);
 
-        // Titre
         doc.fillColor('#2c6e9e').fontSize(20).font('Helvetica-Bold')
            .text(`FACTURE N° ${String(saleId).padStart(5, '0')}`, 50, y, { align: 'center' });
         y += 30;
 
-        // Cadre client / infos facture
         doc.rect(50, y, 500, 70).fill('#f5f7fa').stroke('#e0e4e8', 0.5);
         doc.fillColor('#1a2a3a').fontSize(10).font('Helvetica-Bold')
            .text('CLIENT', 60, y + 8);
@@ -1476,7 +1476,6 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         doc.fillColor('#3a4a5a').fontSize(10).font('Helvetica')
            .text(`Date : ${new Date(sale.sale_date).toLocaleDateString('fr-FR')}`, rightX, y + 25);
 
-        // Badge statut
         const statusMap = {
             'completed': { label: 'PAYÉE', color: '#27ae60' },
             'pending': { label: 'EN ATTENTE', color: '#f39c12' },
@@ -1490,15 +1489,14 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
 
         y += 85;
 
-        // Tableau des articles
-        const col1 = 60, col2 = 250, col3 = 350, col4 = 430, col5 = 490;
+        const col1 = 60, col2 = 250, col3 = 350, col4 = 450;
         const rowHeight = 22;
         doc.rect(50, y, 500, rowHeight).fill('#2c6e9e');
         doc.fillColor('#ffffff').fontSize(9).font('Helvetica-Bold');
         doc.text('PRODUIT', col1, y + 6);
         doc.text('QTÉ', col2, y + 6, { width: 60, align: 'right' });
         doc.text('PRIX UNIT.', col3, y + 6, { width: 70, align: 'right' });
-        doc.text('TOTAL', col5, y + 6, { width: 50, align: 'right' });
+        doc.text('TOTAL', col4, y + 6, { width: 80, align: 'right' });
         y += rowHeight;
 
         let subtotal = 0;
@@ -1508,8 +1506,8 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
             doc.fillColor('#1a2a3a').fontSize(9).font('Helvetica');
             doc.text(item.product_name || 'Produit', col1 + 2, y + 5);
             doc.text(item.quantity.toString(), col2, y + 5, { width: 60, align: 'right' });
-            doc.text(`${formatPDFNumber(item.unit_price)} ${company.currency}`, col3, y + 5, { width: 70, align: 'right' });
-            doc.text(`${formatPDFNumber(item.total_price)} ${company.currency}`, col5, y + 5, { width: 50, align: 'right' });
+            doc.text(formatPDFNumber(item.unit_price), col3, y + 5, { width: 70, align: 'right' });
+            doc.text(formatPDFNumber(item.total_price), col4, y + 5, { width: 80, align: 'right' });
             subtotal += parseFloat(item.total_price);
             y += rowHeight;
         });
@@ -1517,45 +1515,64 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         doc.moveTo(50, y).lineTo(550, y).stroke('#e0e4e8');
         y += 10;
 
-        // Totaux
-        const totalX = 380;
+        const totalX = 360;
         const taxAmount = sale.tax || 0;
         const remiseValue = (sale.remise_pct || 0) / 100 * subtotal;
         const acompteValue = sale.acompte || 0;
         const finalAmount = sale.final_amount || 0;
 
-     const lines = [
-    { label: 'Sous-total', value: formatPDFNumber(sale.total_amount) }
-];
-if (taxRate > 0) {
-    lines.push({ label: `TVA (${taxRate}%)`, value: formatPDFNumber(sale.tax) });
-}
+        const yAfterTable = y;
+        y = yAfterTable;
+
+        const totalLines = [];
+        totalLines.push({ label: 'Sous-total', value: formatPDFNumber(subtotal) });
+        if (taxRate > 0) {
+            totalLines.push({ label: `TVA (${taxRate}%)`, value: formatPDFNumber(taxAmount) });
+        }
         if (sale.remise_pct && sale.remise_pct > 0) {
-            lines.push({ label: `Remise (${sale.remise_pct}%)`, value: `- ${formatPDFNumber(remiseValue)}` });
+            totalLines.push({ label: `Remise (${sale.remise_pct}%)`, value: `- ${formatPDFNumber(remiseValue)}` });
         }
         if (acompteValue > 0) {
-            lines.push({ label: 'Acompte', value: `- ${formatPDFNumber(acompteValue)}` });
+            totalLines.push({ label: 'Acompte', value: `- ${formatPDFNumber(acompteValue)}` });
         }
 
-        lines.forEach((line, i) => {
-            const isTotal = i === lines.length - 1;
+        // ✅ Ligne vide pour aérer
+        totalLines.push({ label: '', value: '' });
+
+        // ✅ NET À PAYER en plus petit et aligné
+        totalLines.push({ label: 'NET À PAYER', value: formatPDFNumber(finalAmount), isTotal: true });
+
+        totalLines.forEach((line, i) => {
             const yPos = y + i * 22;
+            const isTotal = line.isTotal || false;
+            const isBlank = line.label === '' && line.value === '';
+            if (isBlank) {
+                // On saute une ligne
+                return;
+            }
+            
+            // ✅ Taille réduite pour NET À PAYER
+            const fontSize = isTotal ? 12 : 10;
+            const font = isTotal ? 'Helvetica-Bold' : 'Helvetica';
+            
             doc.fillColor(isTotal ? '#1a2a3a' : '#3a4a5a');
-            doc.fontSize(isTotal ? 11 : 10).font(isTotal ? 'Helvetica-Bold' : 'Helvetica');
-            doc.text(line.label, totalX, yPos, { width: 100, align: 'right' });
-            doc.text(`${line.value} ${company.currency}`, 460, yPos, { width: 80, align: 'right' });
+            doc.fontSize(fontSize).font(font);
+            
+            // ✅ Label un peu plus à gauche (x = 300 au lieu de 360)
+            const labelX = isTotal ? 300 : totalX;
+            doc.text(line.label, labelX, yPos, { width: 100, align: 'right' });
+            
+            // ✅ Montant bien aligné à droite, avec espace
+            const textToDisplay = `${line.value} ${company.currency}`;
+            const xPos = isTotal ? 460 : 450;
+            const widthVal = isTotal ? 90 : 80;
+            doc.text(textToDisplay, xPos, yPos, { width: widthVal, align: 'right' });
         });
 
-        const totalY = y + lines.length * 22 + 8;
-        doc.rect(350, totalY, 200, 30).fill('#2c6e9e');
-        doc.fillColor('#ffffff').fontSize(14).font('Helvetica-Bold');
-        doc.text('NET À PAYER', 360, totalY + 8);
-        doc.text(`${formatPDFNumber(finalAmount)} ${company.currency}`, 460, totalY + 8, { width: 80, align: 'right' });
-
-        // Pied
-        doc.rect(50, 750, 500, 25).fill('#f0f4f8');
+        const footerY = 750;
+        doc.rect(50, footerY, 500, 25).fill('#f0f4f8');
         doc.fillColor('#7a8a9a').fontSize(8).font('Helvetica');
-        doc.text('Merci de votre confiance • Facture générée par GestPro', 50, 758, { align: 'center' });
+        doc.text('Merci de votre confiance • Facture générée par GestPro', 50, footerY + 8, { align: 'center' });
 
         doc.end();
     } catch (err) {
