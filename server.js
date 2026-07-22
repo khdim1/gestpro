@@ -313,8 +313,12 @@ try {
         ('settings_edit', 'Modifier les paramètres'),
         ('sub_users_manage', 'Gérer l\\\'équipe')
     `);
+    // ===== AJOUT AUTOMATIQUE DES COLONNES MANQUANTES =====
+try { await pool.query(`ALTER TABLE sales ADD COLUMN tax_rate DECIMAL(5,2) DEFAULT 0`); } catch(e) {}
+try { await pool.query(`ALTER TABLE proforma_invoices ADD COLUMN tax_rate DECIMAL(5,2) DEFAULT 0`); } catch(e) {}
     // Dans initAndStart(), après la création des tables, ajoutez :
-
+// Dans initAndStart(), après la création des tables :
+try { await pool.query(`ALTER TABLE sales ADD COLUMN tax_rate DECIMAL(5,2) DEFAULT 0`); } catch(e) {}
 // ===== VÉRIFICATION ET AJOUT DES COLONNES MANQUANTES =====
 console.log('🔍 Vérification des colonnes de la table sales...');
 
@@ -664,7 +668,6 @@ app.get('/api/products/barcode/:code', authenticate, async (req, res) => {
     res.json(rows[0]);
 });
 
-
 // ========== ROUTES VENTES ==========
 app.post('/api/sales', authenticate, async (req, res) => {
     console.log('📦 Données reçues:', req.body);
@@ -727,26 +730,32 @@ app.post('/api/sales', authenticate, async (req, res) => {
             subtotal += item.total_price;
         }
 
-        // ✅ Récupérer le taux de TVA depuis la base (même si 0%)
+        // ✅ Récupération du taux de TVA
         const [settings] = await connection.query(
             'SELECT tax_rate FROM settings WHERE user_id = ?', 
             [req.user.id]
         );
-        // ✅ Utiliser 0 si null, undefined ou 0
         const tax_rate = settings[0]?.tax_rate !== null && settings[0]?.tax_rate !== undefined 
             ? parseFloat(settings[0].tax_rate) 
             : 0;
+
+        // ✅ Déclaration de tax et autres calculs
         const tax = subtotal * (tax_rate / 100);
         const remise_valeur = (remise_pct || 0) / 100 * subtotal;
         const total_apres_remise = subtotal - remise_valeur;
         const final_amount = total_apres_remise + tax - (acompte || 0);
 
         const finalStatus = status === 'pending' ? 'pending' : 'completed';
-        const [saleResult] = await connection.query(
-            `INSERT INTO sales (user_id, client_id, total_amount, remise_pct, acompte, tax, final_amount, payment_method, status, due_date, notes)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [req.user.id, client_id, subtotal, remise_pct || 0, acompte || 0, tax, final_amount, payment_method || 'cash', finalStatus, due_date || null, is_wholesale ? 'VENTE EN GROS' : null]
-        );
+        const [saleResult] = await connection.query(`
+            INSERT INTO sales 
+            (user_id, client_id, total_amount, remise_pct, acompte, tax, final_amount, payment_method, status, due_date, notes, tax_rate)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+            req.user.id, client_id, subtotal, remise_pct || 0, acompte || 0, 
+            tax, final_amount, payment_method || 'cash', finalStatus, due_date || null,
+            is_wholesale ? 'VENTE EN GROS' : null,
+            tax_rate   // ✅ Stockage du taux
+        ]);
         const sale_id = saleResult.insertId;
 
         for (let item of items) {
@@ -1118,8 +1127,8 @@ app.get('/api/history', authenticate, async (req, res) => {
     const history = [...sales, ...movements].sort((a,b) => new Date(b.date) - new Date(a.date)).slice(0,50);
     res.json(history);
 });
-
 // ========== ROUTES PROFORMA ==========
+
 async function getNextProformaNumber(userId) {
     const [rows] = await pool.query('SELECT proforma_number FROM proforma_invoices WHERE user_id = ? ORDER BY id DESC LIMIT 1', [userId]);
     let lastNumber = 0;
@@ -1133,38 +1142,57 @@ async function getNextProformaNumber(userId) {
 app.post('/api/proforma', authenticate, async (req, res) => {
     const { client_name, client_email, client_phone, client_address, items, remise_pct, acompte, valid_until, notes } = req.body;
     if (!items || items.length === 0) return res.status(400).json({ error: 'Aucun article' });
+
     const connection = await pool.getConnection();
     try {
         await connection.beginTransaction();
+
         let subtotal = 0;
         for (let item of items) {
             item.total_price = item.quantity * item.unit_price;
             subtotal += item.total_price;
         }
-        // Dans la route POST /api/sales, trouvez la partie du calcul de la TVA :
-const [settings] = await connection.query(
-    'SELECT tax_rate FROM settings WHERE user_id = ?', 
-    [req.user.id]
-);
-// ✅ Utiliser 0 si null ou undefined
-const tax_rate = settings[0]?.tax_rate !== null && settings[0]?.tax_rate !== undefined 
-    ? parseFloat(settings[0].tax_rate) 
-    : 0;  // ✅ Changé de 20 à 0
-const tax = subtotal * (tax_rate / 100);
+
+        // ✅ Récupération du taux de TVA
+        const [settings] = await connection.query('SELECT tax_rate FROM settings WHERE user_id = ?', [req.user.id]);
+        const tax_rate = settings[0]?.tax_rate !== null && settings[0]?.tax_rate !== undefined 
+            ? parseFloat(settings[0].tax_rate) 
+            : 0;
+
+        const tax = subtotal * (tax_rate / 100);
         const remise_valeur = (remise_pct || 0) / 100 * subtotal;
         const total_apres_remise = subtotal - remise_valeur;
         const total = total_apres_remise + tax - (acompte || 0);
+
         const proformaNumber = await getNextProformaNumber(req.user.id);
-        const [result] = await connection.query(`INSERT INTO proforma_invoices (user_id, proforma_number, client_name, client_email, client_phone, client_address, subtotal, tax, remise_pct, acompte, total, valid_until, notes, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "draft")`, [req.user.id, proformaNumber, client_name || '', client_email || '', client_phone || '', client_address || '', subtotal, tax, remise_pct || 0, acompte || 0, total, valid_until || null, notes || '']);
+
+        // ✅ INSERT avec guillemets simples pour 'draft' et colonne tax_rate
+        const [result] = await connection.query(`
+            INSERT INTO proforma_invoices 
+            (user_id, proforma_number, client_name, client_email, client_phone, client_address, 
+             subtotal, tax, remise_pct, acompte, total, valid_until, notes, status, tax_rate)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+            req.user.id, proformaNumber, client_name || '', client_email || '', client_phone || '', client_address || '',
+            subtotal, tax, remise_pct || 0, acompte || 0, total, valid_until || null, notes || '',
+            'draft',   // ✅ Guillemets SIMPLES
+            tax_rate   // ✅ Sauvegarde du taux
+        ]);
+
         const proformaId = result.insertId;
+
         for (let item of items) {
-            await connection.query('INSERT INTO proforma_items (proforma_id, description, quantity, unit_price, total_price) VALUES (?, ?, ?, ?, ?)', [proformaId, item.description, item.quantity, item.unit_price, item.total_price]);
+            await connection.query(
+                'INSERT INTO proforma_items (proforma_id, description, quantity, unit_price, total_price) VALUES (?, ?, ?, ?, ?)',
+                [proformaId, item.description, item.quantity, item.unit_price, item.total_price]
+            );
         }
+
         await connection.commit();
         res.status(201).json({ id: proformaId, number: proformaNumber });
-    } catch(err) {
+    } catch (err) {
         await connection.rollback();
-        console.error('Erreur proforma:', err);
+        console.error('❌ Erreur proforma:', err);
         res.status(500).json({ error: err.message });
     } finally {
         connection.release();
@@ -1180,76 +1208,119 @@ app.delete('/api/proforma/:id', authenticate, async (req, res) => {
     await pool.query('DELETE FROM proforma_invoices WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
     res.json({ message: 'Proforma supprimée' });
 });
-
+// ========== ROUTE PROFORMA PDF ==========
 app.get('/api/proforma/:id/pdf', authenticate, async (req, res) => {
     try {
         const proformaId = req.params.id;
-        const [invoiceRows] = await pool.query('SELECT * FROM proforma_invoices WHERE id = ? AND user_id = ?', [proformaId, req.user.id]);
+        // ✅ Requête corrigée : pas d'alias 's'
+        const [invoiceRows] = await pool.query(`
+            SELECT * FROM proforma_invoices 
+            WHERE id = ? AND user_id = ?
+        `, [proformaId, req.user.id]);
+        
         if (invoiceRows.length === 0) return res.status(404).json({ error: 'Proforma non trouvée' });
         const invoice = invoiceRows[0];
+        
         const [items] = await pool.query('SELECT * FROM proforma_items WHERE proforma_id = ?', [proformaId]);
         const [settingsRows] = await pool.query('SELECT * FROM settings WHERE user_id = ?', [req.user.id]);
-        const company = settingsRows[0] || { company_name: 'Mon Entreprise', company_subtitle: '', company_activity: '', company_rc: '', company_address: '', company_phone: '', company_phone2: '', currency: 'FCFA' };
+        const company = settingsRows[0] || { company_name: 'Mon Entreprise', currency: 'FCFA' };
+
         const doc = new PDFDocument({ margin: 50, size: 'A4' });
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename=proforma_${invoice.proforma_number}.pdf`);
         doc.pipe(res);
-        
+
+        // En-tête
         let y = await drawCompanyHeader(doc, company);
-        doc.fillColor('#3498db').fontSize(18).font('Helvetica-Bold').text(`FACTURE PROFORMA N° ${invoice.proforma_number}`, 50, y, { align: 'center' });
+
+        // Titre
+        doc.fillColor('#2c6e9e').fontSize(20).font('Helvetica-Bold')
+           .text(`FACTURE PROFORMA N° ${invoice.proforma_number}`, 50, y, { align: 'center' });
         y += 30;
-        doc.fillColor('#ecf0f1').rect(50, y, 500, 80).fill();
-        doc.fillColor('black').fontSize(10);
-        doc.text(`Date d'émission : ${new Date(invoice.issue_date).toLocaleString()}`, 60, y + 10);
-        doc.text(`Client : ${invoice.client_name || 'Client particulier'}`, 60, y + 25);
-        if (invoice.client_email) doc.text(`Email : ${invoice.client_email}`, 60, y + 40);
-        if (invoice.client_phone) doc.text(`Tél : ${invoice.client_phone}`, 60, y + 55);
-        if (invoice.client_address) doc.text(`Adresse : ${invoice.client_address}`, 60, y + 70);
-        if (invoice.valid_until) doc.text(`Valable jusqu'au : ${new Date(invoice.valid_until).toLocaleDateString()}`, 400, y + 10);
-        y += 90;
-        
-        const tableTop = y;
-        doc.fillColor('#2c3e50').rect(50, tableTop, 500, 20).fill();
-        doc.fillColor('white').fontSize(10).font('Helvetica-Bold');
-        doc.text('Description', 60, tableTop + 5);
-        doc.text('Quantité', 250, tableTop + 5);
-        doc.text('Prix unit.', 350, tableTop + 5);
-        doc.text('Total', 450, tableTop + 5);
-        let rowY = tableTop + 25;
-        doc.fillColor('black').font('Helvetica');
-        items.forEach(item => {
-            doc.text(item.description, 60, rowY);
-            doc.text(item.quantity.toString(), 250, rowY);
-            doc.text(`${item.unit_price.toLocaleString()} ${company.currency}`, 350, rowY);
-            doc.text(`${item.total_price.toLocaleString()} ${company.currency}`, 450, rowY);
-            rowY += 20;
+
+        // Infos client
+        doc.fillColor('#1a2a3a').fontSize(11).font('Helvetica')
+           .text(`Date : ${new Date(invoice.issue_date).toLocaleDateString('fr-FR')}`, 50, y);
+        y += 16;
+        doc.text(`Client : ${invoice.client_name || 'Client particulier'}`, 50, y);
+        if (invoice.client_address) { y += 16; doc.text(`Adresse : ${invoice.client_address}`, 50, y); }
+        if (invoice.client_email) { y += 16; doc.text(`Email : ${invoice.client_email}`, 50, y); }
+        if (invoice.valid_until) { y += 16; doc.text(`Valable jusqu'au : ${new Date(invoice.valid_until).toLocaleDateString('fr-FR')}`, 50, y); }
+        y += 25;
+
+        // Tableau
+        const col1 = 60, col2 = 250, col3 = 350, col4 = 450;
+        const rowHeight = 22;
+        doc.rect(50, y, 500, rowHeight).fill('#2c6e9e');
+        doc.fillColor('#ffffff').fontSize(9).font('Helvetica-Bold');
+        doc.text('DESIGNATION', col1, y + 6);
+        doc.text('QTE', col2, y + 6, { width: 60, align: 'right' });
+        doc.text('PRIX UNIT.', col3, y + 6, { width: 70, align: 'right' });
+        doc.text('MONTANT', col4, y + 6, { width: 80, align: 'right' });
+        y += rowHeight;
+
+        let subtotal = 0;
+        items.forEach((item, idx) => {
+            const bg = idx % 2 === 0 ? '#ffffff' : '#f8fafc';
+            doc.rect(50, y, 500, rowHeight).fill(bg);
+            doc.fillColor('#1a2a3a').fontSize(9).font('Helvetica');
+            doc.text(item.description, col1 + 2, y + 5);
+            doc.text(item.quantity.toString(), col2, y + 5, { width: 60, align: 'right' });
+            doc.text(`${formatPDFNumber(item.unit_price)} ${company.currency}`, col3, y + 5, { width: 70, align: 'right' });
+            doc.text(`${formatPDFNumber(item.total_price)} ${company.currency}`, col4, y + 5, { width: 80, align: 'right' });
+            subtotal += parseFloat(item.total_price);
+            y += rowHeight;
         });
-        for (let i = 0; i <= items.length; i++) doc.lineWidth(0.5).strokeColor('#bdc3c7').moveTo(50, tableTop + 20 + i * 20).lineTo(550, tableTop + 20 + i * 20).stroke();
-        rowY += 10;
-        doc.font('Helvetica-Bold');
-        doc.text(`Sous-total : ${invoice.subtotal.toLocaleString()} ${company.currency}`, 350, rowY);
-        rowY += 15;
-        doc.text(`TVA (20%) : ${invoice.tax.toLocaleString()} ${company.currency}`, 350, rowY);
-        rowY += 15;
+
+        // Ligne de séparation
+        doc.moveTo(50, y).lineTo(550, y).stroke('#e0e4e8');
+        y += 10;
+
+        // ✅ Récupération du taux de TVA depuis l'objet invoice
+        const taxRate = invoice.tax_rate || 0;
+        const taxAmount = invoice.tax || 0;
+        const remiseValue = (invoice.remise_pct || 0) / 100 * subtotal;
+        const acompteValue = invoice.acompte || 0;
+        const total = invoice.total || 0;
+
+        const totalX = 370;
+        const lines = [];
+        lines.push({ label: 'Sous-total', value: formatPDFNumber(subtotal) });
+        if (taxRate > 0) {
+            lines.push({ label: `TVA (${taxRate}%)`, value: formatPDFNumber(taxAmount) });
+        }
         if (invoice.remise_pct && invoice.remise_pct > 0) {
-            const remise_valeur = (invoice.remise_pct / 100) * invoice.subtotal;
-            doc.text(`Remise (${invoice.remise_pct}%) : ${remise_valeur.toLocaleString()} ${company.currency}`, 350, rowY);
-            rowY += 15;
+            lines.push({ label: `Remise (${invoice.remise_pct}%)`, value: `- ${formatPDFNumber(remiseValue)}` });
         }
-        if (invoice.acompte && invoice.acompte > 0) {
-            doc.text(`Acompte versé : ${invoice.acompte.toLocaleString()} ${company.currency}`, 350, rowY);
-            rowY += 15;
+        if (acompteValue > 0) {
+            lines.push({ label: 'Acompte', value: `- ${formatPDFNumber(acompteValue)}` });
         }
-        doc.fillColor('#3498db').fontSize(12).text(`Net à payer : ${invoice.total.toLocaleString()} ${company.currency}`, 350, rowY, { bold: true });
-        doc.fillColor('#2c3e50').rect(50, 750, 500, 30).fill();
-        doc.fillColor('white').fontSize(8).text('Document non contractuel - Devis valant accord', 50, 760, { align: 'center' });
+
+        lines.forEach((line, i) => {
+            const yPos = y + i * 22;
+            doc.fillColor(i === lines.length - 1 ? '#1a2a3a' : '#3a4a5a');
+            doc.fontSize(i === lines.length - 1 ? 11 : 10).font(i === lines.length - 1 ? 'Helvetica-Bold' : 'Helvetica');
+            doc.text(line.label, totalX, yPos, { width: 100, align: 'right' });
+            doc.text(`${line.value} ${company.currency}`, 450, yPos, { width: 80, align: 'right' });
+        });
+
+        const totalY = y + lines.length * 22 + 8;
+        doc.rect(350, totalY, 200, 30).fill('#2c6e9e');
+        doc.fillColor('#ffffff').fontSize(14).font('Helvetica-Bold');
+        doc.text('NET À PAYER', 360, totalY + 8);
+        doc.text(`${formatPDFNumber(total)} ${company.currency}`, 450, totalY + 8, { width: 80, align: 'right' });
+
+        // Pied
+        doc.rect(50, 750, 500, 25).fill('#f0f4f8');
+        doc.fillColor('#7a8a9a').fontSize(8).font('Helvetica');
+        doc.text('Document non contractuel - Devis valant accord', 50, 758, { align: 'center' });
+
         doc.end();
-    } catch(err) {
-        console.error(err);
+    } catch (err) {
+        console.error('Erreur génération proforma:', err);
         res.status(500).json({ error: 'Erreur génération proforma' });
     }
 });
-
 // ========== ROUTE EXPORT ==========
 app.get('/api/export', authenticate, async (req, res) => {
     try {
@@ -1347,199 +1418,151 @@ async function drawCompanyHeader(doc, company, startY = 45) {
     
     return startY + headerHeight + 20;
 }
-// ========== FACTURE AVEC FORMAT VIRGULE ==========
 app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
     try {
         const saleId = req.params.id;
-        const [saleRows] = await pool.query(
-            `SELECT s.*, c.name as client_name, c.email as client_email, c.address as client_address 
-             FROM sales s 
-             LEFT JOIN clients c ON s.client_id = c.id 
-             WHERE s.id = ? AND s.user_id = ?`,
-            [saleId, req.user.id]
-        );
-        if (saleRows.length === 0) {
-            return res.status(404).json({ error: 'Vente non trouvée' });
-        }
+        const [saleRows] = await pool.query(`
+            SELECT s.*, c.name as client_name, c.email as client_email, c.address as client_address 
+            FROM sales s 
+            LEFT JOIN clients c ON s.client_id = c.id 
+            WHERE s.id = ? AND s.user_id = ?
+        `, [saleId, req.user.id]);
+        if (saleRows.length === 0) return res.status(404).json({ error: 'Vente non trouvée' });
         const sale = saleRows[0];
-        
-        const [items] = await pool.query(
-            `SELECT si.*, p.name as product_name 
-             FROM sale_items si 
-             JOIN products p ON si.product_id = p.id 
-             WHERE si.sale_id = ?`,
-            [saleId]
-        );
-        
-        const [settingsRows] = await pool.query(
-            'SELECT * FROM settings WHERE user_id = ?',
-            [req.user.id]
-        );
-        const company = settingsRows[0] || { 
-            company_name: 'Mon Entreprise', 
-            currency: 'FCFA',
-            tax_rate: 20 
-        };
-        
+
+        const [items] = await pool.query(`
+            SELECT si.*, p.name as product_name 
+            FROM sale_items si 
+            JOIN products p ON si.product_id = p.id 
+            WHERE si.sale_id = ?
+        `, [saleId]);
+
+        const [settingsRows] = await pool.query('SELECT * FROM settings WHERE user_id = ?', [req.user.id]);
+        const company = settingsRows[0] || { company_name: 'Mon Entreprise', currency: 'FCFA' };
+
+       const taxRate = sale.tax_rate !== null && sale.tax_rate !== undefined 
+    ? parseFloat(sale.tax_rate) 
+    : parseFloat(company.tax_rate || 0);
+
         const doc = new PDFDocument({ margin: 50, size: 'A4' });
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename=facture_${saleId}.pdf`);
         doc.pipe(res);
-        
-        // ===== EN-TÊTE =====
+
+        // En-tête
         let y = await drawCompanyHeader(doc, company);
-        
-        // ===== TITRE FACTURE =====
-        doc.fillColor('#2c6e9e');
-        doc.fontSize(20).font('Helvetica-Bold')
+
+        // Titre
+        doc.fillColor('#2c6e9e').fontSize(20).font('Helvetica-Bold')
            .text(`FACTURE N° ${String(saleId).padStart(5, '0')}`, 50, y, { align: 'center' });
         y += 30;
-        
-        // ===== CADRE INFO CLIENT / FACTURE =====
-        doc.rect(50, y, 500, 70)
-           .fill('#f5f7fa')
-           .stroke('#e0e4e8', 0.5);
-        
-        doc.fillColor('#1a2a3a');
-        doc.fontSize(10).font('Helvetica-Bold')
+
+        // Cadre client / infos facture
+        doc.rect(50, y, 500, 70).fill('#f5f7fa').stroke('#e0e4e8', 0.5);
+        doc.fillColor('#1a2a3a').fontSize(10).font('Helvetica-Bold')
            .text('CLIENT', 60, y + 8);
-        doc.fillColor('#3a4a5a');
-        doc.fontSize(11).font('Helvetica')
+        doc.fillColor('#3a4a5a').fontSize(11).font('Helvetica')
            .text(sale.client_name || 'Client particulier', 60, y + 25);
         if (sale.client_address) {
-            doc.fontSize(9).font('Helvetica')
-               .text(sale.client_address, 60, y + 42);
+            doc.fontSize(9).font('Helvetica').text(sale.client_address, 60, y + 42);
         }
         if (sale.client_email) {
-            doc.fontSize(9).font('Helvetica')
-               .text(sale.client_email, 60, y + 58);
+            doc.fontSize(9).font('Helvetica').text(sale.client_email, 60, y + 58);
         }
-        
+
         const rightX = 350;
-        doc.fillColor('#1a2a3a');
-        doc.fontSize(10).font('Helvetica-Bold')
+        doc.fillColor('#1a2a3a').fontSize(10).font('Helvetica-Bold')
            .text('DÉTAILS FACTURE', rightX, y + 8);
-        doc.fillColor('#3a4a5a');
-        doc.fontSize(10).font('Helvetica')
+        doc.fillColor('#3a4a5a').fontSize(10).font('Helvetica')
            .text(`Date : ${new Date(sale.sale_date).toLocaleDateString('fr-FR')}`, rightX, y + 25);
-        
+
+        // Badge statut
         const statusMap = {
             'completed': { label: 'PAYÉE', color: '#27ae60' },
             'pending': { label: 'EN ATTENTE', color: '#f39c12' },
             'cancelled': { label: 'ANNULÉE', color: '#e74c3c' }
         };
         const statusInfo = statusMap[sale.status] || { label: 'INCONNU', color: '#95a5a6' };
-        
-        const badgeX = 400;
-        const badgeY = y + 42;
-        doc.rect(badgeX, badgeY, 90, 20)
-           .fill(statusInfo.color);
-        doc.fillColor('#ffffff');
-        doc.fontSize(8).font('Helvetica-Bold')
+        const badgeX = 400, badgeY = y + 42;
+        doc.rect(badgeX, badgeY, 90, 20).fill(statusInfo.color);
+        doc.fillColor('#ffffff').fontSize(8).font('Helvetica-Bold')
            .text(statusInfo.label, badgeX + 18, badgeY + 6);
-        
+
         y += 85;
-        
-        // ===== TABLEAU DES ARTICLES =====
+
+        // Tableau des articles
         const col1 = 60, col2 = 250, col3 = 350, col4 = 430, col5 = 490;
         const rowHeight = 22;
-        
-        doc.rect(50, y, 500, rowHeight)
-           .fill('#2c6e9e');
-        doc.fillColor('#ffffff');
-        doc.fontSize(9).font('Helvetica-Bold');
+        doc.rect(50, y, 500, rowHeight).fill('#2c6e9e');
+        doc.fillColor('#ffffff').fontSize(9).font('Helvetica-Bold');
         doc.text('PRODUIT', col1, y + 6);
         doc.text('QTÉ', col2, y + 6, { width: 60, align: 'right' });
         doc.text('PRIX UNIT.', col3, y + 6, { width: 70, align: 'right' });
         doc.text('TOTAL', col5, y + 6, { width: 50, align: 'right' });
-        
         y += rowHeight;
-        
-        // Lignes des articles
+
         let subtotal = 0;
-        let rowIndex = 0;
-        items.forEach(item => {
-            const bgColor = rowIndex % 2 === 0 ? '#ffffff' : '#f8fafc';
-            doc.rect(50, y, 500, rowHeight)
-               .fill(bgColor);
-            
-            doc.fillColor('#1a2a3a');
-            doc.fontSize(9).font('Helvetica');
+        items.forEach((item, idx) => {
+            const bg = idx % 2 === 0 ? '#ffffff' : '#f8fafc';
+            doc.rect(50, y, 500, rowHeight).fill(bg);
+            doc.fillColor('#1a2a3a').fontSize(9).font('Helvetica');
             doc.text(item.product_name || 'Produit', col1 + 2, y + 5);
             doc.text(item.quantity.toString(), col2, y + 5, { width: 60, align: 'right' });
-            // ✅ UTILISER formatPDFNumber AVEC VIRGULES
             doc.text(`${formatPDFNumber(item.unit_price)} ${company.currency}`, col3, y + 5, { width: 70, align: 'right' });
             doc.text(`${formatPDFNumber(item.total_price)} ${company.currency}`, col5, y + 5, { width: 50, align: 'right' });
-            
             subtotal += parseFloat(item.total_price);
             y += rowHeight;
-            rowIndex++;
         });
-        
+
         doc.moveTo(50, y).lineTo(550, y).stroke('#e0e4e8');
         y += 10;
-        
-        // ===== TOTAUX =====
+
+        // Totaux
         const totalX = 380;
-        const taxRate = parseFloat(company.tax_rate) || 20;
-        const taxAmount = subtotal * (taxRate / 100);
+        const taxAmount = sale.tax || 0;
         const remiseValue = (sale.remise_pct || 0) / 100 * subtotal;
-        const totalAfterRemise = subtotal - remiseValue;
-        const finalAmount = totalAfterRemise + taxAmount - (sale.acompte || 0);
-        
-        const lines = [
-            { label: 'Sous-total', value: formatPDFNumber(subtotal) },
-            { label: `TVA (${taxRate}%)`, value: formatPDFNumber(taxAmount) },
-        ];
-        
+        const acompteValue = sale.acompte || 0;
+        const finalAmount = sale.final_amount || 0;
+
+     const lines = [
+    { label: 'Sous-total', value: formatPDFNumber(sale.total_amount) }
+];
+if (taxRate > 0) {
+    lines.push({ label: `TVA (${taxRate}%)`, value: formatPDFNumber(sale.tax) });
+}
         if (sale.remise_pct && sale.remise_pct > 0) {
-            lines.push({ 
-                label: `Remise (${sale.remise_pct}%)`, 
-                value: `- ${formatPDFNumber(remiseValue)}` 
-            });
+            lines.push({ label: `Remise (${sale.remise_pct}%)`, value: `- ${formatPDFNumber(remiseValue)}` });
         }
-        if (sale.acompte && sale.acompte > 0) {
-            lines.push({ 
-                label: 'Acompte', 
-                value: `- ${formatPDFNumber(sale.acompte)}` 
-            });
+        if (acompteValue > 0) {
+            lines.push({ label: 'Acompte', value: `- ${formatPDFNumber(acompteValue)}` });
         }
-        
+
         lines.forEach((line, i) => {
             const isTotal = i === lines.length - 1;
             const yPos = y + i * 22;
-            
             doc.fillColor(isTotal ? '#1a2a3a' : '#3a4a5a');
             doc.fontSize(isTotal ? 11 : 10).font(isTotal ? 'Helvetica-Bold' : 'Helvetica');
             doc.text(line.label, totalX, yPos, { width: 100, align: 'right' });
             doc.text(`${line.value} ${company.currency}`, 460, yPos, { width: 80, align: 'right' });
         });
-        
+
         const totalY = y + lines.length * 22 + 8;
-        
-        // ===== TOTAL NET =====
-        doc.rect(350, totalY, 200, 30)
-           .fill('#2c6e9e');
-        doc.fillColor('#ffffff');
-        doc.fontSize(14).font('Helvetica-Bold');
+        doc.rect(350, totalY, 200, 30).fill('#2c6e9e');
+        doc.fillColor('#ffffff').fontSize(14).font('Helvetica-Bold');
         doc.text('NET À PAYER', 360, totalY + 8);
         doc.text(`${formatPDFNumber(finalAmount)} ${company.currency}`, 460, totalY + 8, { width: 80, align: 'right' });
-        
-        // ===== PIED DE PAGE =====
-        const footerY = 750;
-        doc.rect(50, footerY, 500, 25)
-           .fill('#f0f4f8');
-        doc.fillColor('#7a8a9a');
-        doc.fontSize(8).font('Helvetica');
-        doc.text('Merci de votre confiance • Facture générée par GestPro', 50, footerY + 8, { align: 'center' });
-        
+
+        // Pied
+        doc.rect(50, 750, 500, 25).fill('#f0f4f8');
+        doc.fillColor('#7a8a9a').fontSize(8).font('Helvetica');
+        doc.text('Merci de votre confiance • Facture générée par GestPro', 50, 758, { align: 'center' });
+
         doc.end();
     } catch (err) {
         console.error('Erreur génération facture:', err);
         res.status(500).json({ error: 'Erreur génération facture' });
     }
 });
-
 // ========== ROUTE BON DE COMMANDE ==========
 app.get('/api/sales/:id/order', authenticate, async (req, res) => {
     try {
