@@ -872,7 +872,6 @@ app.put('/api/sales/:id', authenticate, async (req, res) => {
         connection.release();
     }
 });
-
 // ========== ROUTE PAIEMENT CORRIGÉE ==========
 app.post('/api/sales/:id/payment', authenticate, async (req, res) => {
     const { amount, payment_method } = req.body;
@@ -880,38 +879,66 @@ app.post('/api/sales/:id/payment', authenticate, async (req, res) => {
     const connection = await pool.getConnection();
     try {
         await connection.beginTransaction();
-        const [saleRows] = await connection.query('SELECT * FROM sales WHERE id=? AND user_id=? FOR UPDATE', [saleId, req.user.id]);
-        if (saleRows.length === 0) return res.status(404).json({ error: 'Facture non trouvée' });
+
+        const [saleRows] = await connection.query(
+            'SELECT * FROM sales WHERE id = ? AND user_id = ? FOR UPDATE',
+            [saleId, req.user.id]
+        );
+        if (saleRows.length === 0) {
+            return res.status(404).json({ error: 'Facture non trouvée' });
+        }
         const sale = saleRows[0];
-        if (sale.status === 'completed') return res.status(400).json({ error: 'Cette facture est déjà réglée' });
-        
-        const [paidRows] = await connection.query('SELECT COALESCE(SUM(amount),0) as total_paid FROM payments WHERE sale_id=?', [saleId]);
+
+        if (sale.status === 'completed') {
+            return res.status(400).json({ error: 'Cette facture est déjà réglée' });
+        }
+
+        const [paidRows] = await connection.query(
+            'SELECT COALESCE(SUM(amount), 0) as total_paid FROM payments WHERE sale_id = ?',
+            [saleId]
+        );
         const totalPaid = parseFloat(paidRows[0].total_paid);
         const remaining = parseFloat(sale.final_amount) - totalPaid;
         const paymentAmount = parseFloat(amount);
-        
+
+        if (isNaN(paymentAmount) || paymentAmount <= 0) {
+            return res.status(400).json({ error: 'Montant invalide' });
+        }
         if (paymentAmount > remaining) {
             return res.status(400).json({ error: `Le montant dépasse le reste à payer (${formatNumber(remaining)} FCFA)` });
         }
-        
-        await connection.query('INSERT INTO payments (sale_id, amount, payment_method) VALUES (?, ?, ?)', [saleId, paymentAmount, payment_method || 'cash']);
-        await connection.query(`INSERT INTO cash_register (user_id, transaction_type, amount, description, reference_id) VALUES (?, 'deposit', ?, ?, ?)`, [req.user.id, paymentAmount, `Règlement facture #${saleId}`, saleId]);
-        
+
+        await connection.query(
+            'INSERT INTO payments (sale_id, amount, payment_method) VALUES (?, ?, ?)',
+            [saleId, paymentAmount, payment_method || 'cash']
+        );
+
+        await connection.query(
+            `INSERT INTO cash_register (user_id, transaction_type, amount, description, reference_id)
+             VALUES (?, 'deposit', ?, ?, ?)`,
+            [req.user.id, paymentAmount, `Règlement facture #${saleId}`, saleId]
+        );
+
         const newTotalPaid = totalPaid + paymentAmount;
         let newStatus = sale.status;
+
         if (newTotalPaid >= parseFloat(sale.final_amount) - 0.01) {
-            await connection.query('UPDATE sales SET status = "completed" WHERE id = ?', [saleId]);
+            // ✅ Utilisation de paramètres préparés (pas de guillemets dans la requête)
+            await connection.query(
+                'UPDATE sales SET status = ? WHERE id = ?',
+                ['completed', saleId]  // ✅ Chaîne simple
+            );
             newStatus = 'completed';
         }
-        
+
         await connection.commit();
-        res.json({ 
-            message: '✅ Règlement enregistré', 
-            remaining: parseFloat(sale.final_amount) - newTotalPaid, 
+        res.json({
+            message: '✅ Règlement enregistré',
+            remaining: parseFloat(sale.final_amount) - newTotalPaid,
             status: newStatus,
             paid: newTotalPaid
         });
-    } catch(err) {
+    } catch (err) {
         await connection.rollback();
         console.error('Erreur paiement:', err);
         res.status(500).json({ error: 'Erreur interne lors du règlement: ' + err.message });
@@ -919,7 +946,6 @@ app.post('/api/sales/:id/payment', authenticate, async (req, res) => {
         connection.release();
     }
 });
-
 // ========== ROUTES CAISSE ==========
 app.get('/api/cash-register', authenticate, async (req, res) => {
     const [rows] = await pool.query('SELECT * FROM cash_register WHERE user_id=? ORDER BY created_at DESC LIMIT 200', [req.user.id]);

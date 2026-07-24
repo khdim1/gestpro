@@ -160,6 +160,16 @@
         .cart-item .item-qty button:hover { background: var(--primary-light); }
         .cart-item .item-qty span { min-width: 20px; text-align: center; font-weight: 600; }
         .cart-item .item-price { font-weight: 600; color: var(--primary); min-width: 70px; text-align: right; font-size: 0.8rem; }
+        .cart-item .item-price-edit {
+    margin: 0 6px;
+}
+.cart-item .item-price-edit input {
+    width: 80px !important;
+    padding: 2px 6px !important;
+    font-size: 0.8rem;
+    text-align: center;
+    border-radius: 0.5rem !important;
+}
         .cart-item .item-remove { color: var(--danger); cursor: pointer; padding: 0 4px; font-size: 1rem; transition: var(--transition); }
         .cart-item .item-remove:hover { transform: scale(1.2); }
 
@@ -1009,7 +1019,9 @@ async function renderProducts() {
 
         const html = `
             <div class="row mb-3">
-                <div class="col-md-4"><input type="text" id="searchProduct" class="form-control" placeholder="🔍 Rechercher un produit..."></div>
+                <div class="col-md-4">
+    <input type="text" id="searchProduct" class="form-control" placeholder="🔍 Rechercher un produit..." oninput="searchProducts()">
+</div>
                 <div class="col-md-2"><button class="btn btn-outline-secondary w-100" onclick="searchProducts()"><i class="bi bi-search"></i> Rechercher</button></div>
                 <div class="col-md-2"><button class="btn btn-outline-warning w-100" id="lowStockFilter" onclick="searchProducts(true)"><i class="bi bi-exclamation-triangle"></i> Stock faible</button></div>
                 <div class="col-md-4 text-end"><button class="btn btn-primary" onclick="showProductModal()"><i class="bi bi-plus-circle"></i> Nouveau produit</button></div>
@@ -1590,35 +1602,49 @@ window.filterProducts = () => {
     if (deferredCheck && deferredFields) {
         deferredCheck.addEventListener('change', () => deferredFields.style.display = deferredCheck.checked ? 'block' : 'none');
     }
-
-    window.renderCart = () => {
-        const container = document.getElementById('cartList');
-        const countEl = document.getElementById('cartCount');
-        let total = 0;
-        if (!cart.length) {
-            container.innerHTML = '<div class="text-center text-muted-custom py-4"><i class="bi bi-cart" style="font-size:2rem;"></i><p class="mb-0">Panier vide</p></div>';
-            document.getElementById('cartTotal').innerText = '0 FCFA';
-            if (countEl) countEl.innerText = '0';
-            return;
-        }
-        container.innerHTML = cart.map((item, idx) => {
-            total += item.total_price;
-            return `
-                <div class="cart-item">
-                    <span class="item-name" title="${item.name}">${item.name}${item.isWholesale ? ' 📦' : ''}</span>
-                    <div class="item-qty">
-                        <button onclick="updateQty(${idx}, -1)"><i class="bi bi-dash"></i></button>
-                        <span>${item.quantity}</span>
-                        <button onclick="updateQty(${idx}, 1)"><i class="bi bi-plus"></i></button>
-                    </div>
-                    <span class="item-price">${formatNumber(item.total_price)}</span>
-                    <span class="item-remove" onclick="removeFromCart(${idx})"><i class="bi bi-x-circle"></i></span>
+window.renderCart = () => {
+    const container = document.getElementById('cartList');
+    const countEl = document.getElementById('cartCount');
+    let total = 0;
+    if (!cart.length) {
+        container.innerHTML = '<div class="text-center text-muted-custom py-4"><i class="bi bi-cart" style="font-size:2rem;"></i><p class="mb-0">Panier vide</p></div>';
+        document.getElementById('cartTotal').innerText = '0 FCFA';
+        if (countEl) countEl.innerText = '0';
+        return;
+    }
+    container.innerHTML = cart.map((item, idx) => {
+        total += item.total_price;
+        return `
+            <div class="cart-item">
+                <span class="item-name">${item.name}</span>
+                <div class="item-qty">
+                    <button onclick="updateQty(${idx}, -1)"><i class="bi bi-dash"></i></button>
+                    <span>${item.quantity}</span>
+                    <button onclick="updateQty(${idx}, 1)"><i class="bi bi-plus"></i></button>
                 </div>
-            `;
-        }).join('');
-        document.getElementById('cartTotal').innerText = formatNumber(total) + ' FCFA';
-        if (countEl) countEl.innerText = cart.length;
-    };
+                <div class="item-price-edit">
+                    <input type="number" class="form-control form-control-sm" style="width:80px;display:inline-block;" 
+                           value="${item.unit_price}" step="10" min="0" 
+                           onchange="updateUnitPrice(${idx}, this.value)">
+                </div>
+                <span class="item-price">${formatNumber(item.total_price)}</span>
+                <span class="item-remove" onclick="removeFromCart(${idx})"><i class="bi bi-x-circle"></i></span>
+            </div>
+        `;
+    }).join('');
+    document.getElementById('cartTotal').innerText = formatNumber(total) + ' FCFA';
+    if (countEl) countEl.innerText = cart.length;
+};
+window.updateUnitPrice = (idx, newPrice) => {
+    const price = parseFloat(newPrice);
+    if (isNaN(price) || price < 0) {
+        alert('Prix invalide');
+        return;
+    }
+    cart[idx].unit_price = price;
+    cart[idx].total_price = price * cart[idx].quantity;
+    renderCart();
+};
 
     window.updateQty = (idx, delta) => {
         const item = cart[idx];
