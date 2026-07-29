@@ -443,20 +443,89 @@ app.post('/api/register', async (req, res) => {
         res.status(201).json({ message: 'Utilisateur créé' });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
 app.post('/api/login', async (req, res) => {
     const { email, password } = req.body;
     try {
-        const [rows] = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
-        if (rows.length === 0) return res.status(401).json({ error: 'Identifiants invalides' });
-        const user = rows[0];
-        const valid = await bcrypt.compare(password, user.password_hash);
-        if (!valid) return res.status(401).json({ error: 'Identifiants invalides' });
-        const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
-        res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
-    } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
-});
+        // 1. Chercher d’abord dans la table des utilisateurs principaux
+        let [rows] = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
+        let user = rows[0];
+        let isSubUser = false;
+        let subUserId = null;
+        let permissions = [];
 
+        if (user) {
+            // Vérifier le mot de passe pour un utilisateur principal
+            const valid = await bcrypt.compare(password, user.password_hash);
+            if (!valid) {
+                return res.status(401).json({ error: 'Identifiants invalides' });
+            }
+            // Récupérer les permissions (toutes pour un admin)
+            permissions = ['*']; // ou toutes les permissions
+        } else {
+            // 2. Si aucun utilisateur principal, chercher dans les sous‑comptes
+            const [subRows] = await pool.query(
+                `SELECT su.*, u.name as parent_name 
+                 FROM sub_users su 
+                 JOIN users u ON su.parent_id = u.id 
+                 WHERE su.email = ? AND su.is_active = 1`,
+                [email]
+            );
+            if (subRows.length === 0) {
+                return res.status(401).json({ error: 'Identifiants invalides ou compte désactivé' });
+            }
+            const subUser = subRows[0];
+            const valid = await bcrypt.compare(password, subUser.password_hash);
+            if (!valid) {
+                return res.status(401).json({ error: 'Identifiants invalides' });
+            }
+            // C’est un sous‑utilisateur
+            isSubUser = true;
+            subUserId = subUser.id;
+            // Récupérer les permissions du sous‑utilisateur
+            const [perms] = await pool.query(
+                `SELECT p.name 
+                 FROM sub_user_permissions sp 
+                 JOIN permissions p ON sp.permission_id = p.id 
+                 WHERE sp.sub_user_id = ?`,
+                [subUser.id]
+            );
+            permissions = perms.map(p => p.name);
+            // Construire l’objet utilisateur (similaire à un user principal)
+            user = {
+                id: subUser.id,
+                name: subUser.name,
+                email: subUser.email,
+                role: 'sub_user',
+                parent_name: subUser.parent_name,
+                permissions: permissions
+            };
+        }
+
+        // Générer le token (ajouter des infos pour les sous‑utilisateurs)
+        const token = jwt.sign({
+            userId: user.id,
+            email: user.email,
+            isSubUser: isSubUser,
+            subUserId: isSubUser ? subUserId : null,
+            permissions: permissions
+        }, JWT_SECRET, { expiresIn: '7d' });
+
+        res.json({
+            token,
+            user: {
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                role: user.role || 'sub_user',
+                isSubUser: isSubUser,
+                permissions: permissions
+            }
+        });
+    } catch (err) {
+        console.error('Erreur login:', err);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
 // ========== ROUTES CLIENTS ==========
 app.get('/api/clients', authenticate, async (req, res) => {
     const { search } = req.query;
@@ -840,108 +909,80 @@ app.get('/api/sales/:id', authenticate, async (req, res) => {
     const [payments] = await pool.query('SELECT * FROM payments WHERE sale_id = ? ORDER BY payment_date', [req.params.id]);
     res.json({ sale: saleRows[0], items, payments });
 });
-
+// ========== MODIFIER UNE VENTE (REMISE, ACOMPTE, CLIENT) ==========
 app.put('/api/sales/:id', authenticate, async (req, res) => {
-    const { remise_pct, acompte } = req.body;
+    const { remise_pct, acompte, client_name, client_email, client_phone, client_address } = req.body;
     const connection = await pool.getConnection();
     try {
         await connection.beginTransaction();
-        const [saleRows] = await connection.query('SELECT * FROM sales WHERE id=? AND user_id=? FOR UPDATE', [req.params.id, req.user.id]);
-        if (saleRows.length === 0) return res.status(404).json({ error: 'Vente non trouvée' });
+
+        // Vérifier que la vente existe et appartient à l'utilisateur
+        const [saleRows] = await connection.query(
+            'SELECT * FROM sales WHERE id = ? AND user_id = ? FOR UPDATE',
+            [req.params.id, req.user.id]
+        );
+        if (saleRows.length === 0) {
+            return res.status(404).json({ error: 'Vente non trouvée' });
+        }
         const sale = saleRows[0];
+
+        // Vérifier si la vente est déjà payée
+        if (sale.status === 'completed') {
+            return res.status(400).json({ error: 'Impossible de modifier une vente déjà payée' });
+        }
+
+        // ===== GESTION DU CLIENT =====
+        let client_id = sale.client_id;
+        if (client_name !== undefined) {
+            // Si un nom de client est fourni
+            if (client_name && client_name.trim() !== '') {
+                // Chercher si le client existe déjà
+                let [existing] = await connection.query(
+                    'SELECT id FROM clients WHERE user_id = ? AND name = ?',
+                    [req.user.id, client_name.trim()]
+                );
+                if (existing.length > 0) {
+                    // Client existant
+                    client_id = existing[0].id;
+                } else {
+                    // Créer un nouveau client
+                    const [result] = await connection.query(
+                        'INSERT INTO clients (user_id, name, email, phone, address) VALUES (?, ?, ?, ?, ?)',
+                        [req.user.id, client_name.trim(), client_email || null, client_phone || null, client_address || null]
+                    );
+                    client_id = result.insertId;
+                }
+            } else {
+                // Si client_name est vide, on retire le client
+                client_id = null;
+            }
+        }
+
+        // ===== RECALCUL DES TOTAUX =====
         const newRemise = remise_pct !== undefined ? remise_pct : sale.remise_pct;
         const newAcompte = acompte !== undefined ? acompte : sale.acompte;
         const remise_valeur = (newRemise || 0) / 100 * sale.total_amount;
         const total_apres_remise = sale.total_amount - remise_valeur;
         const new_final = total_apres_remise + sale.tax - (newAcompte || 0);
-        await connection.query('UPDATE sales SET remise_pct=?, acompte=?, final_amount=? WHERE id=?', [newRemise, newAcompte, new_final, req.params.id]);
-        if (sale.status === 'completed') {
-            const diff = new_final - sale.final_amount;
-            if (diff !== 0) {
-                await connection.query('UPDATE payments SET amount=? WHERE sale_id=?', [new_final, req.params.id]);
-                await connection.query('UPDATE cash_register SET amount=amount+? WHERE reference_id=? AND transaction_type="sale"', [diff, req.params.id]);
-            }
-        }
-        await connection.commit();
-        res.json({ message: 'Vente modifiée' });
-    } catch(err) {
-        await connection.rollback();
-        console.error(err);
-        res.status(500).json({ error: err.message });
-    } finally {
-        connection.release();
-    }
-});
-// ========== ROUTE PAIEMENT CORRIGÉE ==========
-app.post('/api/sales/:id/payment', authenticate, async (req, res) => {
-    const { amount, payment_method } = req.body;
-    const saleId = req.params.id;
-    const connection = await pool.getConnection();
-    try {
-        await connection.beginTransaction();
 
-        const [saleRows] = await connection.query(
-            'SELECT * FROM sales WHERE id = ? AND user_id = ? FOR UPDATE',
-            [saleId, req.user.id]
-        );
-        if (saleRows.length === 0) {
-            return res.status(404).json({ error: 'Facture non trouvée' });
-        }
-        const sale = saleRows[0];
-
-        if (sale.status === 'completed') {
-            return res.status(400).json({ error: 'Cette facture est déjà réglée' });
-        }
-
-        const [paidRows] = await connection.query(
-            'SELECT COALESCE(SUM(amount), 0) as total_paid FROM payments WHERE sale_id = ?',
-            [saleId]
-        );
-        const totalPaid = parseFloat(paidRows[0].total_paid);
-        const remaining = parseFloat(sale.final_amount) - totalPaid;
-        const paymentAmount = parseFloat(amount);
-
-        if (isNaN(paymentAmount) || paymentAmount <= 0) {
-            return res.status(400).json({ error: 'Montant invalide' });
-        }
-        if (paymentAmount > remaining) {
-            return res.status(400).json({ error: `Le montant dépasse le reste à payer (${formatNumber(remaining)} FCFA)` });
-        }
-
+        // ===== MISE À JOUR =====
         await connection.query(
-            'INSERT INTO payments (sale_id, amount, payment_method) VALUES (?, ?, ?)',
-            [saleId, paymentAmount, payment_method || 'cash']
+            `UPDATE sales 
+             SET remise_pct = ?, acompte = ?, final_amount = ?, client_id = ?
+             WHERE id = ?`,
+            [newRemise, newAcompte, new_final, client_id, req.params.id]
         );
-
-        await connection.query(
-            `INSERT INTO cash_register (user_id, transaction_type, amount, description, reference_id)
-             VALUES (?, 'deposit', ?, ?, ?)`,
-            [req.user.id, paymentAmount, `Règlement facture #${saleId}`, saleId]
-        );
-
-        const newTotalPaid = totalPaid + paymentAmount;
-        let newStatus = sale.status;
-
-        if (newTotalPaid >= parseFloat(sale.final_amount) - 0.01) {
-            // ✅ Utilisation de paramètres préparés (pas de guillemets dans la requête)
-            await connection.query(
-                'UPDATE sales SET status = ? WHERE id = ?',
-                ['completed', saleId]  // ✅ Chaîne simple
-            );
-            newStatus = 'completed';
-        }
 
         await connection.commit();
-        res.json({
-            message: '✅ Règlement enregistré',
-            remaining: parseFloat(sale.final_amount) - newTotalPaid,
-            status: newStatus,
-            paid: newTotalPaid
+        res.json({ 
+            message: 'Vente modifiée avec succès',
+            client_id: client_id,
+            final_amount: new_final
         });
     } catch (err) {
         await connection.rollback();
-        console.error('Erreur paiement:', err);
-        res.status(500).json({ error: 'Erreur interne lors du règlement: ' + err.message });
+        console.error('Erreur modification vente:', err);
+        res.status(500).json({ error: err.message });
     } finally {
         connection.release();
     }
@@ -1099,6 +1140,127 @@ app.get('/api/settings', authenticate, async (req, res) => {
     } catch (err) {
         console.error('❌ Erreur GET /settings:', err);
         res.status(500).json({ error: 'Erreur lors du chargement des paramètres.' });
+    }
+});
+// ========== MODIFIER LES ARTICLES D'UNE VENTE ==========
+app.put('/api/sales/:id/items', authenticate, async (req, res) => {
+    const saleId = req.params.id;
+    const { items } = req.body; // items: [{product_id, quantity, unit_price}]
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        // Vérifier que la vente existe et appartient à l'utilisateur
+        const [saleRows] = await connection.query(
+            'SELECT * FROM sales WHERE id = ? AND user_id = ? FOR UPDATE',
+            [saleId, req.user.id]
+        );
+        if (saleRows.length === 0) {
+            return res.status(404).json({ error: 'Vente non trouvée' });
+        }
+        const sale = saleRows[0];
+
+        // Vérifier si la vente est déjà payée
+        if (sale.status === 'completed') {
+            return res.status(400).json({ error: 'Impossible de modifier une vente déjà payée' });
+        }
+
+        // Récupérer les anciens articles
+        const [oldItems] = await connection.query(
+            'SELECT product_id, quantity FROM sale_items WHERE sale_id = ?',
+            [saleId]
+        );
+
+        // Calculer les différences de stock
+        const oldMap = {};
+        oldItems.forEach(item => { oldMap[item.product_id] = item.quantity; });
+
+        const newMap = {};
+        items.forEach(item => { newMap[item.product_id] = (newMap[item.product_id] || 0) + item.quantity; });
+
+        // Supprimer les anciens articles
+        await connection.query('DELETE FROM sale_items WHERE sale_id = ?', [saleId]);
+
+        // Insérer les nouveaux articles et ajuster le stock
+        let subtotal = 0;
+        for (const item of items) {
+            if (!item.product_id || !item.quantity || !item.unit_price) {
+                throw new Error('Données d\'article invalides');
+            }
+            // Vérifier le stock disponible (si augmentation)
+            const oldQty = oldMap[item.product_id] || 0;
+            const newQty = item.quantity;
+            const diff = newQty - oldQty;
+
+            if (diff > 0) {
+                const [prod] = await connection.query(
+                    'SELECT quantity FROM products WHERE id = ? AND user_id = ? FOR UPDATE',
+                    [item.product_id, req.user.id]
+                );
+                if (prod.length === 0) throw new Error(`Produit ${item.product_id} inexistant`);
+                if (prod[0].quantity < diff) {
+                    throw new Error(`Stock insuffisant pour le produit ${item.product_id}`);
+                }
+                // Déduire du stock
+                await connection.query(
+                    'UPDATE products SET quantity = quantity - ? WHERE id = ?',
+                    [diff, item.product_id]
+                );
+                await connection.query(
+                    `INSERT INTO stock_movements (product_id, user_id, type, quantity_change, quantity_before, quantity_after, reference, notes)
+                     VALUES (?, ?, 'sale', ?, ?, ?, ?, ?)`,
+                    [item.product_id, req.user.id, -diff, prod[0].quantity, prod[0].quantity - diff, `MODIFICATION VENTE #${saleId}`, 'Ajustement stock']
+                );
+            } else if (diff < 0) {
+                // Rendre le stock
+                await connection.query(
+                    'UPDATE products SET quantity = quantity + ? WHERE id = ?',
+                    [-diff, item.product_id]
+                );
+                const [prod] = await connection.query(
+                    'SELECT quantity FROM products WHERE id = ? FOR UPDATE',
+                    [item.product_id]
+                );
+                await connection.query(
+                    `INSERT INTO stock_movements (product_id, user_id, type, quantity_change, quantity_before, quantity_after, reference, notes)
+                     VALUES (?, ?, 'return', ?, ?, ?, ?, ?)`,
+                    [item.product_id, req.user.id, -diff, prod[0].quantity + diff, prod[0].quantity, `MODIFICATION VENTE #${saleId}`, 'Retour stock']
+                );
+            }
+
+            // Insérer le nouvel article
+            const total_price = item.quantity * item.unit_price;
+            await connection.query(
+                'INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, total_price) VALUES (?, ?, ?, ?, ?)',
+                [saleId, item.product_id, item.quantity, item.unit_price, total_price]
+            );
+            subtotal += total_price;
+        }
+
+        // Recalculer les totaux
+        const [settings] = await connection.query('SELECT tax_rate FROM settings WHERE user_id = ?', [req.user.id]);
+        const tax_rate = settings[0]?.tax_rate !== null && settings[0]?.tax_rate !== undefined
+            ? parseFloat(settings[0].tax_rate)
+            : 0;
+        const tax = subtotal * (tax_rate / 100);
+        const remise_valeur = (sale.remise_pct || 0) / 100 * subtotal;
+        const total_apres_remise = subtotal - remise_valeur;
+        const final_amount = total_apres_remise + tax - (sale.acompte || 0);
+
+        // Mettre à jour la vente
+        await connection.query(
+            'UPDATE sales SET total_amount = ?, tax = ?, final_amount = ? WHERE id = ?',
+            [subtotal, tax, final_amount, saleId]
+        );
+
+        await connection.commit();
+        res.json({ message: 'Vente modifiée avec succès', final_amount });
+    } catch (err) {
+        await connection.rollback();
+        console.error('Erreur modification vente:', err);
+        res.status(400).json({ error: err.message });
+    } finally {
+        connection.release();
     }
 });
 // ========== ROUTES PARAMÈTRES (CORRIGÉ DÉFINITIF) ==========

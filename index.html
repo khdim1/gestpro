@@ -1414,6 +1414,13 @@ async function renderSales() {
                     <div class="modal-body">
                         <div id="editSaleItems"></div>
                         <hr>
+<div class="row">
+    <div class="col-6">
+        <strong>Sous-total :</strong>
+        <span id="editSubtotalDisplay">0 FCFA</span>
+    </div>
+</div>
+                        <hr>
                         <div class="row">
                             <div class="col-md-6"><label class="form-label">Remise (%)</label><input type="number" id="editRemisePct" class="form-control" step="0.01"></div>
                             <div class="col-md-6"><label class="form-label">Acompte (FCFA)</label><input type="number" id="editAcompte" class="form-control" step="0.01"></div>
@@ -1824,34 +1831,267 @@ function renderSalesTable(sales) {
             alert('❌ Erreur: ' + err.message);
         }
     };
-
-    window.editSale = async (saleId) => {
+window.editSale = async (saleId) => {
+    try {
         const saleData = await apiCall(`/sales/${saleId}`);
         const sale = saleData.sale;
         const items = saleData.items;
+
+        // Remplir les champs de remise et acompte
         document.getElementById('editSaleId').innerText = saleId;
         document.getElementById('editRemisePct').value = sale.remise_pct || 0;
         document.getElementById('editAcompte').value = sale.acompte || 0;
-        let itemsHtml = '<h6>Articles :</h6><div class="table-wrapper"><table class="table table-sm"><thead><tr><th>Produit</th><th>Quantité</th><th>Prix unit.</th><th>Total</th></tr></thead><tbody>';
-        items.forEach(item => { itemsHtml += `<tr><td>${item.product_name}</td><td>${item.quantity}</td><td>${formatNumber(item.unit_price)} FCFA</td><td>${formatNumber(item.total_price)} FCFA</td></tr>`; });
-        itemsHtml += '</tbody></table></div>';
-        document.getElementById('editSaleItems').innerHTML = itemsHtml;
+
+        // Récupérer les informations du client
+        const clientName = sale.client_name || '';
+        const clientEmail = sale.client_email || '';
+        const clientPhone = sale.client_phone || '';
+        const clientAddress = sale.client_address || '';
+
+        // Construire le HTML des champs client
+        const clientHtml = `
+            <div class="row g-2 mb-2">
+                <div class="col-md-4">
+                    <label class="form-label" style="font-size:0.8rem;">Client</label>
+                    <input type="text" id="editClientName" class="form-control form-control-sm" value="${clientName}" placeholder="Nom du client">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label" style="font-size:0.8rem;">Email</label>
+                    <input type="email" id="editClientEmail" class="form-control form-control-sm" value="${clientEmail}" placeholder="Email">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label" style="font-size:0.8rem;">Téléphone</label>
+                    <input type="text" id="editClientPhone" class="form-control form-control-sm" value="${clientPhone}" placeholder="Téléphone">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label" style="font-size:0.8rem;"> </label>
+                    <button class="btn btn-sm btn-outline-secondary w-100" onclick="clearClientFields()">
+                        <i class="bi bi-x-circle"></i> Effacer
+                    </button>
+                </div>
+            </div>
+            <div class="mb-2">
+                <label class="form-label" style="font-size:0.8rem;">Adresse</label>
+                <input type="text" id="editClientAddress" class="form-control form-control-sm" value="${clientAddress}" placeholder="Adresse">
+            </div>
+            <hr>
+        `;
+
+        // Construire le HTML des articles
+        let itemsHtml = `
+            <h6>Articles</h6>
+            <div class="table-wrapper">
+                <table class="table table-sm">
+                    <thead>
+                        <tr>
+                            <th>Produit</th>
+                            <th>Quantité</th>
+                            <th>Prix unit.</th>
+                            <th>Total</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="editItemsBody">
+                        ${items.map((item, idx) => `
+                            <tr data-index="${idx}">
+                                <td>${item.product_name}</td>
+                                <td>
+                                    <input type="number" class="form-control form-control-sm edit-qty" style="width:70px;" 
+                                           value="${item.quantity}" min="1" step="1" data-id="${item.product_id}">
+                                </td>
+                                <td>
+                                    <input type="number" class="form-control form-control-sm edit-price" style="width:100px;" 
+                                           value="${item.unit_price}" min="0" step="10" data-id="${item.product_id}">
+                                </td>
+                                <td class="edit-total">${formatNumber(item.total_price)} FCFA</td>
+                                <td>
+                                    <button class="btn btn-sm btn-danger remove-item" data-id="${item.product_id}">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+            <button class="btn btn-sm btn-secondary mt-2" onclick="addItemToEditSale()">
+                <i class="bi bi-plus-circle"></i> Ajouter un produit
+            </button>
+            <div id="editAddItemArea" style="display:none; margin-top:10px;">
+                <div class="row g-2">
+                    <div class="col-5">
+                        <select id="editAddProductSelect" class="form-select form-select-sm">
+                            ${allProducts.map(p => `<option value="${p.id}">${p.name}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="col-2">
+                        <input type="number" id="editAddQty" class="form-control form-control-sm" value="1" min="1">
+                    </div>
+                    <div class="col-3">
+                        <input type="number" id="editAddPrice" class="form-control form-control-sm" placeholder="Prix unit." min="0" step="10">
+                    </div>
+                    <div class="col-2">
+                        <button class="btn btn-sm btn-success" onclick="confirmAddItemToEdit()">
+                            <i class="bi bi-check"></i>
+                        </button>
+                        <button class="btn btn-sm btn-secondary" onclick="cancelAddItemToEdit()">
+                            <i class="bi bi-x"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Insérer le tout dans le container
+        document.getElementById('editSaleItems').innerHTML = clientHtml + itemsHtml;
+
+        // Événements pour recalculer les totaux
+        document.querySelectorAll('.edit-qty, .edit-price').forEach(input => {
+            input.addEventListener('input', recalcEditTotals);
+        });
+
+        // Supprimer un article
+        document.querySelectorAll('.remove-item').forEach(btn => {
+            btn.addEventListener('click', function() {
+                this.closest('tr').remove();
+                recalcEditTotals();
+            });
+        });
+
         new bootstrap.Modal(document.getElementById('editSaleModal')).show();
-    };
+    } catch (err) {
+        alert('❌ Erreur: ' + err.message);
+    }
+};
+// ----- Recalcul des totaux dans le modal -----
+function recalcEditTotals() {
+    let subtotal = 0;
+    document.querySelectorAll('#editItemsBody tr').forEach(row => {
+        const qty = parseInt(row.querySelector('.edit-qty')?.value) || 0;
+        const price = parseFloat(row.querySelector('.edit-price')?.value) || 0;
+        const total = qty * price;
+        const totalCell = row.querySelector('.edit-total');
+        if (totalCell) totalCell.innerText = formatNumber(total) + ' FCFA';
+        subtotal += total;
+    });
+    // Optionnel : afficher le sous-total quelque part
+    const display = document.getElementById('editSubtotalDisplay');
+    if (display) display.innerText = formatNumber(subtotal) + ' FCFA';
+}
 
-    window.saveSaleModification = async () => {
-        const saleId = document.getElementById('editSaleId').innerText;
-        const remise_pct = parseFloat(document.getElementById('editRemisePct').value) || 0;
-        const acompte = parseFloat(document.getElementById('editAcompte').value) || 0;
-        try {
-            await apiCall(`/sales/${saleId}`, 'PUT', { remise_pct, acompte });
-            alert('✅ Vente modifiée avec succès');
-            bootstrap.Modal.getInstance(document.getElementById('editSaleModal')).hide();
-            loadSalesList();
-            renderDashboard();
-        } catch(err) { alert('❌ Erreur : ' + err.message); }
-    };
+// ----- Effacer les champs client -----
+function clearClientFields() {
+    document.getElementById('editClientName').value = '';
+    document.getElementById('editClientEmail').value = '';
+    document.getElementById('editClientPhone').value = '';
+    document.getElementById('editClientAddress').value = '';
+}
 
+// ----- Ajouter un article (afficher le formulaire) -----
+function addItemToEditSale() {
+    document.getElementById('editAddItemArea').style.display = 'block';
+}
+
+// ----- Annuler l'ajout -----
+function cancelAddItemToEdit() {
+    document.getElementById('editAddItemArea').style.display = 'none';
+}
+
+// ----- Confirmer l'ajout -----
+function confirmAddItemToEdit() {
+    const productId = document.getElementById('editAddProductSelect').value;
+    const qty = parseInt(document.getElementById('editAddQty').value) || 1;
+    const price = parseFloat(document.getElementById('editAddPrice').value) || 0;
+    if (!productId || qty <= 0 || price <= 0) {
+        alert('Veuillez remplir tous les champs');
+        return;
+    }
+    // Trouver le nom du produit
+    const product = allProducts.find(p => p.id == productId);
+    if (!product) return;
+    const row = document.createElement('tr');
+    row.innerHTML = `
+        <td>${product.name}</td>
+        <td>
+            <input type="number" class="form-control form-control-sm edit-qty" style="width:70px;" 
+                   value="${qty}" min="1" step="1" data-id="${productId}">
+        </td>
+        <td>
+            <input type="number" class="form-control form-control-sm edit-price" style="width:100px;" 
+                   value="${price}" min="0" step="10" data-id="${productId}">
+        </td>
+        <td class="edit-total">${formatNumber(qty * price)} FCFA</td>
+        <td>
+            <button class="btn btn-sm btn-danger remove-item" data-id="${productId}">
+                <i class="bi bi-trash"></i>
+            </button>
+        </td>
+    `;
+    document.getElementById('editItemsBody').appendChild(row);
+    // Ajouter les événements
+    row.querySelectorAll('.edit-qty, .edit-price').forEach(input => {
+        input.addEventListener('input', recalcEditTotals);
+    });
+    row.querySelector('.remove-item').addEventListener('click', function() {
+        this.closest('tr').remove();
+        recalcEditTotals();
+    });
+    recalcEditTotals();
+    cancelAddItemToEdit();
+}
+
+// ----- Enregistrer les modifications -----
+window.saveSaleModification = async () => {
+    const saleId = document.getElementById('editSaleId').innerText;
+
+    // Récupérer les données client
+    const client_name = document.getElementById('editClientName')?.value?.trim() || '';
+    const client_email = document.getElementById('editClientEmail')?.value?.trim() || '';
+    const client_phone = document.getElementById('editClientPhone')?.value?.trim() || '';
+    const client_address = document.getElementById('editClientAddress')?.value?.trim() || '';
+
+    // Récupérer la remise et l'acompte
+    const remise_pct = parseFloat(document.getElementById('editRemisePct').value) || 0;
+    const acompte = parseFloat(document.getElementById('editAcompte').value) || 0;
+
+    // Récupérer les articles
+    const items = [];
+    document.querySelectorAll('#editItemsBody tr').forEach(row => {
+        const product_id = row.querySelector('.edit-qty')?.dataset?.id;
+        const quantity = parseInt(row.querySelector('.edit-qty')?.value) || 0;
+        const unit_price = parseFloat(row.querySelector('.edit-price')?.value) || 0;
+        if (product_id && quantity > 0 && unit_price >= 0) {
+            items.push({ product_id, quantity, unit_price });
+        }
+    });
+
+    if (items.length === 0) {
+        alert('La vente doit contenir au moins un article');
+        return;
+    }
+
+    try {
+        // 1. Mettre à jour la vente (client, remise, acompte)
+        await apiCall(`/sales/${saleId}`, 'PUT', {
+            client_name,
+            client_email,
+            client_phone,
+            client_address,
+            remise_pct,
+            acompte
+        });
+
+        // 2. Mettre à jour les articles
+        await apiCall(`/sales/${saleId}/items`, 'PUT', { items });
+
+        alert('✅ Vente modifiée avec succès');
+        bootstrap.Modal.getInstance(document.getElementById('editSaleModal')).hide();
+        loadSalesList();
+        renderDashboard();
+    } catch (err) {
+        alert('❌ Erreur: ' + err.message);
+    }
+};
     const historyHtml = `
         <div class="card-modern mt-3">
             <h6 class="card-title"><i class="bi bi-clock-history text-primary-custom me-2"></i>Historique ventes</h6>
