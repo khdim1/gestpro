@@ -306,13 +306,88 @@ try {
         ('invoices_pay', 'Payer les factures'),
         ('cash_view', 'Voir la caisse'),
         ('cash_manage', 'Gérer la caisse'),
-        ('inventory_view', 'Voir l\\\'inventaire'),
-        ('inventory_manage', 'Gérer l\\\'inventaire'),
+        ('inventory_view', 'Voir l''inventaire'),
+        ('inventory_manage', 'Gérer l''inventaire'),
         ('reports_view', 'Voir les rapports'),
         ('settings_view', 'Voir les paramètres'),
         ('settings_edit', 'Modifier les paramètres'),
-        ('sub_users_manage', 'Gérer l\\\'équipe')
+        ('sub_users_manage', 'Gérer l''équipe'),
+        ('orders_view', 'Voir les commandes en ligne'),
+        ('orders_validate', 'Valider les commandes en ligne')
     `);
+  // ===== TABLE ORDERS (AVEC user_id) =====
+await pool.query(`CREATE TABLE IF NOT EXISTS orders (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    customer_name VARCHAR(100) NOT NULL,
+    customer_email VARCHAR(100),
+    customer_phone VARCHAR(50),
+    customer_address TEXT,
+    order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    total_amount DECIMAL(10,2) NOT NULL,
+    status ENUM('pending','confirmed','shipped','delivered','cancelled') DEFAULT 'pending',
+    payment_method VARCHAR(50) DEFAULT 'cash',
+    notes TEXT,
+    sale_id INT NULL,
+    user_id INT NOT NULL,  -- ← Nouvelle colonne
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE SET NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+)`);
+await pool.query(`CREATE TABLE IF NOT EXISTS order_items (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    order_id INT NOT NULL,
+    product_id INT NOT NULL,
+    quantity INT NOT NULL,
+    unit_price DECIMAL(10,2) NOT NULL,
+    total_price DECIMAL(10,2) NOT NULL,
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+    FOREIGN KEY (product_id) REFERENCES products(id)
+)`);
+// ===== CORRECTION DE LA TABLE ORDERS =====
+try {
+    // Vérifier si la colonne status existe
+    const [statusCol] = await pool.query(`SHOW COLUMNS FROM orders LIKE 'status'`);
+    if (statusCol.length === 0) {
+        // Ajouter la colonne status
+        await pool.query(`ALTER TABLE orders ADD COLUMN status ENUM('pending','confirmed','shipped','delivered','cancelled') DEFAULT 'pending'`);
+        console.log('✅ Colonne status ajoutée à orders');
+    } else {
+        // Vérifier le type
+        const type = statusCol[0].Type;
+        if (!type.includes('enum')) {
+            // Modifier le type si ce n'est pas un ENUM
+            await pool.query(`ALTER TABLE orders MODIFY COLUMN status ENUM('pending','confirmed','shipped','delivered','cancelled') DEFAULT 'pending'`);
+            console.log('✅ Colonne status modifiée en ENUM');
+        } else {
+            console.log('✅ Colonne status déjà correcte');
+        }
+    }
+    // Mettre à jour les valeurs NULL éventuelles
+    await pool.query(`UPDATE orders SET status = 'pending' WHERE status IS NULL`);
+} catch(e) {
+    console.log('⚠️ Erreur correction table orders:', e.message);
+}
+
+// Vérifier la colonne user_id
+try {
+    const [userIdCol] = await pool.query(`SHOW COLUMNS FROM orders LIKE 'user_id'`);
+    if (userIdCol.length === 0) {
+        await pool.query(`ALTER TABLE orders ADD COLUMN user_id INT NOT NULL`);
+        console.log('✅ Colonne user_id ajoutée à orders');
+    }
+} catch(e) {
+    console.log('⚠️ Erreur ajout user_id à orders:', e.message);
+}
+// ===== AJOUT DE LA COLONNE STATUS DANS ORDERS (SI MANQUANTE) =====
+try {
+    const [col] = await pool.query(`SHOW COLUMNS FROM orders LIKE 'status'`);
+    if (col.length === 0) {
+        await pool.query(`ALTER TABLE orders ADD COLUMN status ENUM('pending','confirmed','shipped','delivered','cancelled') DEFAULT 'pending'`);
+        console.log('✅ Colonne status ajoutée à orders');
+    }
+} catch(e) {
+    console.log('⚠️ Erreur ajout colonne status à orders:', e.message);
+}
     // ===== AJOUT AUTOMATIQUE DES COLONNES MANQUANTES =====
 try { await pool.query(`ALTER TABLE sales ADD COLUMN tax_rate DECIMAL(5,2) DEFAULT 0`); } catch(e) {}
 try { await pool.query(`ALTER TABLE proforma_invoices ADD COLUMN tax_rate DECIMAL(5,2) DEFAULT 0`); } catch(e) {}
@@ -524,6 +599,308 @@ app.post('/api/login', async (req, res) => {
     } catch (err) {
         console.error('Erreur login:', err);
         res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+app.get('/api/public/products', async (req, res) => {
+    const { shop } = req.query; // Récupère le paramètre ?shop=...
+    try {
+        let query = 'SELECT id, name, description, sell_price, wholesale_price, wholesale_quantity, quantity, image_url, unit FROM products';
+        const params = [];
+        if (shop && !isNaN(shop)) {
+            query += ' WHERE user_id = ? AND quantity > 0';
+            params.push(parseInt(shop));
+        } else {
+            query += ' WHERE quantity > 0';
+        }
+        query += ' ORDER BY name';
+        const [rows] = await pool.query(query, params);
+        res.json(rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+// Servir la boutique en ligne (public)
+app.get('/store', (req, res) => {
+    res.sendFile(path.join(__dirname, 'store.html'));
+});
+// ========== PASSER UNE COMMANDE (PUBLIC) ==========
+app.post('/api/public/orders', async (req, res) => {
+    const { customer_name, customer_email, customer_phone, customer_address, items, payment_method, notes, shop } = req.body;
+
+    if (!customer_name || !items || !items.length) {
+        return res.status(400).json({ error: 'Nom client et articles requis' });
+    }
+    if (!shop || isNaN(shop)) {
+        return res.status(400).json({ error: 'Identifiant boutique manquant' });
+    }
+    const userId = parseInt(shop);
+
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        let total = 0;
+        for (const item of items) {
+            const [prod] = await connection.query(
+                'SELECT sell_price, quantity FROM products WHERE id = ? AND user_id = ? FOR UPDATE',
+                [item.product_id, userId]
+            );
+            if (!prod.length) throw new Error(`Produit ${item.product_id} inexistant`);
+            if (prod[0].quantity < item.quantity) {
+                throw new Error(`Stock insuffisant pour le produit ${item.product_id}`);
+            }
+            const unitPrice = item.unit_price || prod[0].sell_price;
+            item.total_price = unitPrice * item.quantity;
+            total += item.total_price;
+        }
+
+        const [orderResult] = await connection.query(
+            `INSERT INTO orders 
+             (customer_name, customer_email, customer_phone, customer_address, total_amount, payment_method, notes, status, user_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+            [customer_name, customer_email, customer_phone, customer_address, total, payment_method || 'cash', notes || '', userId]
+        );
+        const orderId = orderResult.insertId;
+
+        for (const item of items) {
+            await connection.query(
+                `INSERT INTO order_items (order_id, product_id, quantity, unit_price, total_price)
+                 VALUES (?, ?, ?, ?, ?)`,
+                [orderId, item.product_id, item.quantity, item.unit_price || 0, item.total_price]
+            );
+        }
+
+        await connection.commit();
+        res.status(201).json({ order_id: orderId, message: 'Commande enregistrée en attente de validation' });
+    } catch (err) {
+        await connection.rollback();
+        console.error('Erreur création commande:', err);
+        res.status(400).json({ error: err.message });
+    } finally {
+        connection.release();
+    }
+});
+app.get('/api/admin/orders', authenticate, async (req, res) => {
+    const userId = req.user.id;
+    console.log('🔍 Récupération des commandes pour user_id:', userId);
+    try {
+        const [rows] = await pool.query(
+            `SELECT o.*, 
+                    (SELECT COUNT(*) FROM order_items WHERE order_id = o.id) as items_count
+             FROM orders o
+             WHERE o.user_id = ?
+             ORDER BY o.created_at DESC`,
+            [userId]
+        );
+        console.log('📦 Commandes trouvées:', rows.length);
+        res.json(rows);
+    } catch (err) {
+        console.error('Erreur GET /admin/orders:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+// ========== PARAMÈTRES PUBLICS DE LA BOUTIQUE ==========
+app.get('/api/public/settings', async (req, res) => {
+    const { shop } = req.query;
+    if (!shop || isNaN(shop)) {
+        return res.status(400).json({ error: 'Paramètre shop invalide' });
+    }
+    try {
+        const [rows] = await pool.query(
+            'SELECT company_name, company_subtitle, company_activity, company_rc, company_address, company_phone, company_phone2, company_email, logo_url, currency, tax_rate FROM settings WHERE user_id = ?',
+            [parseInt(shop)]
+        );
+        if (rows.length === 0) {
+            // Valeurs par défaut
+            return res.json({
+                company_name: 'Mon Entreprise',
+                company_subtitle: '',
+                company_activity: '',
+                company_address: '',
+                company_phone: '',
+                company_email: '',
+                logo_url: '',
+                currency: 'FCFA',
+                tax_rate: 0
+            });
+        }
+        res.json(rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+app.get('/api/admin/orders/pending-count', authenticate, async (req, res) => {
+    const isAdmin = req.user.role === 'admin';
+    try {
+        let query = 'SELECT COUNT(*) as count FROM orders WHERE status = ?';
+        const params = ['pending'];
+        if (!isAdmin) {
+            query += ' AND user_id = ?';
+            params.push(req.user.id);
+        }
+        const [rows] = await pool.query(query, params);
+        res.json({ count: rows[0].count || 0 });
+    } catch (err) {
+        console.error('Erreur comptage commandes:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+app.get('/api/admin/orders/:id', authenticate, async (req, res) => {
+    const userId = req.user.id;
+    const orderId = req.params.id;
+    try {
+        const [orderRows] = await pool.query(
+            'SELECT * FROM orders WHERE id = ? AND user_id = ?',
+            [orderId, userId]
+        );
+        if (!orderRows.length) return res.status(404).json({ error: 'Commande non trouvée' });
+
+        const [items] = await pool.query(
+            `SELECT oi.*, p.name as product_name
+             FROM order_items oi
+             JOIN products p ON oi.product_id = p.id
+             WHERE oi.order_id = ?`,
+            [orderId]
+        );
+        res.json({ order: orderRows[0], items });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+app.put('/api/admin/orders/:id/status', authenticate, async (req, res) => {
+    const userId = req.user.id;
+    const orderId = req.params.id;
+    const { status } = req.body;
+    const validStatus = ['pending','confirmed','shipped','delivered','cancelled'];
+    if (!validStatus.includes(status)) {
+        return res.status(400).json({ error: 'Statut invalide' });
+    }
+    try {
+        const [check] = await pool.query('SELECT id FROM orders WHERE id = ? AND user_id = ?', [orderId, userId]);
+        if (!check.length) return res.status(403).json({ error: 'Accès non autorisé' });
+        await pool.query('UPDATE orders SET status = ? WHERE id = ?', [status, orderId]);
+        res.json({ message: 'Statut mis à jour' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});// ========== VALIDER UNE COMMANDE ==========
+app.post('/api/admin/orders/:id/validate', authenticate, async (req, res) => {
+    const userId = req.user.id;
+    const orderId = req.params.id;
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        // ✅ Utilisation de ? pour status
+        const [orderRows] = await connection.query(
+            'SELECT * FROM orders WHERE id = ? AND user_id = ? AND status = ?',
+            [orderId, userId, 'pending']
+        );
+        if (!orderRows.length) {
+            return res.status(404).json({ error: 'Commande non trouvée ou déjà traitée' });
+        }
+        const order = orderRows[0];
+
+        // Récupérer les articles de la commande
+        const [items] = await connection.query('SELECT * FROM order_items WHERE order_id = ?', [orderId]);
+        if (!items.length) {
+            return res.status(400).json({ error: 'Commande sans articles' });
+        }
+
+        // Créer ou récupérer le client
+        let clientId = null;
+        if (order.customer_name) {
+            let [existing] = await connection.query(
+                'SELECT id FROM clients WHERE user_id = ? AND name = ?',
+                [userId, order.customer_name]
+            );
+            if (existing.length) {
+                clientId = existing[0].id;
+            } else {
+                const [result] = await connection.query(
+                    `INSERT INTO clients (user_id, name, email, phone, address)
+                     VALUES (?, ?, ?, ?, ?)`,
+                    [userId, order.customer_name, order.customer_email || null, order.customer_phone || null, order.customer_address || null]
+                );
+                clientId = result.insertId;
+            }
+        }
+
+        // Calcul des totaux
+        let subtotal = 0;
+        for (const item of items) {
+            subtotal += item.total_price;
+        }
+        const [settings] = await connection.query(
+            'SELECT tax_rate FROM settings WHERE user_id = ?',
+            [userId]
+        );
+        const taxRate = parseFloat(settings[0]?.tax_rate) || 0;
+        const tax = subtotal * (taxRate / 100);
+        const finalAmount = subtotal + tax;
+
+        // Créer la vente
+        const [saleResult] = await connection.query(
+            `INSERT INTO sales 
+             (user_id, client_id, total_amount, tax, final_amount, payment_method, status, notes, tax_rate)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+                userId,
+                clientId,
+                subtotal,
+                tax,
+                finalAmount,
+                order.payment_method || 'cash',
+                'completed',
+                `Commande en ligne #${orderId}`,
+                taxRate
+            ]
+        );
+        const saleId = saleResult.insertId;
+
+        // Insérer les articles de vente et mettre à jour le stock
+        for (const item of items) {
+            await connection.query(
+                `INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, total_price)
+                 VALUES (?, ?, ?, ?, ?)`,
+                [saleId, item.product_id, item.quantity, item.unit_price, item.total_price]
+            );
+            await connection.query(
+                'UPDATE products SET quantity = quantity - ? WHERE id = ? AND user_id = ?',
+                [item.quantity, item.product_id, userId]
+            );
+            const [prodBefore] = await connection.query(
+                'SELECT quantity FROM products WHERE id = ? AND user_id = ? FOR UPDATE',
+                [item.product_id, userId]
+            );
+            const newQty = prodBefore[0].quantity - item.quantity;
+            await connection.query(
+                `INSERT INTO stock_movements (product_id, user_id, type, quantity_change, quantity_before, quantity_after, reference, notes)
+                 VALUES (?, ?, 'sale', ?, ?, ?, ?, ?)`,
+                [item.product_id, userId, -item.quantity, prodBefore[0].quantity, newQty, `VENTE #${saleId}`, `Commande en ligne #${orderId}`]
+            );
+        }
+
+        // Mettre à jour la commande
+        await connection.query(
+            'UPDATE orders SET status = ?, sale_id = ? WHERE id = ?',
+            ['confirmed', saleId, orderId]
+        );
+
+        await connection.commit();
+
+        const token = req.header('Authorization')?.replace('Bearer ', '') || req.query.token;
+        res.json({
+            message: 'Commande validée avec succès',
+            sale_id: saleId,
+            invoice_url: `/api/sales/${saleId}/invoice?token=${token}`
+        });
+    } catch (err) {
+        await connection.rollback();
+        console.error('Erreur validation commande:', err);
+        res.status(500).json({ error: err.message });
+    } finally {
+        connection.release();
     }
 });
 // ========== ROUTES CLIENTS ==========

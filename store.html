@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GestPro - Boutique en ligne</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        body { background: #f8f9fa; }
+        .product-card {
+            transition: transform 0.2s;
+            cursor: pointer;
+        }
+        .product-card:hover { transform: translateY(-5px); }
+        .product-card img {
+            height: 150px;
+            object-fit: contain;
+        }
+        .cart-sidebar {
+            position: sticky;
+            top: 20px;
+        }
+        .badge-stock {
+            font-size: 0.7rem;
+            padding: 3px 8px;
+            border-radius: 20px;
+        }
+        .badge-stock.in-stock { background: #27ae60; color: white; }
+        .badge-stock.low-stock { background: #f39c12; color: white; }
+        .badge-stock.out-of-stock { background: #e74c3c; color: white; }
+        .cart-item {
+            border-bottom: 1px solid #eee;
+            padding: 8px 0;
+        }
+        .cart-item:last-child { border-bottom: none; }
+        .toast-container { z-index: 9999; }
+    </style>
+</head>
+<body>
+<header class="d-flex justify-content-between align-items-center mb-4">
+    <div class="d-flex align-items-center">
+        <div class="logo-container me-3"></div>
+        <h1 class="h3"><i class="bi bi-bag"></i> Boutique en ligne</h1>
+    </div>
+    <button class="btn btn-outline-primary position-relative" onclick="toggleCart()">
+        <i class="bi bi-cart"></i> Panier
+        <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" id="cartCount">0</span>
+    </button>
+</header>
+<div class="container py-4">
+    <header class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="h3"><i class="bi bi-bag"></i> Boutique en ligne</h1>
+        <button class="btn btn-outline-primary position-relative" onclick="toggleCart()">
+            <i class="bi bi-cart"></i> Panier
+            <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" id="cartCount">0</span>
+        </button>
+    </header>
+
+    <!-- Barre de recherche -->
+    <div class="row mb-3">
+        <div class="col-md-6">
+            <input type="text" id="searchInput" class="form-control" placeholder="🔍 Rechercher un produit..." oninput="filterProducts()">
+        </div>
+        <div class="col-md-6 text-end">
+            <button class="btn btn-sm btn-secondary" onclick="loadProducts()"><i class="bi bi-arrow-clockwise"></i> Rafraîchir</button>
+        </div>
+    </div>
+
+    <!-- Grille des produits -->
+    <div class="row" id="productGrid"></div>
+
+    <!-- Pagination (simple) -->
+    <nav aria-label="Navigation" class="mt-4">
+        <ul class="pagination justify-content-center" id="pagination"></ul>
+    </nav>
+</div>
+
+<!-- Offcanvas Panier -->
+<div class="offcanvas offcanvas-end" tabindex="-1" id="cartOffcanvas" aria-labelledby="cartOffcanvasLabel">
+    <div class="offcanvas-header">
+        <h5 class="offcanvas-title" id="cartOffcanvasLabel"><i class="bi bi-cart"></i> Votre panier</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="offcanvas"></button>
+    </div>
+    <div class="offcanvas-body">
+        <div id="cartItems"></div>
+        <hr>
+        <div class="d-flex justify-content-between">
+            <strong>Total :</strong>
+            <span id="cartTotal">0 FCFA</span>
+        </div>
+        <button class="btn btn-success w-100 mt-3" onclick="showCheckout()">Passer la commande</button>
+    </div>
+</div>
+
+<!-- Modal Checkout -->
+<div class="modal fade" id="checkoutModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-person"></i> Informations client</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="checkoutForm">
+                    <div class="mb-3">
+                        <label class="form-label">Nom complet *</label>
+                        <input type="text" id="customerName" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Email</label>
+                        <input type="email" id="customerEmail" class="form-control">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Téléphone</label>
+                        <input type="text" id="customerPhone" class="form-control">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Adresse de livraison</label>
+                        <textarea id="customerAddress" class="form-control" rows="2"></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Mode de paiement</label>
+                        <select id="paymentMethod" class="form-select">
+                            <option value="cash">Espèces à la livraison</option>
+                            <option value="wave">Wave</option>
+                            <option value="orange">Orange Money</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Notes (optionnel)</label>
+                        <textarea id="orderNotes" class="form-control" rows="2"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                <button class="btn btn-primary" onclick="placeOrder()"><i class="bi bi-check-circle"></i> Confirmer la commande</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Toast de notification -->
+<div class="toast-container position-fixed bottom-0 end-0 p-3">
+    <div id="liveToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+        <div class="toast-header">
+            <strong class="me-auto">Notification</strong>
+            <button type="button" class="btn-close" data-bs-dismiss="toast"></button>
+        </div>
+        <div class="toast-body" id="toastBody">Message</div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    // ===== GLOBAL =====
+    let allProducts = [];
+    let cart = [];
+    let currentPage = 1;
+    const itemsPerPage = 20;
+let shopSettings = null;
+
+async function loadShopSettings(shopId) {
+    try {
+        const res = await fetch(`/api/public/settings?shop=${shopId}`);
+        if (res.ok) {
+            shopSettings = await res.json();
+            // Personnaliser le titre et le header
+            document.title = shopSettings.company_name || 'Boutique en ligne';
+            const headerTitle = document.querySelector('header h1');
+            if (headerTitle) {
+                headerTitle.innerHTML = `<i class="bi bi-bag"></i> ${shopSettings.company_name || 'Boutique en ligne'}`;
+            }
+            // Afficher le logo
+            const logoContainer = document.querySelector('.logo-container');
+            if (logoContainer && shopSettings.logo_url) {
+                logoContainer.innerHTML = `<img src="${shopSettings.logo_url}" alt="Logo" style="max-height:50px;">`;
+            }
+            // Personnaliser la devise (utilisée dans l'affichage)
+            const currency = shopSettings.currency || 'FCFA';
+            document.querySelectorAll('.currency-symbol').forEach(el => el.textContent = currency);
+        }
+    } catch (err) {
+        console.error('Erreur chargement paramètres:', err);
+    }
+}
+async function loadProducts() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const shopId = urlParams.get('shop') || '';
+    await loadShopSettings(shopId);
+    try {
+        const res = await fetch(`/api/public/products?shop=${shopId}`);
+        if (!res.ok) throw new Error(await res.text());
+        allProducts = await res.json();
+        renderPage(1);
+    } catch (err) {
+        showToast('Erreur chargement produits: ' + err.message, 'danger');
+    }
+}
+
+    function renderPage(page) {
+        currentPage = page;
+        const filtered = filterProductsList();
+        const totalPages = Math.ceil(filtered.length / itemsPerPage) || 1;
+        const start = (page - 1) * itemsPerPage;
+        const end = Math.min(start + itemsPerPage, filtered.length);
+        const pageItems = filtered.slice(start, end);
+
+        const grid = document.getElementById('productGrid');
+        if (!pageItems.length) {
+            grid.innerHTML = '<div class="col-12 text-center py-5">Aucun produit disponible</div>';
+        } else {
+            grid.innerHTML = pageItems.map(p => `
+                <div class="col-md-3 col-sm-6 mb-4">
+                    <div class="card product-card h-100">
+                        ${p.image_url && p.image_url.startsWith('data:image') ? 
+                            `<img src="${p.image_url}" class="card-img-top" alt="${p.name}">` :
+                            `<div class="card-img-top bg-light d-flex align-items-center justify-content-center" style="height:150px;">
+                                <i class="bi bi-box-seam" style="font-size:3rem;color:#ccc;"></i>
+                             </div>`
+                        }
+                        <div class="card-body">
+                            <h6 class="card-title">${p.name}</h6>
+                            <p class="card-text small">${p.description || ''}</p>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span class="fw-bold">${formatNumber(p.sell_price)} FCFA</span>
+                                <span class="badge-stock ${p.quantity <= 0 ? 'out-of-stock' : (p.quantity <= 5 ? 'low-stock' : 'in-stock')}">
+                                    ${p.quantity <= 0 ? 'Rupture' : (p.quantity <= 5 ? 'Stock faible' : 'En stock')}
+                                </span>
+                            </div>
+                            ${p.wholesale_price > 0 ? `<small class="text-muted">Prix gros (x${p.wholesale_quantity}) : ${formatNumber(p.wholesale_price)} FCFA</small>` : ''}
+                            <button class="btn btn-sm btn-primary w-100 mt-2" onclick="addToCart(${p.id})" ${p.quantity <= 0 ? 'disabled' : ''}>
+                                <i class="bi bi-cart-plus"></i> Ajouter
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Pagination
+        const pagination = document.getElementById('pagination');
+        let pagHtml = '';
+        if (totalPages > 1) {
+            pagHtml += `<li class="page-item ${page <= 1 ? 'disabled' : ''}">
+                <a class="page-link" href="#" onclick="renderPage(${page-1})">Précédent</a></li>`;
+            for (let i = 1; i <= totalPages; i++) {
+                pagHtml += `<li class="page-item ${i === page ? 'active' : ''}">
+                    <a class="page-link" href="#" onclick="renderPage(${i})">${i}</a></li>`;
+            }
+            pagHtml += `<li class="page-item ${page >= totalPages ? 'disabled' : ''}">
+                <a class="page-link" href="#" onclick="renderPage(${page+1})">Suivant</a></li>`;
+        }
+        pagination.innerHTML = pagHtml;
+    }
+
+    function filterProductsList() {
+        const search = document.getElementById('searchInput').value.toLowerCase();
+        return allProducts.filter(p => 
+            p.name.toLowerCase().includes(search) || 
+            (p.barcode && p.barcode.toLowerCase().includes(search))
+        );
+    }
+
+    window.filterProducts = function() {
+        renderPage(1);
+    };
+
+    // ===== PANIER =====
+    function addToCart(productId) {
+        const product = allProducts.find(p => p.id === productId);
+        if (!product) return;
+        if (product.quantity <= 0) {
+            showToast('Produit en rupture de stock', 'warning');
+            return;
+        }
+        const existing = cart.find(item => item.product_id === productId);
+        if (existing) {
+            if (existing.quantity >= product.quantity) {
+                showToast('Stock insuffisant', 'warning');
+                return;
+            }
+            existing.quantity++;
+        } else {
+            cart.push({
+                product_id: productId,
+                name: product.name,
+                quantity: 1,
+                unit_price: product.sell_price,
+                stock: product.quantity
+            });
+        }
+        updateCartUI();
+        showToast(`${product.name} ajouté au panier`, 'success');
+    }
+
+    function removeFromCart(index) {
+        cart.splice(index, 1);
+        updateCartUI();
+    }
+
+    function updateCartUI() {
+        document.getElementById('cartCount').textContent = cart.length;
+        const container = document.getElementById('cartItems');
+        if (!cart.length) {
+            container.innerHTML = '<p class="text-muted">Votre panier est vide</p>';
+            document.getElementById('cartTotal').textContent = '0 FCFA';
+            return;
+        }
+        let html = '';
+        let total = 0;
+        cart.forEach((item, idx) => {
+            const lineTotal = item.quantity * item.unit_price;
+            total += lineTotal;
+            html += `
+                <div class="cart-item d-flex justify-content-between align-items-center">
+                    <div>
+                        <strong>${item.name}</strong>
+                        <span class="badge bg-secondary ms-1">x${item.quantity}</span>
+                    </div>
+                    <div>
+                        <span class="me-2">${formatNumber(lineTotal)} FCFA</span>
+                        <button class="btn btn-sm btn-outline-danger" onclick="removeFromCart(${idx})">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            `;
+        });
+        container.innerHTML = html;
+        document.getElementById('cartTotal').textContent = formatNumber(total) + ' FCFA';
+    }
+
+    function toggleCart() {
+        const offcanvas = new bootstrap.Offcanvas(document.getElementById('cartOffcanvas'));
+        offcanvas.toggle();
+    }
+
+    function showCheckout() {
+        if (!cart.length) {
+            showToast('Panier vide', 'warning');
+            return;
+        }
+        const modal = new bootstrap.Modal(document.getElementById('checkoutModal'));
+        modal.show();
+    }
+
+   // ===== PASSER COMMANDE =====
+async function placeOrder() {
+    const name = document.getElementById('customerName').value.trim();
+    if (!name) {
+        showToast('Veuillez entrer votre nom', 'warning');
+        return;
+    }
+
+    // Récupérer l'identifiant boutique depuis l'URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const shopId = urlParams.get('shop') || '';
+    if (!shopId) {
+        showToast('Identifiant boutique manquant', 'danger');
+        return;
+    }
+
+    const data = {
+        customer_name: name,
+        customer_email: document.getElementById('customerEmail').value.trim(),
+        customer_phone: document.getElementById('customerPhone').value.trim(),
+        customer_address: document.getElementById('customerAddress').value.trim(),
+        payment_method: document.getElementById('paymentMethod').value,
+        notes: document.getElementById('orderNotes').value.trim(),
+        shop: shopId,
+        items: cart.map(item => ({
+            product_id: item.product_id,
+            quantity: item.quantity,
+            unit_price: item.unit_price
+        }))
+    };
+    console.log('📤 Envoi de la commande avec shop:', shopId);
+
+    try {
+        const res = await fetch('/api/public/orders', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        const result = await res.json();
+        if (!res.ok) throw new Error(result.error || 'Erreur');
+        showToast('✅ Commande enregistrée ! En attente de validation.', 'success');
+        cart = [];
+        updateCartUI();
+        bootstrap.Modal.getInstance(document.getElementById('checkoutModal')).hide();
+        bootstrap.Offcanvas.getInstance(document.getElementById('cartOffcanvas')).hide();
+        document.getElementById('checkoutForm').reset();
+    } catch (err) {
+        showToast('❌ Erreur: ' + err.message, 'danger');
+        console.error(err);
+    }
+}
+
+    // ===== UTILITAIRES =====
+    function formatNumber(n) {
+        if (n === undefined || n === null || isNaN(n)) return '0';
+        return Number(n).toLocaleString('fr-FR').replace(/\s/g, ' ').replace(/,/g, ' ');
+    }
+
+    function showToast(message, type = 'success') {
+        const toast = document.getElementById('liveToast');
+        const body = document.getElementById('toastBody');
+        body.textContent = message;
+        toast.className = `toast text-bg-${type}`;
+        const bsToast = new bootstrap.Toast(toast);
+        bsToast.show();
+    }
+
+    // ===== INIT =====
+    loadProducts();
+</script>
+
+</body>
+</html>
