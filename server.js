@@ -1521,13 +1521,14 @@ app.get('/api/settings', authenticate, async (req, res) => {
 });
 // ========== MODIFIER LES ARTICLES D'UNE VENTE ==========
 app.put('/api/sales/:id/items', authenticate, async (req, res) => {
-    const saleId = req.params.id;
-    const { items } = req.body; // items: [{product_id, quantity, unit_price}]
+    const saleId = req.params.id; // ✅ Défini en premier
+    const { items } = req.body;
+    console.log(`🔍 Modification des articles de la vente #${saleId}`, items);
+
     const connection = await pool.getConnection();
     try {
         await connection.beginTransaction();
 
-        // Vérifier que la vente existe et appartient à l'utilisateur
         const [saleRows] = await connection.query(
             'SELECT * FROM sales WHERE id = ? AND user_id = ? FOR UPDATE',
             [saleId, req.user.id]
@@ -1537,9 +1538,9 @@ app.put('/api/sales/:id/items', authenticate, async (req, res) => {
         }
         const sale = saleRows[0];
 
-        // Vérifier si la vente est déjà payée
+        // Autoriser la modification même si payée (avec avertissement)
         if (sale.status === 'completed') {
-            return res.status(400).json({ error: 'Impossible de modifier une vente déjà payée' });
+            console.warn(`⚠️ Modification d'une vente déjà payée (ID ${saleId})`);
         }
 
         // Récupérer les anciens articles
@@ -1548,12 +1549,9 @@ app.put('/api/sales/:id/items', authenticate, async (req, res) => {
             [saleId]
         );
 
-        // Calculer les différences de stock
+        // Calcul des différences de stock
         const oldMap = {};
         oldItems.forEach(item => { oldMap[item.product_id] = item.quantity; });
-
-        const newMap = {};
-        items.forEach(item => { newMap[item.product_id] = (newMap[item.product_id] || 0) + item.quantity; });
 
         // Supprimer les anciens articles
         await connection.query('DELETE FROM sale_items WHERE sale_id = ?', [saleId]);
@@ -1564,7 +1562,6 @@ app.put('/api/sales/:id/items', authenticate, async (req, res) => {
             if (!item.product_id || !item.quantity || !item.unit_price) {
                 throw new Error('Données d\'article invalides');
             }
-            // Vérifier le stock disponible (si augmentation)
             const oldQty = oldMap[item.product_id] || 0;
             const newQty = item.quantity;
             const diff = newQty - oldQty;
@@ -1578,7 +1575,6 @@ app.put('/api/sales/:id/items', authenticate, async (req, res) => {
                 if (prod[0].quantity < diff) {
                     throw new Error(`Stock insuffisant pour le produit ${item.product_id}`);
                 }
-                // Déduire du stock
                 await connection.query(
                     'UPDATE products SET quantity = quantity - ? WHERE id = ?',
                     [diff, item.product_id]
@@ -1589,7 +1585,6 @@ app.put('/api/sales/:id/items', authenticate, async (req, res) => {
                     [item.product_id, req.user.id, -diff, prod[0].quantity, prod[0].quantity - diff, `MODIFICATION VENTE #${saleId}`, 'Ajustement stock']
                 );
             } else if (diff < 0) {
-                // Rendre le stock
                 await connection.query(
                     'UPDATE products SET quantity = quantity + ? WHERE id = ?',
                     [-diff, item.product_id]
@@ -1605,7 +1600,6 @@ app.put('/api/sales/:id/items', authenticate, async (req, res) => {
                 );
             }
 
-            // Insérer le nouvel article
             const total_price = item.quantity * item.unit_price;
             await connection.query(
                 'INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, total_price) VALUES (?, ?, ?, ?, ?)',
@@ -1624,7 +1618,6 @@ app.put('/api/sales/:id/items', authenticate, async (req, res) => {
         const total_apres_remise = subtotal - remise_valeur;
         const final_amount = total_apres_remise + tax - (sale.acompte || 0);
 
-        // Mettre à jour la vente
         await connection.query(
             'UPDATE sales SET total_amount = ?, tax = ?, final_amount = ? WHERE id = ?',
             [subtotal, tax, final_amount, saleId]
@@ -2804,6 +2797,80 @@ app.post('/api/clients/:id/withdrawal', authenticate, async (req, res) => {
         await connection.rollback();
         console.error('❌ Erreur POST /clients/:id/withdrawal:', err);
         res.status(500).json({ error: err.message });
+    } finally {
+        connection.release();
+    }
+});
+// ========== ROUTE PAIEMENT D'UNE FACTURE ==========
+app.post('/api/sales/:id/payment', authenticate, async (req, res) => {
+    const { amount, payment_method } = req.body;
+    const saleId = req.params.id;
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        const [saleRows] = await connection.query(
+            'SELECT * FROM sales WHERE id = ? AND user_id = ? FOR UPDATE',
+            [saleId, req.user.id]
+        );
+        if (saleRows.length === 0) {
+            return res.status(404).json({ error: 'Facture non trouvée' });
+        }
+        const sale = saleRows[0];
+
+        if (sale.status === 'completed') {
+            return res.status(400).json({ error: 'Cette facture est déjà réglée' });
+        }
+
+        const [paidRows] = await connection.query(
+            'SELECT COALESCE(SUM(amount), 0) as total_paid FROM payments WHERE sale_id = ?',
+            [saleId]
+        );
+        const totalPaid = parseFloat(paidRows[0].total_paid);
+        const remaining = parseFloat(sale.final_amount) - totalPaid;
+        const paymentAmount = parseFloat(amount);
+
+        if (isNaN(paymentAmount) || paymentAmount <= 0) {
+            return res.status(400).json({ error: 'Montant invalide' });
+        }
+        if (paymentAmount > remaining) {
+            return res.status(400).json({ error: `Le montant dépasse le reste à payer (${remaining} FCFA)` });
+        }
+
+        // Enregistrer le paiement
+        await connection.query(
+            'INSERT INTO payments (sale_id, amount, payment_method) VALUES (?, ?, ?)',
+            [saleId, paymentAmount, payment_method || 'cash']
+        );
+
+        // Enregistrer dans la caisse
+        await connection.query(
+            `INSERT INTO cash_register (user_id, transaction_type, amount, description, reference_id)
+             VALUES (?, 'deposit', ?, ?, ?)`,
+            [req.user.id, paymentAmount, `Règlement facture #${saleId}`, saleId]
+        );
+
+        const newTotalPaid = totalPaid + paymentAmount;
+        let newStatus = sale.status;
+        if (newTotalPaid >= parseFloat(sale.final_amount) - 0.01) {
+            await connection.query(
+                'UPDATE sales SET status = ? WHERE id = ?',
+                ['completed', saleId]
+            );
+            newStatus = 'completed';
+        }
+
+        await connection.commit();
+        res.json({
+            message: '✅ Règlement enregistré',
+            remaining: parseFloat(sale.final_amount) - newTotalPaid,
+            status: newStatus,
+            paid: newTotalPaid
+        });
+    } catch (err) {
+        await connection.rollback();
+        console.error('Erreur paiement:', err);
+        res.status(500).json({ error: 'Erreur interne lors du règlement: ' + err.message });
     } finally {
         connection.release();
     }
