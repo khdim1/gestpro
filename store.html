@@ -7,9 +7,9 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <!-- ColorThief pour l'extraction des couleurs du logo -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/color-thief/2.3.0/color-thief.umd.min.js"></script>
     <style>
+        /* ====== STYLES (adaptés pour panier centré) ====== */
         :root {
             --primary: #2c6e9e;
             --primary-dark: #1a4a6e;
@@ -33,6 +33,7 @@
             background: #f5f7fb;
             color: var(--gray-900);
             overflow-x: hidden;
+            padding-bottom: 20px;
         }
         .navbar-custom {
             background: white;
@@ -48,10 +49,7 @@
             font-size: 1.9rem;
             color: var(--primary);
             text-decoration: none;
-            white-space: normal;
-            overflow: visible;
-            text-overflow: unset;
-            max-width: none;
+            white-space: nowrap;
         }
         .navbar-custom .brand i { margin-right: 6px; }
         .navbar-custom .cart-btn {
@@ -97,7 +95,7 @@
             color: white;
             text-align: center;
         }
-        .hero-section h1 { font-weight: 700; font-size: 1.5rem; letter-spacing: -0.3px; }
+        .hero-section h1 { font-weight: 700; font-size: 1.5rem; }
         .hero-section p { opacity: 0.85; font-size: 0.95rem; margin-top: 2px; }
         .search-wrapper {
             background: white;
@@ -234,54 +232,6 @@
             margin: 0 auto;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
-        .offcanvas-custom .offcanvas-header { border-bottom: 1px solid var(--gray-200); }
-        .offcanvas-custom .cart-item {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 10px 0;
-            border-bottom: 1px solid var(--gray-200);
-        }
-        .offcanvas-custom .cart-item:last-child { border-bottom: none; }
-        .offcanvas-custom .cart-item .item-info { flex: 1; }
-        .offcanvas-custom .cart-item .item-name { font-weight: 600; font-size: 0.9rem; }
-        .offcanvas-custom .cart-item .item-qty {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            margin-top: 4px;
-        }
-        .offcanvas-custom .cart-item .item-qty button {
-            border: none;
-            background: var(--gray-100);
-            border-radius: 50%;
-            width: 24px;
-            height: 24px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: 700;
-            transition: var(--transition);
-        }
-        .offcanvas-custom .cart-item .item-qty button:hover {
-            background: var(--primary-light);
-            color: var(--primary);
-        }
-        .offcanvas-custom .cart-item .item-price {
-            font-weight: 700;
-            color: var(--primary);
-            min-width: 70px;
-            text-align: right;
-            font-size: 0.9rem;
-        }
-        .offcanvas-custom .cart-item .item-remove {
-            color: var(--danger);
-            cursor: pointer;
-            font-size: 1.1rem;
-            transition: var(--transition);
-            margin-left: 8px;
-        }
-        .offcanvas-custom .cart-item .item-remove:hover { transform: scale(1.2); }
         .footer {
             background: white;
             border-top: 1px solid var(--gray-200);
@@ -292,24 +242,164 @@
             font-size: 0.8rem;
         }
         .toast-container { z-index: 9999; }
+
+        /* ====== PANIER CENTRÉ ====== */
+        #cartOverlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.3);
+            z-index: 1055;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        #cartOverlay.visible {
+            display: flex;
+        }
+        #cartModal {
+            background: white;
+            border-radius: 20px;
+            box-shadow: var(--shadow-lg);
+            width: 90%;
+            max-width: 500px;
+            max-height: 70vh;
+            padding: 20px 16px 16px;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            animation: slideUp 0.25s ease;
+        }
+        @keyframes slideUp {
+            from { transform: translateY(40px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        #cartModal .cart-header-modal {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: 700;
+            font-size: 1.1rem;
+            color: var(--primary);
+            padding-bottom: 8px;
+            border-bottom: 2px solid var(--primary-light);
+            margin-bottom: 10px;
+        }
+        #cartModal .cart-header-modal .close-cart {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            color: var(--gray-600);
+            cursor: pointer;
+            transition: var(--transition);
+        }
+        #cartModal .cart-header-modal .close-cart:hover {
+            color: var(--danger);
+            transform: scale(1.1);
+        }
+        #cartModal .cart-items-list {
+            flex: 1;
+            overflow-y: auto;
+            max-height: 40vh;
+            padding-right: 4px;
+            margin-bottom: 8px;
+        }
+        #cartModal .cart-item-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 0;
+            border-bottom: 1px solid var(--gray-200);
+            font-size: 0.9rem;
+        }
+        #cartModal .cart-item-row .item-name {
+            flex: 1;
+            font-weight: 500;
+        }
+        #cartModal .cart-item-row .item-qty {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin: 0 10px;
+        }
+        #cartModal .cart-item-row .item-qty button {
+            border: none;
+            background: var(--gray-100);
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            font-weight: 700;
+            transition: var(--transition);
+        }
+        #cartModal .cart-item-row .item-qty button:hover {
+            background: var(--primary-light);
+            color: var(--primary);
+        }
+        #cartModal .cart-item-row .item-price {
+            font-weight: 700;
+            color: var(--primary);
+            min-width: 70px;
+            text-align: right;
+        }
+        #cartModal .cart-item-row .item-remove {
+            color: var(--danger);
+            cursor: pointer;
+            font-size: 1.1rem;
+            margin-left: 6px;
+        }
+        #cartModal .cart-total-modal {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-top: 2px solid var(--gray-200);
+            padding-top: 10px;
+            margin-top: 4px;
+            font-weight: 700;
+            font-size: 1.1rem;
+        }
+        #cartModal .cart-total-modal .total-amount {
+            color: var(--primary);
+            font-size: 1.3rem;
+        }
+        #cartModal .cart-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+            justify-content: flex-end;
+        }
+        #cartModal .btn-clear-cart {
+            background: transparent;
+            border: none;
+            color: var(--danger);
+            font-size: 0.85rem;
+            text-decoration: underline;
+            cursor: pointer;
+        }
+        #cartModal .btn-checkout-modal {
+            background: var(--secondary);
+            color: white;
+            border: none;
+            padding: 6px 20px;
+            border-radius: 50px;
+            font-weight: 600;
+            transition: var(--transition);
+        }
+        #cartModal .btn-checkout-modal:hover {
+            transform: scale(1.02);
+            opacity: 0.9;
+        }
+        .empty-cart-msg {
+            text-align: center;
+            color: var(--gray-600);
+            padding: 30px 0;
+        }
+
         @media (max-width: 768px) {
-            .hero-section h1 { font-size: 1.2rem; }
-            .hero-section p { font-size: 0.85rem; }
-            .search-wrapper { max-width: 100%; }
-            .product-card .product-img { height: 120px; }
-            .navbar-custom .brand { font-size: 1.2rem; }
-            .contact-info .row { gap: 8px; }
-        }
-        .logo-container img {
-            max-height: 200px !important;
-            width: auto !important;
-            display: block !important;
-        }
-        .navbar-custom .brand {
-            font-size: 2.2rem !important;
-            font-weight: 800 !important;
-            color: var(--primary) !important;
-            white-space: nowrap !important;
+            #cartModal { max-height: 80vh; width: 95%; }
+            #cartModal .cart-items-list { max-height: 50vh; }
         }
     </style>
 </head>
@@ -322,7 +412,7 @@
             <div class="logo-container me-3"></div>
             <a href="#" class="brand" id="shopBrand"><i class="bi bi-bag"></i> Boutique</a>
         </div>
-        <button class="cart-btn" onclick="toggleCart()">
+        <button class="cart-btn" onclick="openCart()">
             <i class="bi bi-cart"></i> Panier
             <span class="badge-cart" id="cartCount">0</span>
         </button>
@@ -339,67 +429,47 @@
 
 <!-- Contenu principal -->
 <div class="container-fluid px-3">
-    <!-- Barre de recherche -->
     <div class="search-wrapper d-flex align-items-center">
         <input type="text" id="searchInput" placeholder="🔍 Rechercher un produit..." oninput="filterProducts()">
         <button onclick="filterProducts()"><i class="bi bi-search"></i></button>
     </div>
 
-    <!-- Contact info -->
     <div class="contact-info bg-white p-3 rounded-3 shadow-sm mb-4 border-start border-4 border-primary" id="contactInfo">
         <div class="row g-3 align-items-center">
-            <div class="col-md-4">
-                <i class="bi bi-geo-alt text-primary me-2"></i>
-                <span id="shopAddress">Adresse non renseignée</span>
-            </div>
-            <div class="col-md-3">
-                <i class="bi bi-telephone text-primary me-2"></i>
-                <span id="shopPhone">Tél non renseigné</span>
-            </div>
-            <div class="col-md-3">
-                <i class="bi bi-envelope text-primary me-2"></i>
-                <span id="shopEmail">Email non renseigné</span>
-            </div>
-            <div class="col-md-2">
-                <i class="bi bi-clock text-primary me-2"></i>
-                <span id="shopHours">Lun-Sam 8h-20h</span>
-            </div>
+            <div class="col-md-4"><i class="bi bi-geo-alt text-primary me-2"></i><span id="shopAddress">Adresse non renseignée</span></div>
+            <div class="col-md-3"><i class="bi bi-telephone text-primary me-2"></i><span id="shopPhone">Tél non renseigné</span></div>
+            <div class="col-md-3"><i class="bi bi-envelope text-primary me-2"></i><span id="shopEmail">Email non renseigné</span></div>
+            <div class="col-md-2"><i class="bi bi-clock text-primary me-2"></i><span id="shopHours">Lun-Sam 8h-20h</span></div>
         </div>
     </div>
 
-    <!-- Grille produits -->
     <div class="row g-3" id="productGrid"></div>
-
-    <!-- Sentinelle pour le chargement infini -->
     <div id="scroll-sentinel">
         <div class="spinner" id="loadingSpinner"></div>
         <span id="sentinelText">Charger plus de produits…</span>
     </div>
 </div>
 
-<!-- Footer -->
 <div class="footer">
-    <div class="container-fluid">
-        <p class="mb-0" id="footerText">© 2026 GestPro – Boutique en ligne</p>
-    </div>
+    <div class="container-fluid"><p class="mb-0" id="footerText">© 2026 GestPro – Boutique en ligne</p></div>
 </div>
 
-<!-- Offcanvas Panier -->
-<div class="offcanvas offcanvas-end offcanvas-custom" tabindex="-1" id="cartOffcanvas">
-    <div class="offcanvas-header">
-        <h5 class="offcanvas-title"><i class="bi bi-cart me-2"></i>Mon panier</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="offcanvas"></button>
-    </div>
-    <div class="offcanvas-body">
-        <div id="cartItems"><p class="text-muted text-center py-4">Votre panier est vide.</p></div>
-        <hr>
-        <div class="d-flex justify-content-between align-items-center">
-            <strong>Total :</strong>
-            <span id="cartTotal" class="fw-bold fs-5 text-primary">0 FCFA</span>
+<!-- ====== PANIER CENTRÉ (MODAL) ====== -->
+<div id="cartOverlay" onclick="if(event.target===this) closeCart()">
+    <div id="cartModal">
+        <div class="cart-header-modal">
+            <span><i class="bi bi-cart"></i> Mon panier</span>
+            <button class="close-cart" onclick="closeCart()">&times;</button>
         </div>
-        <button class="btn btn-success w-100 mt-3" onclick="showCheckout()">
-            <i class="bi bi-check-circle"></i> Passer la commande
-        </button>
+        <div class="cart-items-list" id="cartItemsList"></div>
+        <div class="cart-total-modal">
+            <span>Total :</span>
+            <span class="total-amount" id="cartTotalModal">0 FCFA</span>
+        </div>
+        <div class="cart-actions">
+            <button class="btn-clear-cart" onclick="clearCart()">Vider</button>
+            <button class="btn-checkout-modal" onclick="showCheckout()">Passer commande</button>
+        </div>
     </div>
 </div>
 
@@ -440,10 +510,7 @@
 <!-- Toast -->
 <div class="toast-container position-fixed bottom-0 end-0 p-3">
     <div id="liveToast" class="toast" role="alert">
-        <div class="toast-header">
-            <strong class="me-auto"><i class="bi bi-bell"></i> Notification</strong>
-            <button type="button" class="btn-close" data-bs-dismiss="toast"></button>
-        </div>
+        <div class="toast-header"><strong class="me-auto"><i class="bi bi-bell"></i> Notification</strong><button type="button" class="btn-close" data-bs-dismiss="toast"></button></div>
         <div class="toast-body" id="toastBody">Message</div>
     </div>
 </div>
@@ -453,7 +520,7 @@
     // ============================================================
     //  GLOBAL
     // ============================================================
-    let allProducts = [];          // Tous les produits chargés (pour la recherche)
+    let allProducts = [];
     let cart = [];
     let currentPage = 0;
     let loading = false;
@@ -462,41 +529,29 @@
     let shopSettings = null;
     let filteredProducts = [];
     let shopId = '';
-    let totalProducts = 0;         // Nombre total de produits (retourné par l'API)
+    let totalProducts = 0;
 
     // ============================================================
-    //  CHARGEMENT DES PARAMÈTRES (coordonnées, logo, etc.)
+    //  CHARGEMENT DES PARAMÈTRES
     // ============================================================
     async function loadShopSettings(shopId) {
-        if (!shopId) {
-            console.warn('⚠️ Aucun shopId fourni');
-            return;
-        }
+        if (!shopId) return;
         try {
             const res = await fetch(`/api/public/settings?shop=${shopId}`);
             if (res.ok) {
                 shopSettings = await res.json();
-                console.log('📦 Paramètres chargés :', shopSettings);
-                
                 if (shopSettings.company_name) {
                     document.getElementById('shopName').textContent = shopSettings.company_name;
                     document.getElementById('shopBrand').textContent = shopSettings.company_name;
                     document.title = shopSettings.company_name + ' | Boutique';
-                    document.getElementById('footerText').textContent =
-                        `© ${new Date().getFullYear()} ${shopSettings.company_name} – Boutique en ligne`;
+                    document.getElementById('footerText').textContent = `© ${new Date().getFullYear()} ${shopSettings.company_name} – Boutique en ligne`;
                 }
-                if (shopSettings.company_subtitle) {
-                    document.getElementById('shopSubtitle').textContent = shopSettings.company_subtitle;
-                }
-
-                const address = shopSettings.company_address || 'Adresse non renseignée';
+                if (shopSettings.company_subtitle) document.getElementById('shopSubtitle').textContent = shopSettings.company_subtitle;
+                document.getElementById('shopAddress').textContent = shopSettings.company_address || 'Adresse non renseignée';
                 const phone = shopSettings.company_phone || '';
                 const phone2 = shopSettings.company_phone2 || '';
-                const email = shopSettings.company_email || 'Email non renseigné';
-                
-                document.getElementById('shopAddress').textContent = address;
                 document.getElementById('shopPhone').textContent = phone + (phone2 ? ' / ' + phone2 : '') || 'Tél non renseigné';
-                document.getElementById('shopEmail').textContent = email;
+                document.getElementById('shopEmail').textContent = shopSettings.company_email || 'Email non renseigné';
 
                 const logoContainer = document.querySelector('.logo-container');
                 if (shopSettings.logo_url && shopSettings.logo_url.trim() !== '') {
@@ -509,79 +564,42 @@
                     img.crossOrigin = 'anonymous';
                     logoContainer.innerHTML = '';
                     logoContainer.appendChild(img);
-
-                    img.onload = function() {
-                        extractColorsFromLogo(img);
-                    };
-                    img.onerror = function() {
-                        console.warn('⚠️ Impossible de charger le logo pour l\'extraction des couleurs.');
-                        if (shopSettings.primary_color) {
-                            applyPrimaryColor(shopSettings.primary_color);
-                        }
-                    };
+                    img.onload = function() { extractColorsFromLogo(img); };
+                    img.onerror = function() { if (shopSettings.primary_color) applyPrimaryColor(shopSettings.primary_color); };
                 } else {
                     logoContainer.innerHTML = '';
-                    if (shopSettings.primary_color) {
-                        applyPrimaryColor(shopSettings.primary_color);
-                    }
+                    if (shopSettings.primary_color) applyPrimaryColor(shopSettings.primary_color);
                 }
-
-                if (shopSettings.primary_color) {
-                    window._fallbackPrimary = shopSettings.primary_color;
-                }
-            } else {
-                console.warn('⚠️ Réponse non OK pour les paramètres :', res.status);
+                if (shopSettings.primary_color) window._fallbackPrimary = shopSettings.primary_color;
             }
-        } catch (err) {
-            console.error('Erreur chargement paramètres:', err);
-        }
+        } catch (err) { console.error('Erreur chargement paramètres:', err); }
     }
 
     // ============================================================
-    //  EXTRACTION DES COULEURS DU LOGO (ColorThief)
+    //  EXTRACTION DES COULEURS
     // ============================================================
     function extractColorsFromLogo(imgElement) {
         try {
             const colorThief = new ColorThief();
             const palette = colorThief.getPalette(imgElement, 2);
             if (palette && palette.length >= 2) {
-                const primaryRgb = palette[0];
-                const secondaryRgb = palette[1];
-                const primaryHex = rgbToHex(primaryRgb[0], primaryRgb[1], primaryRgb[2]);
-                const secondaryHex = rgbToHex(secondaryRgb[0], secondaryRgb[1], secondaryRgb[2]);
-                console.log('🎨 Couleurs extraites :', { primary: primaryHex, secondary: secondaryHex });
+                const primaryHex = rgbToHex(palette[0][0], palette[0][1], palette[0][2]);
+                const secondaryHex = rgbToHex(palette[1][0], palette[1][1], palette[1][2]);
                 applyColors(primaryHex, secondaryHex);
             } else if (palette && palette.length === 1) {
-                const primaryRgb = palette[0];
-                const primaryHex = rgbToHex(primaryRgb[0], primaryRgb[1], primaryRgb[2]);
-                console.log('🎨 Une seule couleur extraite :', primaryHex);
+                const primaryHex = rgbToHex(palette[0][0], palette[0][1], palette[0][2]);
                 applyColors(primaryHex, primaryHex);
-            } else {
-                console.warn('⚠️ Aucune couleur extraite du logo.');
-                if (window._fallbackPrimary) {
-                    applyPrimaryColor(window._fallbackPrimary);
-                }
-            }
-        } catch (err) {
-            console.error('Erreur lors de l\'extraction des couleurs :', err);
-            if (window._fallbackPrimary) {
-                applyPrimaryColor(window._fallbackPrimary);
-            }
-        }
+            } else if (window._fallbackPrimary) applyPrimaryColor(window._fallbackPrimary);
+        } catch (err) { if (window._fallbackPrimary) applyPrimaryColor(window._fallbackPrimary); }
     }
 
     function applyColors(primaryHex, secondaryHex) {
         applyPrimaryColor(primaryHex);
-        if (secondaryHex) {
-            document.documentElement.style.setProperty('--secondary', secondaryHex);
-        }
+        if (secondaryHex) document.documentElement.style.setProperty('--secondary', secondaryHex);
     }
 
     function applyPrimaryColor(hex) {
-        if (!hex || !/^#?([a-f0-9]{6}|[a-f0-9]{3})$/i.test(hex)) {
-            console.warn('Couleur primaire invalide :', hex);
-            return;
-        }
+        if (!hex || !/^#?([a-f0-9]{6}|[a-f0-9]{3})$/i.test(hex)) return;
         if (!hex.startsWith('#')) hex = '#' + hex;
         document.documentElement.style.setProperty('--primary', hex);
         const darker = darkenColor(hex, 30);
@@ -590,224 +608,72 @@
         document.documentElement.style.setProperty('--primary-light', lighter);
         document.querySelectorAll('.text-primary').forEach(el => el.style.color = hex);
         document.querySelectorAll('.border-primary').forEach(el => el.style.borderColor = hex);
-        document.querySelectorAll('.btn-primary').forEach(el => {
-            el.style.backgroundColor = hex;
-            el.style.borderColor = hex;
-        });
+        document.querySelectorAll('.btn-primary').forEach(el => { el.style.backgroundColor = hex; el.style.borderColor = hex; });
     }
+
+    function darkenColor(hex, amount) { let c = hexToRgb(hex); if (!c) return '#1a4a6e'; let r = Math.max(0, c.r - amount), g = Math.max(0, c.g - amount), b = Math.max(0, c.b - amount); return rgbToHex(r, g, b); }
+    function lightenColor(hex, amount) { let c = hexToRgb(hex); if (!c) return '#e8f0fe'; let r = Math.min(255, c.r + amount), g = Math.min(255, c.g + amount), b = Math.min(255, c.b + amount); return rgbToHex(r, g, b); }
+    function hexToRgb(hex) { hex = hex.replace(/^#/, ''); if (hex.length === 3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2]; const result = /^([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); return result ? { r: parseInt(result[1],16), g: parseInt(result[2],16), b: parseInt(result[3],16) } : null; }
+    function rgbToHex(r, g, b) { return '#' + [r,g,b].map(x => Math.round(x).toString(16).padStart(2,'0')).join(''); }
 
     // ============================================================
-    //  UTILITAIRES COULEUR
+    //  CHARGEMENT DE TOUS LES PRODUITS
     // ============================================================
-    function darkenColor(hex, amount) {
-        let c = hexToRgb(hex);
-        if (!c) return '#1a4a6e';
-        let r = Math.max(0, c.r - amount);
-        let g = Math.max(0, c.g - amount);
-        let b = Math.max(0, c.b - amount);
-        return rgbToHex(r, g, b);
-    }
-    function lightenColor(hex, amount) {
-        let c = hexToRgb(hex);
-        if (!c) return '#e8f0fe';
-        let r = Math.min(255, c.r + amount);
-        let g = Math.min(255, c.g + amount);
-        let b = Math.min(255, c.b + amount);
-        return rgbToHex(r, g, b);
-    }
-    function hexToRgb(hex) {
-        hex = hex.replace(/^#/, '');
-        if (hex.length === 3) {
-            hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
-        }
-        const result = /^([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-        return result ? {
-            r: parseInt(result[1], 16),
-            g: parseInt(result[2], 16),
-            b: parseInt(result[3], 16)
-        } : null;
-    }
-    function rgbToHex(r, g, b) {
-        return '#' + [r, g, b].map(x => Math.round(x).toString(16).padStart(2, '0')).join('');
-    }
-
-    // ============================================================
-    //  CHARGEMENT DES PRODUITS (PAGINÉ)
-    // ============================================================
-    async function loadProducts() {
-        const urlParams = new URLSearchParams(window.location.search);
-        shopId = urlParams.get('shop') || '';
-        console.log('🔍 Shop ID extrait de l\'URL :', shopId);
-
-        // Afficher un spinner
-        const grid = document.getElementById('productGrid');
-        grid.innerHTML = `
-            <div class="col-12 text-center py-5">
-                <div class="spinner-border text-primary" role="status">
-                    <span class="visually-hidden">Chargement...</span>
-                </div>
-                <p class="mt-2 text-muted">Chargement des produits...</p>
-            </div>
-        `;
-
-        // Charger les paramètres et la première page de produits en parallèle
-        await Promise.all([
-            loadShopSettings(shopId),
-            loadProductsPage(0)   // charge la première page et stocke dans allProducts
-        ]);
-
-        // Une fois la première page chargée, on affiche et on prépare la suite
-        applyFilterAndReset();
-    }
-
-    async function loadProductsPage(page) {
+    async function loadAllProducts() {
         try {
-            const limit = itemsPerPage;
-            const url = `/api/public/products?shop=${shopId}&page=${page}&limit=${limit}`;
+            const url = `/api/public/products?shop=${shopId}&limit=9999`;
             const res = await fetch(url);
             if (!res.ok) throw new Error(await res.text());
             const data = await res.json();
-            // On suppose que l'API retourne { products: [...], total: number }
-            // Si l'API retourne directement un tableau, on l'adapte
-            let products = [];
-            let total = 0;
-            if (Array.isArray(data)) {
-                products = data;
-                total = data.length; // pas fiable, mais on utilisera hasMore basé sur la longueur
-            } else if (data.products && Array.isArray(data.products)) {
-                products = data.products;
-                total = data.total || products.length;
-            } else {
-                // fallback: on suppose que c'est un tableau dans data
-                products = data;
-                total = products.length;
-            }
-            // Ajouter les produits chargés à allProducts (pour la recherche globale)
-            // Mais attention, allProducts peut être vide au début
-            if (page === 0) {
-                allProducts = products;
-            } else {
-                allProducts = allProducts.concat(products);
-            }
-            totalProducts = total;
-            // Déterminer s'il y a plus de pages
-            hasMore = (page + 1) * itemsPerPage < totalProducts;
-            return products;
-        } catch (err) {
-            console.error('Erreur chargement page produits:', err);
-            showToast('Erreur chargement produits: ' + err.message, 'danger');
-            return [];
-        }
+            allProducts = data.products || data || [];
+            totalProducts = data.total || allProducts.length;
+            console.log(`✅ ${allProducts.length} produits chargés`);
+        } catch (err) { console.error('Erreur chargement produits:', err); showToast('Erreur chargement produits: ' + err.message, 'danger'); }
     }
 
     // ============================================================
-    //  FILTRE + RÉINITIALISATION
+    //  FILTRE ET PAGINATION
     // ============================================================
     function applyFilterAndReset() {
         const search = document.getElementById('searchInput').value.toLowerCase().trim();
-        filteredProducts = allProducts.filter(p =>
-            p.name.toLowerCase().includes(search) ||
-            (p.barcode && p.barcode.toLowerCase().includes(search))
-        );
+        filteredProducts = allProducts.filter(p => p.name.toLowerCase().includes(search) || (p.barcode && p.barcode.toLowerCase().includes(search)));
         currentPage = 0;
-        // On ne réinitialise pas hasMore, car il est géré par la pagination serveur
-        // mais on doit afficher les produits déjà chargés
         document.getElementById('productGrid').innerHTML = '';
         document.getElementById('sentinelText').textContent = 'Charger plus de produits…';
         document.getElementById('loadingSpinner').style.display = 'none';
-        // Afficher les produits de la page 0 (déjà dans allProducts)
-        renderProductItems(filteredProducts.slice(0, itemsPerPage));
-        // Mettre à jour le statut de hasMore en fonction du total réel
-        if (filteredProducts.length >= totalProducts) {
-            hasMore = false;
-            document.getElementById('sentinelText').textContent = '— Tous les produits sont chargés —';
-        } else {
-            hasMore = true;
-        }
-        // Réinitialiser la pagination pour les appels suivants
-        currentPage = 1; // car la page 0 est déjà affichée
+        loadMoreProducts();
     }
+    window.filterProducts = function() { applyFilterAndReset(); };
 
-    window.filterProducts = function() {
-        // Réappliquer le filtre sur tous les produits chargés
-        applyFilterAndReset();
-    };
-
-    // ============================================================
-    //  CHARGEMENT INFINI (pagination mixte client/serveur)
-    // ============================================================
-    async function loadMoreProducts() {
+    function loadMoreProducts() {
         if (loading || !hasMore) return;
-        // Vérifier si on a déjà chargé tous les produits côté client (via allProducts)
-        if (currentPage * itemsPerPage >= allProducts.length && allProducts.length >= totalProducts) {
+        if (currentPage * itemsPerPage >= filteredProducts.length) {
             hasMore = false;
             document.getElementById('sentinelText').textContent = '— Tous les produits sont chargés —';
             document.getElementById('loadingSpinner').style.display = 'none';
             return;
         }
-
         loading = true;
         const spinner = document.getElementById('loadingSpinner');
         const sentinelText = document.getElementById('sentinelText');
         spinner.style.display = 'block';
         sentinelText.textContent = 'Chargement en cours…';
-
-        try {
-            // Charger la page suivante depuis le serveur
-            const newProducts = await loadProductsPage(currentPage);
-            if (newProducts.length === 0) {
-                hasMore = false;
-                sentinelText.textContent = '— Tous les produits sont chargés —';
-                spinner.style.display = 'none';
-                loading = false;
-                return;
-            }
-            // Mettre à jour filteredProducts pour inclure les nouveaux produits (si le filtre est actif)
-            const search = document.getElementById('searchInput').value.toLowerCase().trim();
-            if (search) {
-                // Si un filtre est actif, on ajoute les nouveaux produits au filtre
-                const newFiltered = newProducts.filter(p =>
-                    p.name.toLowerCase().includes(search) ||
-                    (p.barcode && p.barcode.toLowerCase().includes(search))
-                );
-                filteredProducts = filteredProducts.concat(newFiltered);
-            } else {
-                filteredProducts = allProducts; // tous les produits
-            }
-            // Afficher uniquement les nouveaux produits (ou tous si pas de filtre)
-            // On va réafficher tout depuis le début pour simplifier, mais c'est plus lourd.
-            // Pour éviter de tout redessiner, on peut ajouter les cartes à la suite.
-            // On opte pour un append des nouveaux produits.
-            const start = (currentPage) * itemsPerPage;
+        setTimeout(() => {
+            const start = currentPage * itemsPerPage;
             const end = Math.min(start + itemsPerPage, filteredProducts.length);
             const pageItems = filteredProducts.slice(start, end);
-            renderProductItems(pageItems);
             currentPage++;
-
-            // Mettre à jour hasMore en fonction du total connu
-            if (allProducts.length >= totalProducts) {
-                hasMore = false;
-                sentinelText.textContent = '— Tous les produits sont chargés —';
-            } else {
-                sentinelText.textContent = 'Charger plus de produits…';
-            }
-        } catch (err) {
-            console.error('Erreur chargement page:', err);
-            showToast('Erreur chargement: ' + err.message, 'danger');
-        } finally {
+            renderProductItems(pageItems);
+            if (end >= filteredProducts.length) { hasMore = false; sentinelText.textContent = '— Tous les produits sont chargés —'; } else { sentinelText.textContent = 'Charger plus de produits…'; }
             spinner.style.display = 'none';
             loading = false;
-        }
+        }, 100);
     }
 
-    // ============================================================
-    //  AFFICHAGE DES PRODUITS (identique)
-    // ============================================================
     function renderProductItems(items) {
         const grid = document.getElementById('productGrid');
         const currency = shopSettings?.currency || 'FCFA';
         const fragment = document.createDocumentFragment();
-
         items.forEach(p => {
             const stockStatus = p.quantity <= 0 ? 'out-of-stock' : (p.quantity <= 5 ? 'low-stock' : 'in-stock');
             const stockLabel = p.quantity <= 0 ? 'Rupture' : (p.quantity <= 5 ? 'Stock faible' : 'En stock');
@@ -816,18 +682,16 @@
             col.className = 'col-lg-2 col-md-3 col-sm-4 col-6';
             col.innerHTML = `
                 <div class="product-card">
-                    <div class="product-img">
-                        ${hasImage ? `<img src="${p.image_url}" alt="${p.name}">` : `<i class="bi bi-box-seam"></i>`}
-                    </div>
+                    <div class="product-img">${hasImage ? `<img src="${escapeHtml(p.image_url)}" alt="${escapeHtml(p.name)}">` : `<i class="bi bi-box-seam"></i>`}</div>
                     <div class="card-body">
-                        <div class="product-name">${p.name}</div>
-                        <div class="product-desc">${p.description || ''}</div>
+                        <div class="product-name">${escapeHtml(p.name)}</div>
+                        <div class="product-desc">${escapeHtml(p.description || '')}</div>
                         <div class="d-flex justify-content-between align-items-center">
                             <span class="product-price">${formatNumber(p.sell_price)} ${currency}</span>
                             <span class="product-stock ${stockStatus}">${stockLabel}</span>
                         </div>
                         ${p.wholesale_price > 0 ? `<div class="wholesale-badge">Gros x${p.wholesale_quantity} : ${formatNumber(p.wholesale_price)} ${currency}</div>` : ''}
-                        <button class="btn-add" onclick="addToCart(${p.id})" ${p.quantity <= 0 ? 'disabled' : ''}>
+                        <button class="btn-add" data-product-id="${p.id}" ${p.quantity <= 0 ? 'disabled' : ''}>
                             <i class="bi bi-cart-plus"></i> Ajouter
                         </button>
                     </div>
@@ -835,36 +699,157 @@
             `;
             fragment.appendChild(col);
         });
-
         grid.appendChild(fragment);
     }
 
     // ============================================================
-    //  PANIER (inchangé)
+    //  PANIER CENTRÉ
     // ============================================================
-    // ... (les fonctions addToCart, removeFromCart, updateCartUI, etc. restent identiques)
-    // Je les réinclus ici pour que le code soit complet, mais elles n'ont pas changé.
-    // Pour gagner de la place, je les mets en commentaire, mais elles doivent être présentes.
+    function addToCart(productId) {
+        const product = allProducts.find(p => p.id === productId);
+        if (!product) { showToast('Erreur: produit non trouvé', 'danger'); return; }
+        if (product.quantity <= 0) { showToast('Rupture de stock', 'warning'); return; }
+
+        const existing = cart.find(item => item.product_id === productId);
+        if (existing) {
+            if (existing.quantity >= product.quantity) { showToast('Stock insuffisant', 'warning'); return; }
+            existing.quantity++;
+        } else {
+            cart.push({
+                product_id: product.id,
+                name: product.name,
+                quantity: 1,
+                unit_price: parseFloat(product.sell_price),
+                stock: product.quantity
+            });
+        }
+
+        updateCartUI();
+        showToast(`${product.name} ajouté au panier`, 'success');
+        openCart();
+    }
+
+    function removeFromCart(index) {
+        cart.splice(index, 1);
+        updateCartUI();
+        if (cart.length === 0) closeCart();
+    }
+
+    function updateCartQty(index, delta) {
+        const item = cart[index];
+        if (!item) return;
+        const newQty = item.quantity + delta;
+        if (newQty < 1) return;
+        if (newQty > item.stock) { showToast('Stock insuffisant', 'warning'); return; }
+        item.quantity = newQty;
+        updateCartUI();
+    }
+
+    function clearCart() {
+        cart = [];
+        updateCartUI();
+        closeCart();
+        showToast('Panier vidé', 'info');
+    }
+
+    function updateCartUI() {
+        // Badge
+        const badge = document.getElementById('cartCount');
+        const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
+        badge.textContent = totalItems;
+
+        // Contenu du panier centré
+        const container = document.getElementById('cartItemsList');
+        const totalSpan = document.getElementById('cartTotalModal');
+
+        if (!cart.length) {
+            container.innerHTML = '<div class="empty-cart-msg">Votre panier est vide.</div>';
+            totalSpan.textContent = '0 FCFA';
+            return;
+        }
+
+        let html = '';
+        let total = 0;
+        const currency = shopSettings?.currency || 'FCFA';
+        cart.forEach((item, idx) => {
+            const lineTotal = item.quantity * item.unit_price;
+            total += lineTotal;
+            html += `
+                <div class="cart-item-row">
+                    <span class="item-name">${escapeHtml(item.name)}</span>
+                    <div class="item-qty">
+                        <button onclick="updateCartQty(${idx}, -1)">−</button>
+                        <span>${item.quantity}</span>
+                        <button onclick="updateCartQty(${idx}, 1)">+</button>
+                    </div>
+                    <span class="item-price">${formatNumber(lineTotal)} ${currency}</span>
+                    <span class="item-remove" onclick="removeFromCart(${idx})">✕</span>
+                </div>
+            `;
+        });
+        container.innerHTML = html;
+        totalSpan.textContent = formatNumber(total) + ' ' + currency;
+    }
+
+    // Ouvrir/fermer le panier centré
+    function openCart() {
+        if (cart.length === 0) { showToast('Panier vide', 'warning'); return; }
+        document.getElementById('cartOverlay').classList.add('visible');
+    }
+
+    function closeCart() {
+        document.getElementById('cartOverlay').classList.remove('visible');
+    }
 
     // ============================================================
-    //  (Rappel des fonctions panier - déjà présentes dans le code original)
+    //  PASSER COMMANDE
     // ============================================================
-    // (Copier-coller les fonctions de gestion du panier depuis la version précédente)
-    // Je les inclus dans le bloc final pour éviter les erreurs.
+    function showCheckout() {
+        if (!cart.length) { showToast('Panier vide', 'warning'); return; }
+        closeCart();
+        const modal = new bootstrap.Modal(document.getElementById('checkoutModal'));
+        modal.show();
+    }
 
-    // ============================================================
-    //  PASSER COMMANDE (inchangé)
-    // ============================================================
-    // ... (fonction placeOrder)
+    async function placeOrder() {
+        const name = document.getElementById('customerName').value.trim();
+        if (!name) { showToast('Veuillez entrer votre nom', 'warning'); return; }
+        const urlParams = new URLSearchParams(window.location.search);
+        const shopId = urlParams.get('shop') || '';
+        if (!shopId) { showToast('Identifiant boutique manquant', 'danger'); return; }
+
+        const data = {
+            customer_name: name,
+            customer_email: document.getElementById('customerEmail').value.trim(),
+            customer_phone: document.getElementById('customerPhone').value.trim(),
+            customer_address: document.getElementById('customerAddress').value.trim(),
+            payment_method: document.getElementById('paymentMethod').value,
+            notes: document.getElementById('orderNotes').value.trim(),
+            shop: shopId,
+            items: cart.map(item => ({ product_id: item.product_id, quantity: item.quantity, unit_price: item.unit_price }))
+        };
+
+        try {
+            const res = await fetch('/api/public/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+            const result = await res.json();
+            if (!res.ok) throw new Error(result.error || 'Erreur');
+            showToast('✅ Commande enregistrée ! En attente de validation.', 'success');
+            cart = [];
+            updateCartUI();
+            bootstrap.Modal.getInstance(document.getElementById('checkoutModal')).hide();
+            document.getElementById('checkoutForm').reset();
+            closeCart();
+        } catch (err) {
+            showToast('❌ Erreur: ' + err.message, 'danger');
+            console.error(err);
+        }
+    }
 
     // ============================================================
     //  UTILITAIRES
     // ============================================================
-    function formatNumber(n) {
-        if (n === undefined || n === null || isNaN(n)) return '0';
-        return Number(n).toLocaleString('fr-FR').replace(/\s/g, ' ').replace(/,/g, ' ');
-    }
-
+    function formatNumber(n) { if (n === undefined || n === null || isNaN(n)) return '0'; return Number(n).toLocaleString('fr-FR').replace(/\s/g, ' ').replace(/,/g, ' '); }
+    function escapeHtml(text) { if (!text) return ''; const div = document.createElement('div'); div.textContent = text; return div.innerHTML; }
     function showToast(message, type = 'success') {
         const toast = document.getElementById('liveToast');
         document.getElementById('toastBody').textContent = message;
@@ -880,19 +865,34 @@
     function setupInfiniteScroll() {
         const sentinel = document.getElementById('scroll-sentinel');
         if (observer) observer.disconnect();
-        observer = new IntersectionObserver((entries) => {
-            if (entries[0].isIntersecting) {
-                loadMoreProducts();
-            }
-        }, { rootMargin: '0px 0px 200px 0px' });
+        observer = new IntersectionObserver((entries) => { if (entries[0].isIntersecting) loadMoreProducts(); }, { rootMargin: '0px 0px 200px 0px' });
         observer.observe(sentinel);
     }
 
     // ============================================================
     //  INIT
     // ============================================================
-    loadProducts().then(() => {
-        setupInfiniteScroll();
+    document.addEventListener('DOMContentLoaded', function() {
+        document.getElementById('productGrid').addEventListener('click', function(e) {
+            const btn = e.target.closest('.btn-add');
+            if (btn) {
+                const productId = parseInt(btn.dataset.productId, 10);
+                if (productId) addToCart(productId);
+            }
+        });
+
+        const urlParams = new URLSearchParams(window.location.search);
+        shopId = urlParams.get('shop') || '';
+        console.log('🔍 Shop ID:', shopId);
+
+        Promise.all([loadShopSettings(shopId), loadAllProducts()]).then(() => {
+            applyFilterAndReset();
+            setupInfiniteScroll();
+        });
+
+        cart = [];
+        updateCartUI();
+        closeCart(); // fermé au départ
     });
 </script>
 </body>
