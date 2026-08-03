@@ -365,6 +365,24 @@
 // ========================================================================
 let token = localStorage.getItem('token');
 let currentUser = null;
+// ===== CACHE =====
+const appCache = {
+    products: { data: null, timestamp: 0 },
+    clients: { data: null, timestamp: 0 },
+    settings: { data: null, timestamp: 0 },
+    ttl: 60000 // 1 minute
+};
+
+async function getCachedData(key, fetchFn) {
+    const cached = appCache[key];
+    if (cached.data && (Date.now() - cached.timestamp < appCache.ttl)) {
+        return cached.data;
+    }
+    const data = await fetchFn();
+    cached.data = data;
+    cached.timestamp = Date.now();
+    return data;
+}
 // ===== NOTIFICATIONS COMMANDES =====
 let pendingOrdersCount = 0;
 let notificationSound = new Audio('/notification.mp3'); // Fichier audio à la racine
@@ -886,6 +904,9 @@ async function renderOrders() {
                                         <button class="btn btn-sm btn-success" onclick="validateOrder(${o.id})"><i class="bi bi-check-circle"></i></button>
                                     ` : ''}
                                     <button class="btn btn-sm btn-secondary" onclick="changeOrderStatus(${o.id})"><i class="bi bi-arrow-repeat"></i></button>
+                                    <button class="btn btn-sm btn-warning me-1" onclick="editOrder(${o.id})">
+    <i class="bi bi-pencil"></i> Modifier
+</button>
                                 </td>
                             </tr>
                         `).join('')}
@@ -899,6 +920,249 @@ async function renderOrders() {
         document.getElementById('pageContainer').innerHTML = `<div class="alert alert-danger">Erreur: ${err.message}</div>`;
     }
 }
+// ============================================================
+//  MODIFICATION DES COMMANDES EN LIGNE
+// ============================================================
+
+window.editOrder = async function(orderId) {
+    try {
+        // Récupérer les données de la commande
+        const data = await apiCall(`/admin/orders/${orderId}`);
+        const order = data.order || {};
+        const items = data.items || [];
+
+        if (!items.length) {
+            alert('Cette commande ne contient aucun article.');
+            return;
+        }
+
+        // Charger les produits si besoin (pour l'ajout d'articles)
+        if (!window.allProducts) {
+            window.allProducts = await apiCall('/products');
+        }
+
+        // Construire le HTML du modal
+        const modalHtml = `
+            <div class="modal fade" id="editOrderModal" tabindex="-1">
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5>Modifier la commande #${orderId}</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <p><strong>Client :</strong> ${order.customer_name || 'Client particulier'}</p>
+                            <p><strong>Date :</strong> ${new Date(order.created_at).toLocaleString()}</p>
+                            <hr>
+                            <div class="table-wrapper">
+                                <table class="table table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>Produit</th>
+                                            <th>Quantité</th>
+                                            <th>Prix unit.</th>
+                                            <th>Total</th>
+                                            <th>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="editOrderItemsBody">
+                                        ${items.map((item, idx) => `
+                                            <tr>
+                                                <td>${item.product_name}</td>
+                                                <td>
+                                                    <input type="number" class="form-control form-control-sm edit-order-qty" 
+                                                           value="${item.quantity}" min="1" step="1" data-id="${item.product_id}">
+                                                </td>
+                                                <td>
+                                                    <input type="number" class="form-control form-control-sm edit-order-price" 
+                                                           value="${item.unit_price}" min="0" step="10" data-id="${item.product_id}">
+                                                </td>
+                                                <td class="edit-order-total">${formatNumber(item.total_price)} FCFA</td>
+                                                <td>
+                                                    <button class="btn btn-sm btn-danger remove-order-item" data-id="${item.product_id}">
+                                                        <i class="bi bi-trash"></i>
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="mt-2">
+                                <button class="btn btn-sm btn-secondary" onclick="addOrderItemToEdit()">
+                                    <i class="bi bi-plus-circle"></i> Ajouter un produit
+                                </button>
+                                <div id="editOrderAddArea" style="display:none; margin-top:10px;">
+                                    <div class="row g-2">
+                                        <div class="col-5">
+                                            <select id="editOrderProductSelect" class="form-select form-select-sm">
+                                                ${window.allProducts.map(p => `<option value="${p.id}">${p.name}</option>`).join('')}
+                                            </select>
+                                        </div>
+                                        <div class="col-2">
+                                            <input type="number" id="editOrderAddQty" class="form-control form-control-sm" value="1" min="1">
+                                        </div>
+                                        <div class="col-3">
+                                            <input type="number" id="editOrderAddPrice" class="form-control form-control-sm" placeholder="Prix unit." min="0" step="10">
+                                        </div>
+                                        <div class="col-2">
+                                            <button class="btn btn-sm btn-success" onclick="confirmAddOrderItem()">
+                                                <i class="bi bi-check"></i>
+                                            </button>
+                                            <button class="btn btn-sm btn-secondary" onclick="cancelAddOrderItem()">
+                                                <i class="bi bi-x"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mt-2">
+                                <strong>Total :</strong>
+                                <span id="editOrderTotalDisplay">${formatNumber(order.total_amount)} FCFA</span>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-primary" onclick="saveOrderModification(${orderId})">
+                                <i class="bi bi-save"></i> Enregistrer
+                            </button>
+                            <button class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Supprimer l'ancien modal s'il existe
+        const oldModal = document.getElementById('editOrderModal');
+        if (oldModal) oldModal.remove();
+
+        // Insérer le modal dans le DOM
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+        // Afficher le modal
+        const modal = new bootstrap.Modal(document.getElementById('editOrderModal'));
+        modal.show();
+
+        // Attacher les événements
+        document.querySelectorAll('.edit-order-qty, .edit-order-price').forEach(input => {
+            input.addEventListener('input', recalcOrderTotals);
+        });
+        document.querySelectorAll('.remove-order-item').forEach(btn => {
+            btn.addEventListener('click', function() {
+                this.closest('tr').remove();
+                recalcOrderTotals();
+            });
+        });
+
+        // Initialiser le calcul du total
+        recalcOrderTotals();
+
+    } catch (err) {
+        alert('❌ Erreur: ' + err.message);
+        console.error(err);
+    }
+};
+
+// ----- Recalcul des totaux dans le modal -----
+function recalcOrderTotals() {
+    let grandTotal = 0;
+    document.querySelectorAll('#editOrderItemsBody tr').forEach(row => {
+        const qty = parseInt(row.querySelector('.edit-order-qty').value) || 0;
+        const price = parseFloat(row.querySelector('.edit-order-price').value) || 0;
+        const total = qty * price;
+        row.querySelector('.edit-order-total').innerText = formatNumber(total) + ' FCFA';
+        grandTotal += total;
+    });
+    const display = document.getElementById('editOrderTotalDisplay');
+    if (display) display.innerText = formatNumber(grandTotal) + ' FCFA';
+}
+
+// ----- Afficher la zone d'ajout -----
+function addOrderItemToEdit() {
+    document.getElementById('editOrderAddArea').style.display = 'block';
+}
+
+// ----- Annuler l'ajout -----
+function cancelAddOrderItem() {
+    document.getElementById('editOrderAddArea').style.display = 'none';
+}
+
+// ----- Confirmer l'ajout -----
+function confirmAddOrderItem() {
+    const productId = document.getElementById('editOrderProductSelect').value;
+    const qty = parseInt(document.getElementById('editOrderAddQty').value) || 1;
+    const price = parseFloat(document.getElementById('editOrderAddPrice').value) || 0;
+    if (!productId || qty <= 0 || price <= 0) {
+        alert('Veuillez remplir tous les champs');
+        return;
+    }
+    const product = window.allProducts?.find(p => p.id == productId);
+    if (!product) {
+        alert('Produit non trouvé');
+        return;
+    }
+
+    const row = document.createElement('tr');
+    row.innerHTML = `
+        <td>${product.name}</td>
+        <td>
+            <input type="number" class="form-control form-control-sm edit-order-qty" 
+                   value="${qty}" min="1" step="1" data-id="${productId}">
+        </td>
+        <td>
+            <input type="number" class="form-control form-control-sm edit-order-price" 
+                   value="${price}" min="0" step="10" data-id="${productId}">
+        </td>
+        <td class="edit-order-total">${formatNumber(qty * price)} FCFA</td>
+        <td>
+            <button class="btn btn-sm btn-danger remove-order-item" data-id="${productId}">
+                <i class="bi bi-trash"></i>
+            </button>
+        </td>
+    `;
+
+    document.getElementById('editOrderItemsBody').appendChild(row);
+
+    // Attacher les événements
+    row.querySelectorAll('.edit-order-qty, .edit-order-price').forEach(input => {
+        input.addEventListener('input', recalcOrderTotals);
+    });
+    row.querySelector('.remove-order-item').addEventListener('click', function() {
+        this.closest('tr').remove();
+        recalcOrderTotals();
+    });
+
+    recalcOrderTotals();
+    cancelAddOrderItem();
+}
+
+// ----- Sauvegarder les modifications -----
+window.saveOrderModification = async function(orderId) {
+    const items = [];
+    document.querySelectorAll('#editOrderItemsBody tr').forEach(row => {
+        const product_id = row.querySelector('.edit-order-qty').dataset.id;
+        const quantity = parseInt(row.querySelector('.edit-order-qty').value) || 0;
+        const unit_price = parseFloat(row.querySelector('.edit-order-price').value) || 0;
+        if (product_id && quantity > 0 && unit_price > 0) {
+            items.push({ product_id, quantity, unit_price });
+        }
+    });
+
+    if (items.length === 0) {
+        alert('La commande doit contenir au moins un article');
+        return;
+    }
+
+    try {
+        await apiCall(`/admin/orders/${orderId}/items`, 'PUT', { items });
+        alert('✅ Commande modifiée avec succès');
+        bootstrap.Modal.getInstance(document.getElementById('editOrderModal')).hide();
+        renderOrders(); // rafraîchir la liste
+    } catch (err) {
+        alert('❌ Erreur: ' + err.message);
+        console.error(err);
+    }
+};
 window.viewOrder = async (orderId) => {
     try {
         const data = await apiCall(`/admin/orders/${orderId}`);
@@ -1582,7 +1846,7 @@ try {
 // ========================================================================
 async function renderSales() {
     // ✅ FORCER LE RECHARGEMENT COMPLET
-    let allProducts = await apiCall('/products?_t=' + Date.now());
+let allProducts = await getCachedData('products', () => apiCall('/products'));
     console.log('📦 Produits chargés:', allProducts.length);
     
     // Si aucun produit, afficher un message d'avertissement
@@ -1815,7 +2079,6 @@ async function renderSales() {
     }
 window.filterProducts = () => {
     const searchTerm = document.getElementById('productSearch').value.toLowerCase().trim();
-    // ✅ Utiliser allProducts (déjà chargé) avec rechargement forcé
     if (!searchTerm) {
         filteredProducts = [...allProducts];
     } else {
@@ -2120,14 +2383,22 @@ function renderSalesTable(sales) {
         } catch(err) {
             alert('❌ Erreur: ' + err.message);
         }
-    };
-window.editSale = async (saleId) => {
+    };// ============================================================
+//  FONCTIONS D'ÉDITION DES VENTES (CORRIGÉES)
+// ============================================================
+
+// ----- Ouvrir le modal d'édition (corrigé) -----
+window.editSale = async function(saleId) {
     try {
         const saleData = await apiCall(`/sales/${saleId}`);
         const sale = saleData.sale;
         const items = saleData.items;
 
-        // Remplir les champs de remise et acompte
+        // S'assurer que window.allProducts est chargé
+        if (!window.allProducts) {
+            window.allProducts = await apiCall('/products');
+        }
+
         document.getElementById('editSaleId').innerText = saleId;
         document.getElementById('editRemisePct').value = sale.remise_pct || 0;
         document.getElementById('editAcompte').value = sale.acompte || 0;
@@ -2138,7 +2409,6 @@ window.editSale = async (saleId) => {
         const clientPhone = sale.client_phone || '';
         const clientAddress = sale.client_address || '';
 
-        // Construire le HTML des champs client
         const clientHtml = `
             <div class="row g-2 mb-2">
                 <div class="col-md-4">
@@ -2154,8 +2424,8 @@ window.editSale = async (saleId) => {
                     <input type="text" id="editClientPhone" class="form-control form-control-sm" value="${clientPhone}" placeholder="Téléphone">
                 </div>
                 <div class="col-md-2">
-                    <label class="form-label" style="font-size:0.8rem;"> </label>
-                    <button class="btn btn-sm btn-outline-secondary w-100" onclick="clearClientFields()">
+                    <label class="form-label" style="font-size:0.8rem;"> </label>
+                    <button class="btn btn-sm btn-outline-secondary w-100" onclick="window.clearClientFields()">
                         <i class="bi bi-x-circle"></i> Effacer
                     </button>
                 </div>
@@ -2166,139 +2436,137 @@ window.editSale = async (saleId) => {
             </div>
             <hr>
         `;
+// Construire le HTML des articles avec recherche et code-barres
+const productsList = window.allProducts || [];
+let itemsHtml = `
+    <h6>Articles</h6>
+    <div class="table-wrapper">
+        <table class="table table-sm">
+            <thead>
+                <tr>
+                    <th>Produit</th>
+                    <th>Quantité</th>
+                    <th>Prix unit.</th>
+                    <th>Total</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody id="editItemsBody">
+                ${items.map((item, idx) => `
+                    <tr data-index="${idx}">
+                        <td>${item.product_name}</td>
+                        <td>
+                            <input type="number" class="form-control form-control-sm edit-qty" style="width:70px;" 
+                                   value="${item.quantity}" min="1" step="1" data-id="${item.product_id}">
+                        </td>
+                        <td>
+                            <input type="number" class="form-control form-control-sm edit-price" style="width:100px;" 
+                                   value="${item.unit_price}" min="0" step="10" data-id="${item.product_id}">
+                        </td>
+                        <td class="edit-total">${formatNumber(item.total_price)} FCFA</td>
+                        <td>
+                            <button class="btn btn-sm btn-danger remove-item" data-id="${item.product_id}">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `).join('')}
+            </tbody>
+        </table>
+    </div>
 
-        // Construire le HTML des articles
-        let itemsHtml = `
-            <h6>Articles</h6>
-            <div class="table-wrapper">
-                <table class="table table-sm">
-                    <thead>
-                        <tr>
-                            <th>Produit</th>
-                            <th>Quantité</th>
-                            <th>Prix unit.</th>
-                            <th>Total</th>
-                            <th>Action</th>
-                        </tr>
-                    </thead>
-                    <tbody id="editItemsBody">
-                        ${items.map((item, idx) => `
-                            <tr data-index="${idx}">
-                                <td>${item.product_name}</td>
-                                <td>
-                                    <input type="number" class="form-control form-control-sm edit-qty" style="width:70px;" 
-                                           value="${item.quantity}" min="1" step="1" data-id="${item.product_id}">
-                                </td>
-                                <td>
-                                    <input type="number" class="form-control form-control-sm edit-price" style="width:100px;" 
-                                           value="${item.unit_price}" min="0" step="10" data-id="${item.product_id}">
-                                </td>
-                                <td class="edit-total">${formatNumber(item.total_price)} FCFA</td>
-                                <td>
-                                    <button class="btn btn-sm btn-danger remove-item" data-id="${item.product_id}">
-                                        <i class="bi bi-trash"></i>
-                                    </button>
-                                </td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
+    <!-- NOUVEAU : Recherche et code-barres -->
+    <div class="mt-2">
+        <label class="form-label">Ajouter un produit</label>
+        <div class="row g-2">
+            <div class="col-md-4">
+                <input type="text" id="editBarcodeScan" class="form-control form-control-sm" placeholder="📷 Code-barres..." autofocus>
             </div>
-            <button class="btn btn-sm btn-secondary mt-2" onclick="addItemToEditSale()">
-                <i class="bi bi-plus-circle"></i> Ajouter un produit
-            </button>
-            <div id="editAddItemArea" style="display:none; margin-top:10px;">
-                <div class="row g-2">
-                    <div class="col-5">
-                        <select id="editAddProductSelect" class="form-select form-select-sm">
-                            ${allProducts.map(p => `<option value="${p.id}">${p.name}</option>`).join('')}
-                        </select>
-                    </div>
-                    <div class="col-2">
-                        <input type="number" id="editAddQty" class="form-control form-control-sm" value="1" min="1">
-                    </div>
-                    <div class="col-3">
-                        <input type="number" id="editAddPrice" class="form-control form-control-sm" placeholder="Prix unit." min="0" step="10">
-                    </div>
-                    <div class="col-2">
-                        <button class="btn btn-sm btn-success" onclick="confirmAddItemToEdit()">
-                            <i class="bi bi-check"></i>
-                        </button>
-                        <button class="btn btn-sm btn-secondary" onclick="cancelAddItemToEdit()">
-                            <i class="bi bi-x"></i>
-                        </button>
-                    </div>
-                </div>
+            <div class="col-md-6 position-relative">
+                <input type="text" id="editProductSearch" class="form-control form-control-sm" placeholder="🔍 Nom du produit..." oninput="window.filterEditProducts()">
+                <div id="editProductSuggestions" class="list-group mt-1" style="max-height:200px; overflow-y:auto; display:none; position:absolute; top:100%; left:0; right:0; z-index:1000; background:white; border-radius:0.5rem; box-shadow:var(--shadow-hover);"></div>
             </div>
-        `;
+            <div class="col-md-2">
+                <button class="btn btn-sm btn-success w-100" onclick="window.addSelectedEditProduct()">
+                    <i class="bi bi-plus-circle"></i> Ajouter
+                </button>
+            </div>
+        </div>
+        <div class="mt-1">
+            <small class="text-muted">Scannez un code-barres ou recherchez un produit, puis cliquez sur Ajouter (quantité par défaut: 1).</small>
+        </div>
+    </div>
+`;
 
-        // Insérer le tout dans le container
         document.getElementById('editSaleItems').innerHTML = clientHtml + itemsHtml;
 
-        // Événements pour recalculer les totaux
         document.querySelectorAll('.edit-qty, .edit-price').forEach(input => {
-            input.addEventListener('input', recalcEditTotals);
+            input.addEventListener('input', window.recalcEditTotals);
         });
 
-        // Supprimer un article
         document.querySelectorAll('.remove-item').forEach(btn => {
             btn.addEventListener('click', function() {
                 this.closest('tr').remove();
-                recalcEditTotals();
+                window.recalcEditTotals();
             });
         });
 
         new bootstrap.Modal(document.getElementById('editSaleModal')).show();
     } catch (err) {
         alert('❌ Erreur: ' + err.message);
+        console.error(err);
     }
 };
-// ----- Recalcul des totaux dans le modal -----
-function recalcEditTotals() {
-    let subtotal = 0;
-    document.querySelectorAll('#editItemsBody tr').forEach(row => {
-        const qty = parseInt(row.querySelector('.edit-qty')?.value) || 0;
-        const price = parseFloat(row.querySelector('.edit-price')?.value) || 0;
-        const total = qty * price;
-        const totalCell = row.querySelector('.edit-total');
-        if (totalCell) totalCell.innerText = formatNumber(total) + ' FCFA';
-        subtotal += total;
-    });
-    // Optionnel : afficher le sous-total quelque part
-    const display = document.getElementById('editSubtotalDisplay');
-    if (display) display.innerText = formatNumber(subtotal) + ' FCFA';
-}
+// ... (après avoir défini itemsHtml)
 
-// ----- Effacer les champs client -----
-function clearClientFields() {
-    document.getElementById('editClientName').value = '';
-    document.getElementById('editClientEmail').value = '';
-    document.getElementById('editClientPhone').value = '';
-    document.getElementById('editClientAddress').value = '';
-}
-
+// Gestion du code-barres dans le modal
+setTimeout(() => {
+    const barcodeInput = document.getElementById('editBarcodeScan');
+    if (barcodeInput) {
+        barcodeInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                const code = this.value.trim();
+                if (code) {
+                    window.addProductByBarcode(code);
+                }
+            }
+        });
+        // Focus sur le champ code-barres
+        barcodeInput.focus();
+    }
+}, 100);
 // ----- Ajouter un article (afficher le formulaire) -----
-function addItemToEditSale() {
-    document.getElementById('editAddItemArea').style.display = 'block';
-}
+window.addItemToEditSale = function() {
+    const area = document.getElementById('editAddItemArea');
+    if (area) area.style.display = 'block';
+};
 
 // ----- Annuler l'ajout -----
-function cancelAddItemToEdit() {
-    document.getElementById('editAddItemArea').style.display = 'none';
-}
+window.cancelAddItemToEdit = function() {
+    const area = document.getElementById('editAddItemArea');
+    if (area) area.style.display = 'none';
+};
 
 // ----- Confirmer l'ajout -----
-function confirmAddItemToEdit() {
-    const productId = document.getElementById('editAddProductSelect').value;
-    const qty = parseInt(document.getElementById('editAddQty').value) || 1;
-    const price = parseFloat(document.getElementById('editAddPrice').value) || 0;
+window.confirmAddItemToEdit = function() {
+    const productId = document.getElementById('editAddProductSelect')?.value;
+    const qty = parseInt(document.getElementById('editAddQty')?.value) || 1;
+    const price = parseFloat(document.getElementById('editAddPrice')?.value) || 0;
+
     if (!productId || qty <= 0 || price <= 0) {
         alert('Veuillez remplir tous les champs');
         return;
     }
-    // Trouver le nom du produit
-    const product = allProducts.find(p => p.id == productId);
-    if (!product) return;
+
+    const product = (window.allProducts || []).find(p => p.id == productId);
+    if (!product) {
+        alert('Produit non trouvé');
+        return;
+    }
+
+    const tbody = document.getElementById('editItemsBody');
+    if (!tbody) return;
+
     const row = document.createElement('tr');
     row.innerHTML = `
         <td>${product.name}</td>
@@ -2317,34 +2585,60 @@ function confirmAddItemToEdit() {
             </button>
         </td>
     `;
-    document.getElementById('editItemsBody').appendChild(row);
-    // Ajouter les événements
+
+    tbody.appendChild(row);
+
     row.querySelectorAll('.edit-qty, .edit-price').forEach(input => {
-        input.addEventListener('input', recalcEditTotals);
+        input.addEventListener('input', window.recalcEditTotals);
     });
     row.querySelector('.remove-item').addEventListener('click', function() {
         this.closest('tr').remove();
-        recalcEditTotals();
+        window.recalcEditTotals();
     });
-    recalcEditTotals();
-    cancelAddItemToEdit();
-}
 
-// ----- Enregistrer les modifications -----
-window.saveSaleModification = async () => {
+    window.recalcEditTotals();
+
+    document.getElementById('editAddQty').value = '1';
+    document.getElementById('editAddPrice').value = '';
+    document.getElementById('editAddProductSelect').selectedIndex = 0;
+    window.cancelAddItemToEdit();
+};
+
+// ----- Recalcul des totaux -----
+window.recalcEditTotals = function() {
+    let subtotal = 0;
+    document.querySelectorAll('#editItemsBody tr').forEach(row => {
+        const qty = parseInt(row.querySelector('.edit-qty')?.value) || 0;
+        const price = parseFloat(row.querySelector('.edit-price')?.value) || 0;
+        const total = qty * price;
+        const totalCell = row.querySelector('.edit-total');
+        if (totalCell) totalCell.innerText = formatNumber(total) + ' FCFA';
+        subtotal += total;
+    });
+    const display = document.getElementById('editSubtotalDisplay');
+    if (display) display.innerText = formatNumber(subtotal) + ' FCFA';
+};
+
+// ----- Effacer les champs client -----
+window.clearClientFields = function() {
+    document.getElementById('editClientName').value = '';
+    document.getElementById('editClientEmail').value = '';
+    document.getElementById('editClientPhone').value = '';
+    document.getElementById('editClientAddress').value = '';
+};
+
+// ----- Sauvegarder les modifications -----
+window.saveSaleModification = async function() {
     const saleId = document.getElementById('editSaleId').innerText;
 
-    // Récupérer les données client
     const client_name = document.getElementById('editClientName')?.value?.trim() || '';
     const client_email = document.getElementById('editClientEmail')?.value?.trim() || '';
     const client_phone = document.getElementById('editClientPhone')?.value?.trim() || '';
     const client_address = document.getElementById('editClientAddress')?.value?.trim() || '';
 
-    // Récupérer la remise et l'acompte
     const remise_pct = parseFloat(document.getElementById('editRemisePct').value) || 0;
     const acompte = parseFloat(document.getElementById('editAcompte').value) || 0;
 
-    // Récupérer les articles
     const items = [];
     document.querySelectorAll('#editItemsBody tr').forEach(row => {
         const product_id = row.querySelector('.edit-qty')?.dataset?.id;
@@ -2361,7 +2655,6 @@ window.saveSaleModification = async () => {
     }
 
     try {
-        // 1. Mettre à jour la vente (client, remise, acompte)
         await apiCall(`/sales/${saleId}`, 'PUT', {
             client_name,
             client_email,
@@ -2371,7 +2664,6 @@ window.saveSaleModification = async () => {
             acompte
         });
 
-        // 2. Mettre à jour les articles
         await apiCall(`/sales/${saleId}/items`, 'PUT', { items });
 
         alert('✅ Vente modifiée avec succès');
@@ -2380,6 +2672,7 @@ window.saveSaleModification = async () => {
         renderDashboard();
     } catch (err) {
         alert('❌ Erreur: ' + err.message);
+        console.error(err);
     }
 };
     const historyHtml = `
@@ -2407,7 +2700,148 @@ window.saveSaleModification = async () => {
         if (scanInput) scanInput.focus();
     }, 300);
 }
+// ============================================================
+//  RECHERCHE ET AJOUT DE PRODUITS DANS LE MODAL D'ÉDITION
+// ============================================================
 
+// Variable pour stocker le produit sélectionné dans la recherche
+let selectedEditProductId = null;
+
+// Filtrer les produits dans la recherche (suggestions)
+window.filterEditProducts = function() {
+    const search = document.getElementById('editProductSearch')?.value?.toLowerCase().trim() || '';
+    const container = document.getElementById('editProductSuggestions');
+    const products = window.allProducts || [];
+
+    if (!search) {
+        container.style.display = 'none';
+        return;
+    }
+
+    const filtered = products.filter(p =>
+        p.name.toLowerCase().includes(search) ||
+        (p.barcode && p.barcode.toLowerCase().includes(search))
+    );
+
+    if (filtered.length === 0) {
+        container.style.display = 'none';
+        return;
+    }
+
+    container.style.display = 'block';
+    container.innerHTML = filtered.slice(0, 10).map(p => `
+        <button class="list-group-item list-group-item-action" 
+                onclick="window.selectEditProduct(${p.id}, '${p.name.replace(/'/g, "\\'")}')">
+            ${p.name} - ${formatNumber(p.sell_price)} FCFA
+            ${p.barcode ? `<span class="text-muted ms-2"><i class="bi bi-upc-scan"></i> ${p.barcode}</span>` : ''}
+        </button>
+    `).join('');
+};
+
+// Sélectionner un produit dans la liste des suggestions
+window.selectEditProduct = function(id, name) {
+    selectedEditProductId = id;
+    document.getElementById('editProductSearch').value = name;
+    document.getElementById('editProductSuggestions').style.display = 'none';
+};
+
+// Ajouter le produit sélectionné (ou scanné) dans le tableau
+window.addSelectedEditProduct = function() {
+    const productId = selectedEditProductId;
+    if (!productId) {
+        alert('Veuillez d\'abord sélectionner un produit dans la recherche ou scanner un code-barres.');
+        return;
+    }
+
+    const product = (window.allProducts || []).find(p => p.id === productId);
+    if (!product) {
+        alert('Produit non trouvé.');
+        return;
+    }
+
+    // Ajouter avec quantité 1 et prix de vente
+    addProductRowToEditSale(productId, 1, product.sell_price);
+    // Réinitialiser la recherche
+    document.getElementById('editProductSearch').value = '';
+    document.getElementById('editProductSuggestions').style.display = 'none';
+    selectedEditProductId = null;
+};
+
+// Ajouter un produit par code-barres
+window.addProductByBarcode = async function(code) {
+    if (!code || code.trim() === '') return;
+    try {
+        const product = await apiCall(`/products/barcode/${encodeURIComponent(code.trim())}`);
+        if (!product) {
+            alert('Produit non trouvé avec ce code-barres.');
+            return;
+        }
+        // Ajouter avec quantité 1 et prix de vente
+        addProductRowToEditSale(product.id, 1, product.sell_price);
+        // Effacer le champ code-barres
+        document.getElementById('editBarcodeScan').value = '';
+    } catch (err) {
+        alert('❌ Erreur: ' + err.message);
+    }
+};
+
+// Fonction utilitaire pour ajouter une ligne dans le tableau d'édition
+function addProductRowToEditSale(productId, qty, price) {
+    const product = (window.allProducts || []).find(p => p.id === productId);
+    if (!product) {
+        alert('Produit non trouvé.');
+        return;
+    }
+
+    const tbody = document.getElementById('editItemsBody');
+    if (!tbody) return;
+
+    const row = document.createElement('tr');
+    row.innerHTML = `
+        <td>${product.name}</td>
+        <td>
+            <input type="number" class="form-control form-control-sm edit-qty" style="width:70px;" 
+                   value="${qty}" min="1" step="1" data-id="${productId}">
+        </td>
+        <td>
+            <input type="number" class="form-control form-control-sm edit-price" style="width:100px;" 
+                   value="${price}" min="0" step="10" data-id="${productId}">
+        </td>
+        <td class="edit-total">${formatNumber(qty * price)} FCFA</td>
+        <td>
+            <button class="btn btn-sm btn-danger remove-item" data-id="${productId}">
+                <i class="bi bi-trash"></i>
+            </button>
+        </td>
+    `;
+
+    tbody.appendChild(row);
+
+    // Ajouter les événements pour recalculer les totaux
+    row.querySelectorAll('.edit-qty, .edit-price').forEach(input => {
+        input.addEventListener('input', window.recalcEditTotals);
+    });
+    row.querySelector('.remove-item').addEventListener('click', function() {
+        this.closest('tr').remove();
+        window.recalcEditTotals();
+    });
+
+    window.recalcEditTotals();
+}
+// ----- Recalcul des totaux dans le modal -----
+window.recalcEditTotals = function() {
+    let subtotal = 0;
+    document.querySelectorAll('#editItemsBody tr').forEach(row => {
+        const qty = parseInt(row.querySelector('.edit-qty')?.value) || 0;
+        const price = parseFloat(row.querySelector('.edit-price')?.value) || 0;
+        const total = qty * price;
+        const totalCell = row.querySelector('.edit-total');
+        if (totalCell) totalCell.innerText = formatNumber(total) + ' FCFA';
+        subtotal += total;
+    });
+    const display = document.getElementById('editSubtotalDisplay');
+    if (display) display.innerText = formatNumber(subtotal) + ' FCFA';
+};
 // ========================================================================
 // AUTRES PAGES
 // ========================================================================

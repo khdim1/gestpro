@@ -1293,7 +1293,7 @@ app.put('/api/sales/:id', authenticate, async (req, res) => {
     try {
         await connection.beginTransaction();
 
-        // Vérifier que la vente existe et appartient à l'utilisateur
+        // Vérifier que la vente existe
         const [saleRows] = await connection.query(
             'SELECT * FROM sales WHERE id = ? AND user_id = ? FOR UPDATE',
             [req.params.id, req.user.id]
@@ -1303,26 +1303,22 @@ app.put('/api/sales/:id', authenticate, async (req, res) => {
         }
         const sale = saleRows[0];
 
-        // Vérifier si la vente est déjà payée
-        if (sale.status === 'completed') {
-            return res.status(400).json({ error: 'Impossible de modifier une vente déjà payée' });
-        }
+        // ✅ SUPPRIMEZ ou COMMENTEZ cette condition :
+        // if (sale.status === 'completed') {
+        //     return res.status(400).json({ error: 'Impossible de modifier une vente déjà payée' });
+        // }
 
-        // ===== GESTION DU CLIENT =====
+        // Gestion du client
         let client_id = sale.client_id;
         if (client_name !== undefined) {
-            // Si un nom de client est fourni
             if (client_name && client_name.trim() !== '') {
-                // Chercher si le client existe déjà
                 let [existing] = await connection.query(
                     'SELECT id FROM clients WHERE user_id = ? AND name = ?',
                     [req.user.id, client_name.trim()]
                 );
                 if (existing.length > 0) {
-                    // Client existant
                     client_id = existing[0].id;
                 } else {
-                    // Créer un nouveau client
                     const [result] = await connection.query(
                         'INSERT INTO clients (user_id, name, email, phone, address) VALUES (?, ?, ?, ?, ?)',
                         [req.user.id, client_name.trim(), client_email || null, client_phone || null, client_address || null]
@@ -1330,19 +1326,18 @@ app.put('/api/sales/:id', authenticate, async (req, res) => {
                     client_id = result.insertId;
                 }
             } else {
-                // Si client_name est vide, on retire le client
                 client_id = null;
             }
         }
 
-        // ===== RECALCUL DES TOTAUX =====
+        // Recalcul des totaux
         const newRemise = remise_pct !== undefined ? remise_pct : sale.remise_pct;
         const newAcompte = acompte !== undefined ? acompte : sale.acompte;
         const remise_valeur = (newRemise || 0) / 100 * sale.total_amount;
         const total_apres_remise = sale.total_amount - remise_valeur;
         const new_final = total_apres_remise + sale.tax - (newAcompte || 0);
 
-        // ===== MISE À JOUR =====
+        // Mise à jour
         await connection.query(
             `UPDATE sales 
              SET remise_pct = ?, acompte = ?, final_amount = ?, client_id = ?
@@ -1351,7 +1346,7 @@ app.put('/api/sales/:id', authenticate, async (req, res) => {
         );
 
         await connection.commit();
-        res.json({ 
+        res.json({
             message: 'Vente modifiée avec succès',
             client_id: client_id,
             final_amount: new_final
@@ -1416,33 +1411,44 @@ app.get('/api/inventory/global', authenticate, async (req, res) => {
     const [rows] = await pool.query('SELECT id, sku, name, quantity, unit, reorder_level FROM products WHERE user_id = ? ORDER BY name', [req.user.id]);
     res.json(rows);
 });
-
-// ========== ROUTES RAPPORTS ==========
 app.get('/api/reports/dashboard', authenticate, async (req, res) => {
+    const userId = req.user.id;
     try {
-        const [totalProducts] = await pool.query('SELECT COUNT(*) as count FROM products WHERE user_id=?', [req.user.id]);
-        const [lowStock] = await pool.query('SELECT COUNT(*) as count FROM products WHERE user_id=? AND quantity <= reorder_level', [req.user.id]);
-        const [inventoryValue] = await pool.query('SELECT COALESCE(SUM(quantity * buy_price),0) as value FROM products WHERE user_id=?', [req.user.id]);
-        const [todaySales] = await pool.query(`SELECT COALESCE(SUM(final_amount),0) as total FROM sales WHERE user_id=? AND DATE(sale_date) = CURDATE() AND status='completed'`, [req.user.id]);
-        const [monthSales] = await pool.query(`SELECT COALESCE(SUM(final_amount),0) as total FROM sales WHERE user_id=? AND MONTH(sale_date)=MONTH(CURDATE()) AND YEAR(sale_date)=YEAR(CURDATE())`, [req.user.id]);
-        const [topProducts] = await pool.query('SELECT p.name, SUM(si.quantity) as qte FROM sale_items si JOIN products p ON si.product_id = p.id JOIN sales s ON si.sale_id = s.id WHERE s.user_id=? AND s.status=\'completed\' GROUP BY p.id ORDER BY qte DESC LIMIT 5', [req.user.id]);
-        const [recentSales] = await pool.query('SELECT s.id, s.final_amount, s.sale_date, c.name as client_name FROM sales s LEFT JOIN clients c ON s.client_id = c.id WHERE s.user_id=? ORDER BY s.sale_date DESC LIMIT 5', [req.user.id]);
-
+        const [results] = await pool.query(`
+            SELECT 
+                (SELECT COUNT(*) FROM products WHERE user_id = ?) AS totalProducts,
+                (SELECT COUNT(*) FROM products WHERE user_id = ? AND quantity <= reorder_level) AS lowStock,
+                (SELECT COALESCE(SUM(quantity * buy_price), 0) FROM products WHERE user_id = ?) AS inventoryValue,
+                (SELECT COALESCE(SUM(final_amount), 0) FROM sales WHERE user_id = ? AND DATE(sale_date) = CURDATE() AND status = 'completed') AS todaySales,
+                (SELECT COALESCE(SUM(final_amount), 0) FROM sales WHERE user_id = ? AND MONTH(sale_date) = MONTH(CURDATE()) AND YEAR(sale_date) = YEAR(CURDATE()) AND status = 'completed') AS monthSales
+        `, [userId, userId, userId, userId, userId]);
+        const [topProducts] = await pool.query(
+            `SELECT p.name, SUM(si.quantity) as qte 
+             FROM sale_items si 
+             JOIN products p ON si.product_id = p.id 
+             JOIN sales s ON si.sale_id = s.id 
+             WHERE s.user_id = ? AND s.status = 'completed' 
+             GROUP BY p.id ORDER BY qte DESC LIMIT 5`,
+            [userId]
+        );
+        const [recentSales] = await pool.query(
+            `SELECT s.id, s.final_amount, s.sale_date, c.name as client_name 
+             FROM sales s 
+             LEFT JOIN clients c ON s.client_id = c.id 
+             WHERE s.user_id = ? 
+             ORDER BY s.sale_date DESC LIMIT 5`,
+            [userId]
+        );
         res.json({
-            totalProducts: totalProducts[0].count,
-            lowStock: lowStock[0].count,
-            inventoryValue: inventoryValue[0].value || 0,
-            todaySales: todaySales[0].total,
-            monthSales: monthSales[0].total,
+            ...results[0],
             topProducts: topProducts || [],
             recentSales: recentSales || []
         });
     } catch (err) {
-        console.error('❌ Erreur dashboard :', err);
+        console.error('Dashboard error:', err);
         res.status(500).json({ error: err.message });
     }
 });
-
 app.get('/api/reports/sales-by-period', authenticate, async (req, res) => {
     const { period } = req.query;
     let groupBy;
@@ -1519,118 +1525,136 @@ app.get('/api/settings', authenticate, async (req, res) => {
         res.status(500).json({ error: 'Erreur lors du chargement des paramètres.' });
     }
 });
-// ========== MODIFIER LES ARTICLES D'UNE VENTE ==========
+// ========== MODIFIER LES ARTICLES D'UNE VENTE (AVEC RETRY) ==========
 app.put('/api/sales/:id/items', authenticate, async (req, res) => {
-    const saleId = req.params.id; // ✅ Défini en premier
+    const saleId = req.params.id;
     const { items } = req.body;
-    console.log(`🔍 Modification des articles de la vente #${saleId}`, items);
+    let attempts = 0;
+    const maxAttempts = 3;
 
-    const connection = await pool.getConnection();
-    try {
-        await connection.beginTransaction();
+    while (attempts < maxAttempts) {
+        attempts++;
+        const connection = await pool.getConnection();
+        try {
+            await connection.beginTransaction();
 
-        const [saleRows] = await connection.query(
-            'SELECT * FROM sales WHERE id = ? AND user_id = ? FOR UPDATE',
-            [saleId, req.user.id]
-        );
-        if (saleRows.length === 0) {
-            return res.status(404).json({ error: 'Vente non trouvée' });
-        }
-        const sale = saleRows[0];
-
-        // Autoriser la modification même si payée (avec avertissement)
-        if (sale.status === 'completed') {
-            console.warn(`⚠️ Modification d'une vente déjà payée (ID ${saleId})`);
-        }
-
-        // Récupérer les anciens articles
-        const [oldItems] = await connection.query(
-            'SELECT product_id, quantity FROM sale_items WHERE sale_id = ?',
-            [saleId]
-        );
-
-        // Calcul des différences de stock
-        const oldMap = {};
-        oldItems.forEach(item => { oldMap[item.product_id] = item.quantity; });
-
-        // Supprimer les anciens articles
-        await connection.query('DELETE FROM sale_items WHERE sale_id = ?', [saleId]);
-
-        // Insérer les nouveaux articles et ajuster le stock
-        let subtotal = 0;
-        for (const item of items) {
-            if (!item.product_id || !item.quantity || !item.unit_price) {
-                throw new Error('Données d\'article invalides');
-            }
-            const oldQty = oldMap[item.product_id] || 0;
-            const newQty = item.quantity;
-            const diff = newQty - oldQty;
-
-            if (diff > 0) {
-                const [prod] = await connection.query(
-                    'SELECT quantity FROM products WHERE id = ? AND user_id = ? FOR UPDATE',
-                    [item.product_id, req.user.id]
-                );
-                if (prod.length === 0) throw new Error(`Produit ${item.product_id} inexistant`);
-                if (prod[0].quantity < diff) {
-                    throw new Error(`Stock insuffisant pour le produit ${item.product_id}`);
-                }
-                await connection.query(
-                    'UPDATE products SET quantity = quantity - ? WHERE id = ?',
-                    [diff, item.product_id]
-                );
-                await connection.query(
-                    `INSERT INTO stock_movements (product_id, user_id, type, quantity_change, quantity_before, quantity_after, reference, notes)
-                     VALUES (?, ?, 'sale', ?, ?, ?, ?, ?)`,
-                    [item.product_id, req.user.id, -diff, prod[0].quantity, prod[0].quantity - diff, `MODIFICATION VENTE #${saleId}`, 'Ajustement stock']
-                );
-            } else if (diff < 0) {
-                await connection.query(
-                    'UPDATE products SET quantity = quantity + ? WHERE id = ?',
-                    [-diff, item.product_id]
-                );
-                const [prod] = await connection.query(
-                    'SELECT quantity FROM products WHERE id = ? FOR UPDATE',
-                    [item.product_id]
-                );
-                await connection.query(
-                    `INSERT INTO stock_movements (product_id, user_id, type, quantity_change, quantity_before, quantity_after, reference, notes)
-                     VALUES (?, ?, 'return', ?, ?, ?, ?, ?)`,
-                    [item.product_id, req.user.id, -diff, prod[0].quantity + diff, prod[0].quantity, `MODIFICATION VENTE #${saleId}`, 'Retour stock']
-                );
-            }
-
-            const total_price = item.quantity * item.unit_price;
-            await connection.query(
-                'INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, total_price) VALUES (?, ?, ?, ?, ?)',
-                [saleId, item.product_id, item.quantity, item.unit_price, total_price]
+            // 1. Vérifier l’existence de la vente sans verrou (lecture simple)
+            const [saleExists] = await connection.query(
+                'SELECT id FROM sales WHERE id = ? AND user_id = ?',
+                [saleId, req.user.id]
             );
-            subtotal += total_price;
+            if (saleExists.length === 0) {
+                return res.status(404).json({ error: 'Vente non trouvée' });
+            }
+
+            // 2. Définir le niveau d’isolation pour réduire les verrous
+            await connection.query('SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED');
+
+            // 3. Verrouiller la ligne pour la mise à jour
+            const [saleRows] = await connection.query(
+                'SELECT * FROM sales WHERE id = ? FOR UPDATE',
+                [saleId]
+            );
+            const sale = saleRows[0];
+
+            // 4. Récupérer les anciens articles
+            const [oldItems] = await connection.query(
+                'SELECT product_id, quantity FROM sale_items WHERE sale_id = ?',
+                [saleId]
+            );
+
+            // 5. Calculer les différences de stock
+            const oldMap = {};
+            oldItems.forEach(item => { oldMap[item.product_id] = item.quantity; });
+
+            // 6. Supprimer les anciens articles
+            await connection.query('DELETE FROM sale_items WHERE sale_id = ?', [saleId]);
+
+            // 7. Insérer les nouveaux articles et ajuster le stock
+            let subtotal = 0;
+            for (const item of items) {
+                if (!item.product_id || !item.quantity || !item.unit_price) {
+                    throw new Error('Données d\'article invalides');
+                }
+                const oldQty = oldMap[item.product_id] || 0;
+                const newQty = item.quantity;
+                const diff = newQty - oldQty;
+
+                if (diff > 0) {
+                    const [prod] = await connection.query(
+                        'SELECT quantity FROM products WHERE id = ? AND user_id = ? FOR UPDATE',
+                        [item.product_id, req.user.id]
+                    );
+                    if (prod.length === 0) throw new Error(`Produit ${item.product_id} inexistant`);
+                    if (prod[0].quantity < diff) {
+                        throw new Error(`Stock insuffisant pour le produit ${item.product_id}`);
+                    }
+                    await connection.query(
+                        'UPDATE products SET quantity = quantity - ? WHERE id = ?',
+                        [diff, item.product_id]
+                    );
+                    // Enregistrer le mouvement de stock
+                    await connection.query(
+                        `INSERT INTO stock_movements (product_id, user_id, type, quantity_change, quantity_before, quantity_after, reference, notes)
+                         VALUES (?, ?, 'sale', ?, ?, ?, ?, ?)`,
+                        [item.product_id, req.user.id, -diff, prod[0].quantity, prod[0].quantity - diff, `MODIFICATION VENTE #${saleId}`, 'Ajustement stock']
+                    );
+                } else if (diff < 0) {
+                    await connection.query(
+                        'UPDATE products SET quantity = quantity + ? WHERE id = ?',
+                        [-diff, item.product_id]
+                    );
+                    const [prod] = await connection.query(
+                        'SELECT quantity FROM products WHERE id = ? FOR UPDATE',
+                        [item.product_id]
+                    );
+                    await connection.query(
+                        `INSERT INTO stock_movements (product_id, user_id, type, quantity_change, quantity_before, quantity_after, reference, notes)
+                         VALUES (?, ?, 'return', ?, ?, ?, ?, ?)`,
+                        [item.product_id, req.user.id, -diff, prod[0].quantity + diff, prod[0].quantity, `MODIFICATION VENTE #${saleId}`, 'Retour stock']
+                    );
+                }
+
+                const total_price = item.quantity * item.unit_price;
+                await connection.query(
+                    'INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, total_price) VALUES (?, ?, ?, ?, ?)',
+                    [saleId, item.product_id, item.quantity, item.unit_price, total_price]
+                );
+                subtotal += total_price;
+            }
+
+            // 8. Recalculer les totaux
+            const [settings] = await connection.query('SELECT tax_rate FROM settings WHERE user_id = ?', [req.user.id]);
+            const tax_rate = settings[0]?.tax_rate !== null && settings[0]?.tax_rate !== undefined
+                ? parseFloat(settings[0].tax_rate)
+                : 0;
+            const tax = subtotal * (tax_rate / 100);
+            const remise_valeur = (sale.remise_pct || 0) / 100 * subtotal;
+            const total_apres_remise = subtotal - remise_valeur;
+            const final_amount = total_apres_remise + tax - (sale.acompte || 0);
+
+            await connection.query(
+                'UPDATE sales SET total_amount = ?, tax = ?, final_amount = ? WHERE id = ?',
+                [subtotal, tax, final_amount, saleId]
+            );
+
+            await connection.commit();
+            res.json({ message: 'Vente modifiée avec succès', final_amount });
+            return; // Sortie de la boucle et de la fonction
+        } catch (err) {
+            await connection.rollback();
+            console.error(`Tentative ${attempts} échouée:`, err.message);
+            if (attempts < maxAttempts && err.code === 'ER_LOCK_WAIT_TIMEOUT') {
+                // Attendre un peu avant de réessayer
+                await new Promise(resolve => setTimeout(resolve, 500));
+                continue;
+            }
+            // Si c'est la dernière tentative ou une autre erreur, renvoyer l'erreur
+            res.status(400).json({ error: err.message });
+            return;
+        } finally {
+            connection.release();
         }
-
-        // Recalculer les totaux
-        const [settings] = await connection.query('SELECT tax_rate FROM settings WHERE user_id = ?', [req.user.id]);
-        const tax_rate = settings[0]?.tax_rate !== null && settings[0]?.tax_rate !== undefined
-            ? parseFloat(settings[0].tax_rate)
-            : 0;
-        const tax = subtotal * (tax_rate / 100);
-        const remise_valeur = (sale.remise_pct || 0) / 100 * subtotal;
-        const total_apres_remise = subtotal - remise_valeur;
-        const final_amount = total_apres_remise + tax - (sale.acompte || 0);
-
-        await connection.query(
-            'UPDATE sales SET total_amount = ?, tax = ?, final_amount = ? WHERE id = ?',
-            [subtotal, tax, final_amount, saleId]
-        );
-
-        await connection.commit();
-        res.json({ message: 'Vente modifiée avec succès', final_amount });
-    } catch (err) {
-        await connection.rollback();
-        console.error('Erreur modification vente:', err);
-        res.status(400).json({ error: err.message });
-    } finally {
-        connection.release();
     }
 });
 // ========== ROUTES PARAMÈTRES (CORRIGÉ DÉFINITIF) ==========
@@ -2875,7 +2899,59 @@ app.post('/api/sales/:id/payment', authenticate, async (req, res) => {
         connection.release();
     }
 });
+// ========== MODIFIER LES ARTICLES D'UNE COMMANDE EN LIGNE ==========
+app.put('/api/admin/orders/:id/items', authenticate, async (req, res) => {
+    const orderId = req.params.id;
+    const userId = req.user.id;
+    const { items } = req.body; // [{product_id, quantity, unit_price}]
 
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        // Vérifier que la commande existe, appartient à l'utilisateur et est en attente
+        const [orderRows] = await connection.query(
+            'SELECT * FROM orders WHERE id = ? AND user_id = ? AND status = ?',
+            [orderId, userId, 'pending']
+        );
+        if (orderRows.length === 0) {
+            return res.status(404).json({ error: 'Commande non trouvée ou déjà traitée' });
+        }
+
+        // Supprimer les anciens articles
+        await connection.query('DELETE FROM order_items WHERE order_id = ?', [orderId]);
+
+        // Insérer les nouveaux articles
+        let total = 0;
+        for (const item of items) {
+            if (!item.product_id || !item.quantity || !item.unit_price) {
+                throw new Error('Données invalides');
+            }
+            const total_price = item.quantity * item.unit_price;
+            await connection.query(
+                `INSERT INTO order_items (order_id, product_id, quantity, unit_price, total_price)
+                 VALUES (?, ?, ?, ?, ?)`,
+                [orderId, item.product_id, item.quantity, item.unit_price, total_price]
+            );
+            total += total_price;
+        }
+
+        // Mettre à jour le total de la commande
+        await connection.query(
+            'UPDATE orders SET total_amount = ? WHERE id = ?',
+            [total, orderId]
+        );
+
+        await connection.commit();
+        res.json({ message: 'Commande modifiée avec succès', total });
+    } catch (err) {
+        await connection.rollback();
+        console.error('Erreur modification commande:', err);
+        res.status(400).json({ error: err.message });
+    } finally {
+        connection.release();
+    }
+});
 // ✅ POST : Payer une facture avec le compte client
 app.post('/api/clients/:id/pay-invoice', authenticate, async (req, res) => {
     const clientId = req.params.id;
