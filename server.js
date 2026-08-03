@@ -602,19 +602,40 @@ app.post('/api/login', async (req, res) => {
     }
 });
 app.get('/api/public/products', async (req, res) => {
-    const { shop } = req.query; // Récupère le paramètre ?shop=...
+    const { shop, limit = 24, offset = 0 } = req.query;
     try {
-        let query = 'SELECT id, name, description, sell_price, wholesale_price, wholesale_quantity, quantity, image_url, unit FROM products';
+        let userId = null;
+        let whereClause = '';
         const params = [];
+
         if (shop && !isNaN(shop)) {
-            query += ' WHERE user_id = ? AND quantity > 0';
-            params.push(parseInt(shop));
+            userId = parseInt(shop);
+            whereClause = 'WHERE user_id = ? AND quantity > 0';
+            params.push(userId);
         } else {
-            query += ' WHERE quantity > 0';
+            whereClause = 'WHERE quantity > 0';
         }
-        query += ' ORDER BY name';
-        const [rows] = await pool.query(query, params);
-        res.json(rows);
+
+        // Compter le total
+        const [countRows] = await pool.query(
+            `SELECT COUNT(*) as total FROM products ${whereClause}`,
+            params
+        );
+        const total = countRows[0].total;
+
+        // Récupérer la page demandée
+        const [rows] = await pool.query(
+            `SELECT id, name, description, sell_price, wholesale_price, wholesale_quantity, quantity, image_url, unit 
+             FROM products ${whereClause} ORDER BY name LIMIT ? OFFSET ?`,
+            [...params, parseInt(limit), parseInt(offset)]
+        );
+
+        res.json({
+            products: rows,
+            total: total,
+            limit: parseInt(limit),
+            offset: parseInt(offset)
+        });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -699,7 +720,6 @@ app.get('/api/admin/orders', authenticate, async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
-// ========== PARAMÈTRES PUBLICS DE LA BOUTIQUE ==========
 app.get('/api/public/settings', async (req, res) => {
     const { shop } = req.query;
     if (!shop || isNaN(shop)) {
@@ -718,6 +738,7 @@ app.get('/api/public/settings', async (req, res) => {
                 company_activity: '',
                 company_address: '',
                 company_phone: '',
+                company_phone2: '',
                 company_email: '',
                 logo_url: '',
                 currency: 'FCFA',
@@ -726,6 +747,7 @@ app.get('/api/public/settings', async (req, res) => {
         }
         res.json(rows[0]);
     } catch (err) {
+        console.error('Erreur GET /api/public/settings:', err);
         res.status(500).json({ error: err.message });
     }
 });
