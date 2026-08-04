@@ -850,6 +850,35 @@ app.get('/api/public/categories', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+// Route pour les boutiques avec un slug personnalisé
+app.get('/boutique/:storeSlug', async (req, res) => {
+    const storeSlug = req.params.storeSlug;
+
+    try {
+        // 1. Rechercher l'ID de la boutique correspondant au slug
+        // (Pour simplifier, on utilise company_name comme slug. 
+        // Une meilleure pratique serait d'avoir une colonne 'slug' dédiée.)
+        const [rows] = await pool.query(
+            'SELECT user_id FROM settings WHERE LOWER(REPLACE(company_name, " ", "-")) = ?',
+            [storeSlug]
+        );
+
+        if (rows.length === 0) {
+            return res.status(404).send('Boutique non trouvée');
+        }
+
+        const shopId = rows[0].user_id;
+
+        // 2. Servir la page store.html avec l'ID trouvé
+        res.sendFile(path.join(__dirname, 'store.html'));
+        // Note : Le fichier store.html devra récupérer l'ID depuis l'URL.
+        // Il peut le faire en extrayant le slug de l'URL ou en utilisant une variable globale.
+
+    } catch (err) {
+        console.error('Erreur lors de la recherche de la boutique:', err);
+        res.status(500).send('Erreur serveur');
+    }
+});
  // ========== ROUTES LIVREURS ==========
 app.get('/api/delivery/drivers', authenticate, async (req, res) => {
     const [rows] = await pool.query(
@@ -3461,6 +3490,13 @@ app.post('/api/clients/:id/pay-invoice', authenticate, async (req, res) => {
     } finally {
         connection.release();
     }
+});
+// Dans server.js
+app.get('/api/public/shop-id-from-slug', async (req, res) => {
+    const slug = req.query.slug;
+    // Logique pour trouver l'ID à partir du slug
+    // ...
+    res.json({ shopId: foundId });
 });
 app.use((req, res, next) => {
     if (req.path.startsWith('/api')) return next();

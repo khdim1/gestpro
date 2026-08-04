@@ -1093,62 +1093,117 @@ async function trackOrder() {
         observer = new IntersectionObserver((entries) => { if (entries[0].isIntersecting) loadMoreProducts(); }, { rootMargin: '0px 0px 200px 0px' });
         observer.observe(sentinel);
     }
-
-    // ================================================================
-    //  INIT - Gestion de l'identifiant boutique
-    // ================================================================
-    document.addEventListener('DOMContentLoaded', function() {
-        const urlParams = new URLSearchParams(window.location.search);
-        const shopIdParam = urlParams.get('shop') || '';
-        shopId = shopIdParam;
-
-        // Vérifier la présence de shopId
-        if (!shopId) {
-            // Afficher la page de sélection
-            const grid = document.getElementById('productGrid');
-            grid.innerHTML = `
-                <div class="empty-state" style="grid-column: 1 / -1;">
-                    <i class="bi bi-shop"></i>
-                    <h3>Identifiant boutique requis</h3>
-                    <p>Veuillez fournir l'identifiant de la boutique dans l'URL : <code>?shop=VOTRE_ID</code></p>
-                    <div class="mt-3">
-                        <div class="input-group mx-auto" style="max-width:400px;">
-                            <input type="number" id="shopIdInput" class="form-control" placeholder="Entrez l'identifiant boutique">
-                            <button class="btn btn-primary" onclick="goToShop()">Accéder</button>
-                        </div>
-                    </div>
-                    <p class="mt-3 text-muted small">Exemple : <code>/store?shop=1</code></p>
-                </div>
-            `;
-            // Fonction de redirection
-            window.goToShop = function() {
-                const id = document.getElementById('shopIdInput').value.trim();
-                if (id) {
-                    window.location.href = `/store?shop=${id}`;
-                } else {
-                    alert('Veuillez entrer un identifiant de boutique valide.');
-                }
-            };
-            // Masquer le reste de l'interface (facultatif)
-            document.querySelector('.search-wrapper').style.display = 'none';
-            document.querySelector('.filters-bar').style.display = 'none';
-            document.querySelector('.contact-info').style.display = 'none';
-            document.querySelector('.results-count').style.display = 'none';
-            document.getElementById('scroll-sentinel').style.display = 'none';
-            return;
+document.addEventListener('DOMContentLoaded', function() {
+    // Délégation pour les boutons "Ajouter"
+    document.getElementById('productGrid').addEventListener('click', function(e) {
+        const btn = e.target.closest('.btn-add');
+        if (btn) {
+            const productId = parseInt(btn.dataset.productId, 10);
+            if (productId) addToCart(productId);
         }
+    });
 
-        // Sinon, charger normalement
+    // Récupérer le slug depuis l'URL (dernier segment du chemin)
+    const pathSegments = window.location.pathname.split('/');
+    // Filtrer les segments vides
+    const segments = pathSegments.filter(s => s.length > 0);
+    // Le dernier segment est le slug, sauf si on est à la racine
+    let slug = segments.length > 0 ? segments[segments.length - 1] : '';
+    
+    // Si l'URL contient encore le paramètre ?shop= (pour compatibilité), on le priorise
+    const urlParams = new URLSearchParams(window.location.search);
+    const shopIdParam = urlParams.get('shop');
+    
+    if (shopIdParam) {
+        // Mode classique avec ?shop=ID
+        shopId = shopIdParam;
+        // Charger directement
+        initStore(shopId);
+    } else if (slug) {
+        // Mode slug : on interroge l'API pour obtenir l'ID
+        fetch(`/api/public/shop-id-from-slug?slug=${encodeURIComponent(slug)}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.shopId) {
+                    shopId = data.shopId;
+                    initStore(shopId);
+                } else {
+                    // Slug non trouvé : afficher une erreur
+                    showShopNotFound(slug);
+                }
+            })
+            .catch(err => {
+                console.error('Erreur lors de la conversion du slug:', err);
+                showShopNotFound(slug);
+            });
+    } else {
+        // Ni shop ni slug : afficher la page de sélection
+        showShopSelector();
+    }
+
+    // Fonction d'initialisation de la boutique
+    function initStore(id) {
         showSkeletons();
-        Promise.all([loadShopSettings(shopId), loadAllProducts(shopId), loadCategories(shopId)]).then(() => {
+        Promise.all([loadShopSettings(id), loadAllProducts(id), loadCategories(id)]).then(() => {
             applyFilterAndReset();
             setupInfiniteScroll();
         });
-
         cart = [];
         updateCartUI();
         closeCart();
-    });
+    }
+
+    // Fonction pour afficher une erreur "boutique non trouvée"
+    function showShopNotFound(slug) {
+        const grid = document.getElementById('productGrid');
+        grid.innerHTML = `
+            <div class="empty-state" style="grid-column: 1 / -1;">
+                <i class="bi bi-shop"></i>
+                <h3>Boutique non trouvée</h3>
+                <p>Aucune boutique correspondant à "<strong>${slug}</strong>" n'a été trouvée.</p>
+                <p class="text-muted small">Vérifiez l'URL ou utilisez l'identifiant numérique : <code>?shop=VOTRE_ID</code></p>
+            </div>
+        `;
+        document.querySelector('.search-wrapper').style.display = 'none';
+        document.querySelector('.filters-bar').style.display = 'none';
+        document.querySelector('.contact-info').style.display = 'none';
+        document.querySelector('.results-count').style.display = 'none';
+        document.getElementById('scroll-sentinel').style.display = 'none';
+    }
+
+    // Fonction pour afficher le sélecteur de boutique (si aucun paramètre)
+    function showShopSelector() {
+        const grid = document.getElementById('productGrid');
+        grid.innerHTML = `
+            <div class="empty-state" style="grid-column: 1 / -1;">
+                <i class="bi bi-shop"></i>
+                <h3>Identifiant boutique requis</h3>
+                <p>Veuillez fournir l'identifiant de la boutique dans l'URL : <code>?shop=VOTRE_ID</code></p>
+                <div class="mt-3">
+                    <div class="input-group mx-auto" style="max-width:400px;">
+                        <input type="number" id="shopIdInput" class="form-control" placeholder="Entrez l'identifiant boutique">
+                        <button class="btn btn-primary" onclick="goToShop()">Accéder</button>
+                    </div>
+                </div>
+                <p class="mt-3 text-muted small">Exemple : <code>/store?shop=1</code></p>
+                <p class="text-muted small">Ou utilisez un slug : <code>/boutique/ma-boutique</code></p>
+            </div>
+        `;
+        window.goToShop = function() {
+            const id = document.getElementById('shopIdInput').value.trim();
+            if (id) {
+                window.location.href = `/store?shop=${id}`;
+            } else {
+                alert('Veuillez entrer un identifiant de boutique valide.');
+            }
+        };
+        document.querySelector('.search-wrapper').style.display = 'none';
+        document.querySelector('.filters-bar').style.display = 'none';
+        document.querySelector('.contact-info').style.display = 'none';
+        document.querySelector('.results-count').style.display = 'none';
+        document.getElementById('scroll-sentinel').style.display = 'none';
+    }
+});
 </script>
 </body>
 </html>
