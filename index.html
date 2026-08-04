@@ -212,7 +212,20 @@
             font-size: 0.5rem; padding: 2px 6px; border-radius: 2rem;
             background: #8e44ad; color: white;
         }
-
+#validateOrderModal .btn-lg {
+    padding: 12px 20px;
+    border-radius: 12px;
+    font-size: 1.1rem;
+    text-align: left;
+}
+#validateOrderModal .btn-lg small {
+    font-size: 0.75rem;
+    font-weight: normal;
+}
+#validateOrderModal .btn-lg i {
+    font-size: 1.5rem;
+    vertical-align: middle;
+}
         input, select, textarea {
             border-radius: 2rem !important;
             border: 1px solid #dee2e6 !important;
@@ -357,7 +370,42 @@
     </div>
     <div id="pageContainer">Chargement...</div>
 </div>
-
+<!-- Modal de validation de commande -->
+<div class="modal fade" id="validateOrderModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-check-circle-fill text-primary me-2"></i>Valider la commande</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p><strong>Commande #<span id="validateOrderId"></span></strong></p>
+                <p class="text-muted">Choisissez le mode de paiement :</p>
+                
+                <div class="d-grid gap-2">
+                    <button class="btn btn-success btn-lg" id="validateImmediate" onclick="confirmValidateOrder(false)">
+                        <i class="bi bi-check-circle me-2"></i>Paiement immédiat
+                        <small class="d-block text-white-50">La facture sera payée directement</small>
+                    </button>
+                    
+                    <button class="btn btn-warning btn-lg" id="validateDeferred" onclick="confirmValidateOrder(true)">
+                        <i class="bi bi-clock me-2"></i>Paiement différé
+                        <small class="d-block text-dark">La facture sera impayée (échéance)</small>
+                    </button>
+                </div>
+                
+                <div id="deferredDateGroup" class="mt-3" style="display: none;">
+                    <label for="dueDateInput" class="form-label">Date d'échéance</label>
+                    <input type="date" id="dueDateInput" class="form-control" 
+                           value="<%= new Date(Date.now() + 30*24*60*60*1000).toISOString().split('T')[0] %>">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+            </div>
+        </div>
+    </div>
+</div>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 // ========================================================================
@@ -898,16 +946,15 @@ async function renderOrders() {
                                         ${o.status}
                                     </span>
                                 </td>
+                               
                                 <td>
-                                    <button class="btn btn-sm btn-info" onclick="viewOrder(${o.id})"><i class="bi bi-eye"></i></button>
-                                    ${o.status === 'pending' ? `
-                                        <button class="btn btn-sm btn-success" onclick="validateOrder(${o.id})"><i class="bi bi-check-circle"></i></button>
-                                    ` : ''}
-                                    <button class="btn btn-sm btn-secondary" onclick="changeOrderStatus(${o.id})"><i class="bi bi-arrow-repeat"></i></button>
-                                    <button class="btn btn-sm btn-warning me-1" onclick="editOrder(${o.id})">
-    <i class="bi bi-pencil"></i> Modifier
-</button>
-                                </td>
+    <button class="btn btn-sm btn-info" onclick="viewOrder(${o.id})"><i class="bi bi-eye"></i></button>
+    ${o.status === 'pending' ? `
+        <button class="btn btn-sm btn-success" onclick="validateOrder(${o.id})"><i class="bi bi-check-circle"></i> Valider</button>
+    ` : ''}
+    <button class="btn btn-sm btn-secondary" onclick="changeOrderStatus(${o.id})"><i class="bi bi-arrow-repeat"></i></button>
+    <button class="btn btn-sm btn-warning" onclick="editOrder(${o.id})"><i class="bi bi-pencil"></i></button>
+</td>
                             </tr>
                         `).join('')}
                     </tbody>
@@ -1210,23 +1257,59 @@ window.viewOrder = async (orderId) => {
         alert('Erreur: ' + err.message);
     }
 };
+// ===== VALIDATION MODERNE AVEC MODAL =====
+let currentOrderId = null;
 
-window.validateOrder = async (orderId) => {
-    if (!confirm('Valider cette commande ? La facture sera générée et le stock sera mis à jour.')) return;
-    try {
-        const result = await apiCall(`/admin/orders/${orderId}/validate`, 'POST');
-        alert('✅ Commande validée !');
-        if (result.invoice_url) {
-            if (confirm('Télécharger la facture ?')) {
-                window.open(result.invoice_url, '_blank');
-            }
-        }
-        renderOrders();
-        renderDashboard();
-    } catch (err) {
-        alert('❌ Erreur: ' + err.message);
+window.validateOrder = function(orderId) {
+    currentOrderId = orderId;
+    document.getElementById('validateOrderId').textContent = orderId;
+    document.getElementById('deferredDateGroup').style.display = 'none';
+    // Réinitialiser le modal
+    const modal = new bootstrap.Modal(document.getElementById('validateOrderModal'));
+    modal.show();
+};
+
+// Lorsque l'utilisateur clique sur un bouton du modal
+window.confirmValidateOrder = function(isDeferred) {
+    if (isDeferred) {
+        // Afficher le champ date d'échéance
+        document.getElementById('deferredDateGroup').style.display = 'block';
+        // Changer le comportement du bouton "Paiement différé" pour soumettre avec date
+        const deferredBtn = document.getElementById('validateDeferred');
+        deferredBtn.innerHTML = '<i class="bi bi-check2 me-2"></i>Confirmer différé';
+        deferredBtn.className = 'btn btn-primary btn-lg';
+        deferredBtn.onclick = function() {
+            const dueDate = document.getElementById('dueDateInput').value;
+            confirmOrder(currentOrderId, true, dueDate);
+        };
+        // Désactiver le bouton immédiat
+        document.getElementById('validateImmediate').disabled = true;
+    } else {
+        confirmOrder(currentOrderId, false, null);
     }
 };
+
+// Fonction finale d'appel API
+async function confirmOrder(orderId, deferred, dueDate) {
+    try {
+        const result = await apiCall(`/admin/orders/${orderId}/validate`, 'POST', {
+            deferred_payment: deferred,
+            due_date: dueDate || null
+        });
+        alert(`✅ Commande #${orderId} validée avec succès !\nStatut : ${deferred ? 'Facture impayée (échéance)' : 'Payée'}`);
+        if (result.invoice_url && confirm('Télécharger la facture ?')) {
+            window.open(result.invoice_url, '_blank');
+        }
+        // Fermer le modal
+        bootstrap.Modal.getInstance(document.getElementById('validateOrderModal')).hide();
+        // Rafraîchir les listes
+        renderOrders();
+        renderDashboard();
+        if (typeof loadAllInvoices === 'function') loadAllInvoices();
+    } catch (err) {
+        alert('❌ Erreur : ' + err.message);
+    }
+}
 
 window.changeOrderStatus = async (orderId) => {
     const newStatus = prompt('Nouveau statut (pending, confirmed, shipped, delivered, cancelled) :', 'confirmed');

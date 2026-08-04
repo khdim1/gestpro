@@ -805,15 +805,17 @@ app.put('/api/admin/orders/:id/status', authenticate, async (req, res) => {
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
-});// ========== VALIDER UNE COMMANDE ==========
+});
 app.post('/api/admin/orders/:id/validate', authenticate, async (req, res) => {
     const userId = req.user.id;
     const orderId = req.params.id;
+    const { deferred_payment = false, due_date = null } = req.body;
+
     const connection = await pool.getConnection();
     try {
         await connection.beginTransaction();
 
-        // ✅ Utilisation de ? pour status
+        // Vérifier la commande
         const [orderRows] = await connection.query(
             'SELECT * FROM orders WHERE id = ? AND user_id = ? AND status = ?',
             [orderId, userId, 'pending']
@@ -823,13 +825,13 @@ app.post('/api/admin/orders/:id/validate', authenticate, async (req, res) => {
         }
         const order = orderRows[0];
 
-        // Récupérer les articles de la commande
+        // Récupérer les articles
         const [items] = await connection.query('SELECT * FROM order_items WHERE order_id = ?', [orderId]);
         if (!items.length) {
             return res.status(400).json({ error: 'Commande sans articles' });
         }
 
-        // Créer ou récupérer le client
+        // Client
         let clientId = null;
         if (order.customer_name) {
             let [existing] = await connection.query(
@@ -842,17 +844,19 @@ app.post('/api/admin/orders/:id/validate', authenticate, async (req, res) => {
                 const [result] = await connection.query(
                     `INSERT INTO clients (user_id, name, email, phone, address)
                      VALUES (?, ?, ?, ?, ?)`,
-                    [userId, order.customer_name, order.customer_email || null, order.customer_phone || null, order.customer_address || null]
+                    [userId, order.customer_name, order.customer_email || null,
+                     order.customer_phone || null, order.customer_address || null]
                 );
                 clientId = result.insertId;
             }
         }
 
-        // Calcul des totaux
+        // ✅ Calcul des totaux – on force la conversion en nombre
         let subtotal = 0;
         for (const item of items) {
-            subtotal += item.total_price;
+            subtotal += parseFloat(item.total_price) || 0;
         }
+
         const [settings] = await connection.query(
             'SELECT tax_rate FROM settings WHERE user_id = ?',
             [userId]
@@ -861,11 +865,17 @@ app.post('/api/admin/orders/:id/validate', authenticate, async (req, res) => {
         const tax = subtotal * (taxRate / 100);
         const finalAmount = subtotal + tax;
 
-        // Créer la vente
+        const saleStatus = deferred_payment ? 'pending' : 'completed';
+        let finalDueDate = null;
+        if (deferred_payment) {
+            finalDueDate = due_date || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        }
+
+        // Créer la vente avec des placeholders
         const [saleResult] = await connection.query(
             `INSERT INTO sales 
-             (user_id, client_id, total_amount, tax, final_amount, payment_method, status, notes, tax_rate)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             (user_id, client_id, total_amount, tax, final_amount, payment_method, status, notes, tax_rate, due_date)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 userId,
                 clientId,
@@ -873,14 +883,15 @@ app.post('/api/admin/orders/:id/validate', authenticate, async (req, res) => {
                 tax,
                 finalAmount,
                 order.payment_method || 'cash',
-                'completed',
+                saleStatus,
                 `Commande en ligne #${orderId}`,
-                taxRate
+                taxRate,
+                finalDueDate
             ]
         );
         const saleId = saleResult.insertId;
 
-        // Insérer les articles de vente et mettre à jour le stock
+        // Insérer les articles et mettre à jour le stock
         for (const item of items) {
             await connection.query(
                 `INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, total_price)
@@ -899,7 +910,21 @@ app.post('/api/admin/orders/:id/validate', authenticate, async (req, res) => {
             await connection.query(
                 `INSERT INTO stock_movements (product_id, user_id, type, quantity_change, quantity_before, quantity_after, reference, notes)
                  VALUES (?, ?, 'sale', ?, ?, ?, ?, ?)`,
-                [item.product_id, userId, -item.quantity, prodBefore[0].quantity, newQty, `VENTE #${saleId}`, `Commande en ligne #${orderId}`]
+                [item.product_id, userId, -item.quantity, prodBefore[0].quantity, newQty,
+                 `VENTE #${saleId}`, `Commande en ligne #${orderId}`]
+            );
+        }
+
+        // Si paiement immédiat, enregistrer le paiement
+        if (!deferred_payment) {
+            await connection.query(
+                'INSERT INTO payments (sale_id, amount, payment_method) VALUES (?, ?, ?)',
+                [saleId, finalAmount, order.payment_method || 'cash']
+            );
+            await connection.query(
+                `INSERT INTO cash_register (user_id, transaction_type, amount, description, reference_id) 
+                 VALUES (?, 'sale', ?, ?, ?)`,
+                [userId, finalAmount, `Vente #${saleId} (commande en ligne)`, saleId]
             );
         }
 
@@ -915,6 +940,7 @@ app.post('/api/admin/orders/:id/validate', authenticate, async (req, res) => {
         res.json({
             message: 'Commande validée avec succès',
             sale_id: saleId,
+            status: saleStatus,
             invoice_url: `/api/sales/${saleId}/invoice?token=${token}`
         });
     } catch (err) {
