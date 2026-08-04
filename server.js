@@ -343,6 +343,196 @@ await pool.query(`CREATE TABLE IF NOT EXISTS order_items (
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
     FOREIGN KEY (product_id) REFERENCES products(id)
 )`);
+// ===== TABLE DES LIVREURS =====
+await pool.query(`CREATE TABLE IF NOT EXISTS delivery_drivers (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    phone VARCHAR(50) NOT NULL,
+    vehicle_type VARCHAR(50) DEFAULT 'moto',
+    license_plate VARCHAR(50),
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+)`);
+
+// ===== TABLE DES DEMANDES DE LIVRAISON =====
+await pool.query(`CREATE TABLE IF NOT EXISTS deliveries (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    order_id INT NOT NULL,
+    driver_id INT,
+    assigned_at TIMESTAMP NULL,
+    pickup_address TEXT,
+    delivery_address TEXT NOT NULL,
+    status ENUM('pending','assigned','picked_up','in_transit','delivered','failed') DEFAULT 'pending',
+    delivered_at TIMESTAMP NULL,
+    tracking_code VARCHAR(50) UNIQUE,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+    FOREIGN KEY (driver_id) REFERENCES delivery_drivers(id) ON DELETE SET NULL
+)`);
+// ===== VÉRIFICATION ET AJOUT DES COLONNES MANQUANTES DANS deliveries ET orders =====
+console.log('🔍 Vérification des colonnes de la table deliveries...');
+
+try {
+    const [driverIdCol] = await pool.query(`SHOW COLUMNS FROM deliveries LIKE 'driver_id'`);
+    if (driverIdCol.length === 0) {
+        await pool.query(`ALTER TABLE deliveries ADD COLUMN driver_id INT NULL`);
+        await pool.query(`ALTER TABLE deliveries ADD FOREIGN KEY (driver_id) REFERENCES delivery_drivers(id) ON DELETE SET NULL`);
+        console.log('✅ Colonne driver_id ajoutée à deliveries');
+    }
+} catch(e) { console.log('⚠️ Erreur ajout driver_id à deliveries:', e.message); }
+
+try {
+    const [trackingCol] = await pool.query(`SHOW COLUMNS FROM deliveries LIKE 'tracking_code'`);
+    if (trackingCol.length === 0) {
+        await pool.query(`ALTER TABLE deliveries ADD COLUMN tracking_code VARCHAR(50) UNIQUE`);
+        console.log('✅ Colonne tracking_code ajoutée à deliveries');
+    }
+} catch(e) { console.log('⚠️ Erreur ajout tracking_code à deliveries:', e.message); }
+
+try {
+    const [statusCol] = await pool.query(`SHOW COLUMNS FROM deliveries LIKE 'status'`);
+    if (statusCol.length === 0) {
+        await pool.query(`ALTER TABLE deliveries ADD COLUMN status ENUM('pending','assigned','picked_up','in_transit','delivered','failed') DEFAULT 'pending'`);
+        console.log('✅ Colonne status ajoutée à deliveries');
+    }
+} catch(e) { console.log('⚠️ Erreur ajout status à deliveries:', e.message); }
+
+try {
+    const [deliveryIdCol] = await pool.query(`SHOW COLUMNS FROM orders LIKE 'delivery_id'`);
+    if (deliveryIdCol.length === 0) {
+        await pool.query(`ALTER TABLE orders ADD COLUMN delivery_id INT NULL`);
+        await pool.query(`ALTER TABLE orders ADD FOREIGN KEY (delivery_id) REFERENCES deliveries(id) ON DELETE SET NULL`);
+        console.log('✅ Colonne delivery_id ajoutée à orders');
+    }
+} catch(e) { console.log('⚠️ Erreur ajout delivery_id à orders:', e.message); }
+
+try {
+    const [deliveryStatusCol] = await pool.query(`SHOW COLUMNS FROM orders LIKE 'delivery_status'`);
+    if (deliveryStatusCol.length === 0) {
+        await pool.query(`ALTER TABLE orders ADD COLUMN delivery_status ENUM('pending','assigned','picked_up','in_transit','delivered','failed') DEFAULT 'pending'`);
+        console.log('✅ Colonne delivery_status ajoutée à orders');
+    }
+} catch(e) { console.log('⚠️ Erreur ajout delivery_status à orders:', e.message); }
+
+console.log('✅ Vérification des colonnes de livraison terminée');
+
+// ============================================================
+//  VÉRIFICATION ET AJOUT DES COLONNES POUR DELIVERIES & ORDERS
+// ============================================================
+console.log('🔍 Vérification des tables de livraison...');
+
+// 1. Vérifier que la table delivery_drivers existe
+try {
+    await pool.query(`SELECT 1 FROM delivery_drivers LIMIT 0`);
+} catch(e) {
+    await pool.query(`CREATE TABLE IF NOT EXISTS delivery_drivers (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        user_id INT NOT NULL,
+        name VARCHAR(100) NOT NULL,
+        phone VARCHAR(50) NOT NULL,
+        vehicle_type VARCHAR(50) DEFAULT 'moto',
+        license_plate VARCHAR(50),
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )`);
+    console.log('✅ Table delivery_drivers créée');
+}
+
+// 2. Vérifier que la table deliveries existe
+try {
+    await pool.query(`SELECT 1 FROM deliveries LIMIT 0`);
+} catch(e) {
+    await pool.query(`CREATE TABLE IF NOT EXISTS deliveries (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        order_id INT NOT NULL,
+        driver_id INT,
+        assigned_at TIMESTAMP NULL,
+        pickup_address TEXT,
+        delivery_address TEXT NOT NULL,
+        status ENUM('pending','assigned','picked_up','in_transit','delivered','failed') DEFAULT 'pending',
+        delivered_at TIMESTAMP NULL,
+        tracking_code VARCHAR(50) UNIQUE,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+        FOREIGN KEY (driver_id) REFERENCES delivery_drivers(id) ON DELETE SET NULL
+    )`);
+    console.log('✅ Table deliveries créée');
+}
+
+// 3. Ajouter les colonnes manquantes dans deliveries
+const deliveriesColumns = [
+    { name: 'driver_id', type: 'INT NULL' },
+    { name: 'assigned_at', type: 'TIMESTAMP NULL' },
+    { name: 'pickup_address', type: 'TEXT' },
+    { name: 'delivery_address', type: 'TEXT NOT NULL' },
+    { name: 'status', type: "ENUM('pending','assigned','picked_up','in_transit','delivered','failed') DEFAULT 'pending'" },
+    { name: 'delivered_at', type: 'TIMESTAMP NULL' },
+    { name: 'tracking_code', type: 'VARCHAR(50) UNIQUE' },
+    { name: 'notes', type: 'TEXT' }
+];
+
+for (const col of deliveriesColumns) {
+    try {
+        const [rows] = await pool.query(`SHOW COLUMNS FROM deliveries LIKE '${col.name}'`);
+        if (rows.length === 0) {
+            await pool.query(`ALTER TABLE deliveries ADD COLUMN ${col.name} ${col.type}`);
+            console.log(`✅ Colonne ${col.name} ajoutée à deliveries`);
+        }
+    } catch(e) {
+        console.log(`⚠️ Erreur ajout ${col.name} à deliveries:`, e.message);
+    }
+}
+
+// 4. Ajouter les colonnes manquantes dans orders
+const ordersColumns = [
+    { name: 'delivery_id', type: 'INT NULL' },
+    { name: 'delivery_status', type: "ENUM('pending','assigned','picked_up','in_transit','delivered','failed') DEFAULT 'pending'" }
+];
+
+for (const col of ordersColumns) {
+    try {
+        const [rows] = await pool.query(`SHOW COLUMNS FROM orders LIKE '${col.name}'`);
+        if (rows.length === 0) {
+            await pool.query(`ALTER TABLE orders ADD COLUMN ${col.name} ${col.type}`);
+            console.log(`✅ Colonne ${col.name} ajoutée à orders`);
+        }
+    } catch(e) {
+        console.log(`⚠️ Erreur ajout ${col.name} à orders:`, e.message);
+    }
+}
+
+// 5. Ajouter les clés étrangères (si elles n'existent pas)
+try {
+    await pool.query(`ALTER TABLE deliveries ADD FOREIGN KEY (driver_id) REFERENCES delivery_drivers(id) ON DELETE SET NULL`);
+} catch(e) { /* déjà existante */ }
+
+try {
+    await pool.query(`ALTER TABLE orders ADD FOREIGN KEY (delivery_id) REFERENCES deliveries(id) ON DELETE SET NULL`);
+} catch(e) { /* déjà existante */ }
+
+console.log('✅ Vérification des tables de livraison terminée');
+// ===== AJOUT DES COLONNES DANS ORDERS (si elles n'existent pas) =====
+try {
+    const [deliveryCol] = await pool.query(`SHOW COLUMNS FROM orders LIKE 'delivery_id'`);
+    if (deliveryCol.length === 0) {
+        await pool.query(`ALTER TABLE orders ADD COLUMN delivery_id INT NULL`);
+        await pool.query(`ALTER TABLE orders ADD FOREIGN KEY (delivery_id) REFERENCES deliveries(id) ON DELETE SET NULL`);
+        console.log('✅ Colonne delivery_id ajoutée à orders');
+    }
+} catch(e) { console.log('⚠️ Erreur ajout delivery_id:', e.message); }
+
+try {
+    const [deliveryStatusCol] = await pool.query(`SHOW COLUMNS FROM orders LIKE 'delivery_status'`);
+    if (deliveryStatusCol.length === 0) {
+        await pool.query(`ALTER TABLE orders ADD COLUMN delivery_status ENUM('pending','assigned','picked_up','in_transit','delivered','failed') DEFAULT 'pending'`);
+        console.log('✅ Colonne delivery_status ajoutée à orders');
+    }
+} catch(e) { console.log('⚠️ Erreur ajout delivery_status:', e.message); }
 // ===== CORRECTION DE LA TABLE ORDERS =====
 try {
     // Vérifier si la colonne status existe
@@ -601,42 +791,246 @@ app.post('/api/login', async (req, res) => {
         res.status(500).json({ error: 'Erreur serveur' });
     }
 });
+// ----------------------------------------------------------------------------
 app.get('/api/public/products', async (req, res) => {
-    const { shop, limit = 24, offset = 0 } = req.query;
+    const { shop, limit = 24, offset = 0, category, sort } = req.query;
     try {
-        let userId = null;
-        let whereClause = '';
+        let whereClause = 'WHERE quantity > 0';
         const params = [];
-
+ 
         if (shop && !isNaN(shop)) {
-            userId = parseInt(shop);
-            whereClause = 'WHERE user_id = ? AND quantity > 0';
-            params.push(userId);
-        } else {
-            whereClause = 'WHERE quantity > 0';
+            whereClause += ' AND user_id = ?';
+            params.push(parseInt(shop));
         }
-
-        // Compter le total
+        if (category && !isNaN(category)) {
+            whereClause += ' AND category_id = ?';
+            params.push(parseInt(category));
+        }
+ 
+        let orderBy = 'ORDER BY name';
+        if (sort === 'price_asc') orderBy = 'ORDER BY sell_price ASC';
+        else if (sort === 'price_desc') orderBy = 'ORDER BY sell_price DESC';
+        else if (sort === 'newest') orderBy = 'ORDER BY created_at DESC';
+ 
         const [countRows] = await pool.query(
             `SELECT COUNT(*) as total FROM products ${whereClause}`,
             params
         );
         const total = countRows[0].total;
-
-        // Récupérer la page demandée
+ 
         const [rows] = await pool.query(
-            `SELECT id, name, description, sell_price, wholesale_price, wholesale_quantity, quantity, image_url, unit 
-             FROM products ${whereClause} ORDER BY name LIMIT ? OFFSET ?`,
+            `SELECT id, name, description, sell_price, wholesale_price, wholesale_quantity,
+                    quantity, image_url, unit, category_id, created_at
+             FROM products ${whereClause} ${orderBy} LIMIT ? OFFSET ?`,
             [...params, parseInt(limit), parseInt(offset)]
+        );
+ 
+        res.json({ products: rows, total, limit: parseInt(limit), offset: parseInt(offset) });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+ 
+//    À ajouter juste après la route /api/public/products
+// ----------------------------------------------------------------------------
+app.get('/api/public/categories', async (req, res) => {
+    const { shop } = req.query;
+    if (!shop || isNaN(shop)) return res.json([]);
+    try {
+        const [rows] = await pool.query(
+            `SELECT DISTINCT c.id, c.name
+             FROM categories c
+             JOIN products p ON p.category_id = c.id
+             WHERE c.user_id = ? AND p.quantity > 0
+             ORDER BY c.name`,
+            [parseInt(shop)]
+        );
+        res.json(rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+ // ========== ROUTES LIVREURS ==========
+app.get('/api/delivery/drivers', authenticate, async (req, res) => {
+    const [rows] = await pool.query(
+        'SELECT * FROM delivery_drivers WHERE user_id = ? ORDER BY name',
+        [req.user.id]
+    );
+    res.json(rows);
+});
+
+app.post('/api/delivery/drivers', authenticate, async (req, res) => {
+    const { name, phone, vehicle_type, license_plate } = req.body;
+    if (!name || !phone) return res.status(400).json({ error: 'Nom et téléphone requis' });
+    const [result] = await pool.query(
+        'INSERT INTO delivery_drivers (user_id, name, phone, vehicle_type, license_plate) VALUES (?, ?, ?, ?, ?)',
+        [req.user.id, name, phone, vehicle_type || 'moto', license_plate || null]
+    );
+    res.status(201).json({ id: result.insertId, message: 'Livreur créé' });
+});
+
+app.put('/api/delivery/drivers/:id', authenticate, async (req, res) => {
+    const { name, phone, vehicle_type, license_plate, is_active } = req.body;
+    await pool.query(
+        `UPDATE delivery_drivers SET name=?, phone=?, vehicle_type=?, license_plate=?, is_active=? 
+         WHERE id=? AND user_id=?`,
+        [name, phone, vehicle_type, license_plate, is_active !== undefined ? is_active : 1, req.params.id, req.user.id]
+    );
+    res.json({ message: 'Livreur mis à jour' });
+});
+
+app.delete('/api/delivery/drivers/:id', authenticate, async (req, res) => {
+    await pool.query('DELETE FROM delivery_drivers WHERE id=? AND user_id=?', [req.params.id, req.user.id]);
+    res.json({ message: 'Livreur supprimé' });
+});
+
+// ========== ROUTES LIVRAISONS ==========
+app.get('/api/delivery/requests', authenticate, async (req, res) => {
+    const [rows] = await pool.query(
+        `SELECT d.*, o.customer_name, o.customer_address, o.total_amount,
+                dr.name as driver_name, dr.phone as driver_phone
+         FROM deliveries d
+         LEFT JOIN orders o ON d.order_id = o.id
+         LEFT JOIN delivery_drivers dr ON d.driver_id = dr.id
+         WHERE o.user_id = ?
+         ORDER BY d.created_at DESC`,
+        [req.user.id]
+    );
+    res.json(rows);
+});
+
+app.post('/api/delivery/requests', authenticate, async (req, res) => {
+    const { order_id, delivery_address, notes } = req.body;
+    if (!order_id || !delivery_address) {
+        return res.status(400).json({ error: 'Commande et adresse requis' });
+    }
+    // Vérifier que la commande appartient à l'utilisateur
+    const [orderCheck] = await pool.query('SELECT id FROM orders WHERE id=? AND user_id=?', [order_id, req.user.id]);
+    if (!orderCheck.length) return res.status(404).json({ error: 'Commande non trouvée' });
+
+    // Générer un code de suivi unique
+    const trackingCode = 'TRK' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(2, 6).toUpperCase();
+
+    const [result] = await pool.query(
+        `INSERT INTO deliveries (order_id, delivery_address, tracking_code, notes)
+         VALUES (?, ?, ?, ?)`,
+        [order_id, delivery_address, trackingCode, notes || null]
+    );
+    // Mettre à jour la commande avec l'ID de livraison
+    await pool.query('UPDATE orders SET delivery_id = ? WHERE id = ?', [result.insertId, order_id]);
+
+    res.status(201).json({ id: result.insertId, tracking_code: trackingCode });
+});
+
+app.put('/api/delivery/requests/:id', authenticate, async (req, res) => {
+    const { driver_id, status, notes } = req.body;
+    const deliveryId = req.params.id;
+    // Vérifier que la livraison appartient à l'utilisateur via la commande
+    const [check] = await pool.query(
+        `SELECT d.id FROM deliveries d
+         JOIN orders o ON d.order_id = o.id
+         WHERE d.id = ? AND o.user_id = ?`,
+        [deliveryId, req.user.id]
+    );
+    if (!check.length) return res.status(404).json({ error: 'Livraison non trouvée' });
+
+    let deliveredAt = null;
+    if (status === 'delivered') deliveredAt = new Date();
+
+    await pool.query(
+        `UPDATE deliveries SET driver_id = ?, status = ?, notes = ?, delivered_at = ? WHERE id = ?`,
+        [driver_id || null, status || 'pending', notes || null, deliveredAt, deliveryId]
+    );
+
+    // Mettre à jour le statut de livraison dans la commande
+    if (status) {
+        await pool.query('UPDATE orders SET delivery_status = ? WHERE delivery_id = ?', [status, deliveryId]);
+    }
+
+    res.json({ message: 'Livraison mise à jour' });
+});
+
+app.delete('/api/delivery/requests/:id', authenticate, async (req, res) => {
+    const deliveryId = req.params.id;
+    const [check] = await pool.query(
+        `SELECT d.id FROM deliveries d JOIN orders o ON d.order_id = o.id WHERE d.id = ? AND o.user_id = ?`,
+        [deliveryId, req.user.id]
+    );
+    if (!check.length) return res.status(404).json({ error: 'Livraison non trouvée' });
+    await pool.query('DELETE FROM deliveries WHERE id = ?', [deliveryId]);
+    // Mettre à jour la commande pour supprimer la référence
+    await pool.query('UPDATE orders SET delivery_id = NULL, delivery_status = NULL WHERE delivery_id = ?', [deliveryId]);
+    res.json({ message: 'Livraison supprimée' });
+});
+
+// Route publique de suivi de livraison par code
+app.get('/api/public/track-delivery', async (req, res) => {
+    const { tracking_code } = req.query;
+    if (!tracking_code) return res.status(400).json({ error: 'Code de suivi requis' });
+
+    const [rows] = await pool.query(
+        `SELECT d.*, o.customer_name, o.customer_phone, o.customer_address,
+                dr.name as driver_name, dr.phone as driver_phone
+         FROM deliveries d
+         LEFT JOIN orders o ON d.order_id = o.id
+         LEFT JOIN delivery_drivers dr ON d.driver_id = dr.id
+         WHERE d.tracking_code = ?`,
+        [tracking_code]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Code de suivi invalide' });
+    res.json(rows[0]);
+});
+app.get('/api/public/orders/track', async (req, res) => {
+    const { shop, order_id, phone } = req.query;
+    if (!shop || !order_id || !phone) {
+        return res.status(400).json({ error: 'Paramètres manquants' });
+    }
+    try {
+        // Récupérer la commande
+        const [orderRows] = await pool.query(
+            `SELECT id, customer_name, customer_phone, status, total_amount, created_at
+             FROM orders WHERE id = ? AND user_id = ?`,
+            [order_id, parseInt(shop)]
+        );
+        if (orderRows.length === 0) {
+            return res.status(404).json({ error: 'Commande introuvable' });
+        }
+        const order = orderRows[0];
+        // Vérification du téléphone
+        const cleanStored = (order.customer_phone || '').replace(/\D/g, '');
+        const cleanInput = phone.replace(/\D/g, '');
+        if (!cleanStored || !cleanInput || 
+            (!cleanStored.endsWith(cleanInput.slice(-8)) && !cleanInput.endsWith(cleanStored.slice(-8)))) {
+            return res.status(403).json({ error: 'Numéro de téléphone incorrect pour cette commande' });
+        }
+
+        // Récupérer les articles
+        const [items] = await pool.query(
+            `SELECT oi.quantity, oi.unit_price, oi.total_price, p.name as product_name
+             FROM order_items oi JOIN products p ON oi.product_id = p.id
+             WHERE oi.order_id = ?`,
+            [order_id]
+        );
+
+        // Récupérer les infos de livraison
+        const [delivery] = await pool.query(
+            `SELECT d.*, dr.name as driver_name, dr.phone as driver_phone
+             FROM deliveries d
+             LEFT JOIN delivery_drivers dr ON d.driver_id = dr.id
+             WHERE d.order_id = ?`,
+            [order_id]
         );
 
         res.json({
-            products: rows,
-            total: total,
-            limit: parseInt(limit),
-            offset: parseInt(offset)
+            id: order.id,
+            status: order.status,
+            total_amount: order.total_amount,
+            created_at: order.created_at,
+            items: items,
+            delivery: delivery[0] || null
         });
     } catch (err) {
+        console.error('Erreur suivi commande:', err);
         res.status(500).json({ error: err.message });
     }
 });

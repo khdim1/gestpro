@@ -349,6 +349,8 @@
     <a class="nav-link" data-page="settings"><i class="bi bi-gear" style="color: #7f8c8d;"></i> Paramètres</a>
     <a class="nav-link" data-page="history"><i class="bi bi-clock-history" style="color: #1abc9c;"></i> Historique</a>
     <a class="nav-link" data-page="sub-users"><i class="bi bi-people-fill" style="color: #2ecc71;"></i> Équipe</a>
+    <a class="nav-link" data-page="drivers"><i class="bi bi-people-fill" style="color: #3498db;"></i> Livreurs</a>
+<a class="nav-link" data-page="deliveries"><i class="bi bi-truck" style="color: #f39c12;"></i> Livraisons</a>
     <!-- ⬇️ NOUVEAU ⬇️ -->
     <a class="nav-link" data-page="orders">
         <i class="bi bi-bag" style="color: #e67e22;"></i> Commandes en ligne
@@ -622,6 +624,8 @@ async function loadPage(page) {
     else if (page === 'settings') await renderSettings();
     else if (page === 'history') await renderHistory();
     else if (page === 'sub-users') await renderSubUsers();
+    else if (page === 'drivers') await renderDrivers();
+else if (page === 'deliveries') await renderDeliveries();
     else if (page === 'orders') await renderOrders(); // ⬅️ NOUVEAU
 }
 // ========================================================================
@@ -2782,6 +2786,211 @@ window.saveSaleModification = async function() {
         const scanInput = document.getElementById('barcodeScan');
         if (scanInput) scanInput.focus();
     }, 300);
+}
+async function renderDrivers() {
+    const drivers = await apiCall('/delivery/drivers');
+    const html = `
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5><i class="bi bi-people-fill text-primary-custom me-2"></i>Gestion des livreurs</h5>
+            <button class="btn btn-primary" onclick="showDriverModal()"><i class="bi bi-plus-circle me-1"></i>Nouveau livreur</button>
+        </div>
+        <div class="table-wrapper">
+            <table class="table">
+                <thead><tr><th>Nom</th><th>Téléphone</th><th>Véhicule</th><th>Plaque</th><th>Statut</th><th>Actions</th></tr></thead>
+                <tbody>${drivers.map(d => `
+                    <tr>
+                        <td><strong>${d.name}</strong></td>
+                        <td>${d.phone}</td>
+                        <td>${d.vehicle_type || 'moto'}</td>
+                        <td>${d.license_plate || '-'}</td>
+                        <td><span class="badge ${d.is_active ? 'badge-success' : 'badge-danger'}">${d.is_active ? 'Actif' : 'Inactif'}</span></td>
+                        <td>
+                            <button class="btn btn-sm btn-warning me-1" onclick="editDriver(${d.id})"><i class="bi bi-pencil"></i></button>
+                            <button class="btn btn-sm btn-danger" onclick="deleteDriver(${d.id})"><i class="bi bi-trash"></i></button>
+                        </td>
+                    </tr>
+                `).join('')}</tbody>
+            </table>
+        </div>
+
+        <div class="modal fade" id="driverModal" tabindex="-1">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header"><h5><span id="driverModalTitle">Nouveau livreur</span></h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                    <div class="modal-body">
+                        <input type="hidden" id="editDriverId">
+                        <div class="mb-3"><label class="form-label">Nom complet *</label><input type="text" id="driverName" class="form-control"></div>
+                        <div class="mb-3"><label class="form-label">Téléphone *</label><input type="text" id="driverPhone" class="form-control"></div>
+                        <div class="mb-3"><label class="form-label">Type de véhicule</label><select id="driverVehicle" class="form-select"><option value="moto">Moto</option><option value="voiture">Voiture</option><option value="camionnette">Camionnette</option><option value="vélo">Vélo</option></select></div>
+                        <div class="mb-3"><label class="form-label">Plaque d'immatriculation</label><input type="text" id="driverPlate" class="form-control"></div>
+                        <div class="mb-3"><label class="form-label">Statut</label><select id="driverStatus" class="form-select"><option value="1">Actif</option><option value="0">Inactif</option></select></div>
+                    </div>
+                    <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button><button class="btn btn-primary" onclick="saveDriver()">Enregistrer</button></div>
+                </div>
+            </div>
+        </div>
+    `;
+    document.getElementById('pageContainer').innerHTML = html;
+
+    window.showDriverModal = function(id = null) {
+        document.getElementById('editDriverId').value = id || '';
+        document.getElementById('driverName').value = '';
+        document.getElementById('driverPhone').value = '';
+        document.getElementById('driverVehicle').value = 'moto';
+        document.getElementById('driverPlate').value = '';
+        document.getElementById('driverStatus').value = '1';
+        document.getElementById('driverModalTitle').innerText = id ? 'Modifier livreur' : 'Nouveau livreur';
+        if (id) {
+            const driver = drivers.find(d => d.id === id);
+            if (driver) {
+                document.getElementById('driverName').value = driver.name;
+                document.getElementById('driverPhone').value = driver.phone;
+                document.getElementById('driverVehicle').value = driver.vehicle_type || 'moto';
+                document.getElementById('driverPlate').value = driver.license_plate || '';
+                document.getElementById('driverStatus').value = driver.is_active ? '1' : '0';
+            }
+        }
+        new bootstrap.Modal(document.getElementById('driverModal')).show();
+    };
+
+    window.editDriver = function(id) { showDriverModal(id); };
+
+    window.saveDriver = async function() {
+        const id = document.getElementById('editDriverId').value;
+        const data = {
+            name: document.getElementById('driverName').value.trim(),
+            phone: document.getElementById('driverPhone').value.trim(),
+            vehicle_type: document.getElementById('driverVehicle').value,
+            license_plate: document.getElementById('driverPlate').value.trim() || null,
+            is_active: parseInt(document.getElementById('driverStatus').value)
+        };
+        if (!data.name || !data.phone) return alert('Nom et téléphone requis');
+        try {
+            if (id) await apiCall(`/delivery/drivers/${id}`, 'PUT', data);
+            else await apiCall('/delivery/drivers', 'POST', data);
+            alert('✅ Livreur enregistré');
+            bootstrap.Modal.getInstance(document.getElementById('driverModal')).hide();
+            renderDrivers();
+        } catch(err) { alert('❌ Erreur: ' + err.message); }
+    };
+
+    window.deleteDriver = async function(id) {
+        if (!confirm('Supprimer ce livreur ?')) return;
+        try {
+            await apiCall(`/delivery/drivers/${id}`, 'DELETE');
+            alert('✅ Livreur supprimé');
+            renderDrivers();
+        } catch(err) { alert('❌ Erreur: ' + err.message); }
+    };
+}
+
+async function renderDeliveries() {
+    const deliveries = await apiCall('/delivery/requests');
+    const drivers = await apiCall('/delivery/drivers');
+    const html = `
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5><i class="bi bi-truck text-primary-custom me-2"></i>Demandes de livraison</h5>
+            <button class="btn btn-primary" onclick="showDeliveryModal()"><i class="bi bi-plus-circle me-1"></i>Nouvelle livraison</button>
+        </div>
+        <div class="table-wrapper">
+            <table class="table">
+                <thead><tr><th>#</th><th>Commande</th><th>Client</th><th>Adresse</th><th>Livreur</th><th>Statut</th><th>Code suivi</th><th>Actions</th></tr></thead>
+                <tbody>${deliveries.map(d => `
+                    <tr>
+                        <td>${d.id}</td>
+                        <td>#${d.order_id}</td>
+                        <td>${d.customer_name}</td>
+                        <td>${d.delivery_address}</td>
+                        <td>${d.driver_name || 'Non assigné'}</td>
+                        <td><span class="badge ${d.status === 'pending' ? 'badge-warning' : d.status === 'delivered' ? 'badge-success' : 'badge-info'}">${d.status}</span></td>
+                        <td><span class="badge bg-secondary">${d.tracking_code}</span></td>
+                        <td>
+                            <button class="btn btn-sm btn-info me-1" onclick="viewDelivery(${d.id})"><i class="bi bi-eye"></i></button>
+                            <button class="btn btn-sm btn-warning me-1" onclick="editDelivery(${d.id})"><i class="bi bi-pencil"></i></button>
+                            <button class="btn btn-sm btn-danger" onclick="deleteDelivery(${d.id})"><i class="bi bi-trash"></i></button>
+                        </td>
+                    </tr>
+                `).join('')}</tbody>
+            </table>
+        </div>
+        <div class="modal fade" id="deliveryModal" tabindex="-1">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header"><h5><span id="deliveryModalTitle">Nouvelle livraison</span></h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                    <div class="modal-body">
+                        <input type="hidden" id="editDeliveryId">
+                        <div class="mb-3"><label class="form-label">Commande ID *</label><input type="number" id="deliveryOrderId" class="form-control"></div>
+                        <div class="mb-3"><label class="form-label">Adresse de livraison *</label><textarea id="deliveryAddress" class="form-control" rows="2"></textarea></div>
+                        <div class="mb-3"><label class="form-label">Livreur</label><select id="deliveryDriver" class="form-select"><option value="">Non assigné</option>${drivers.map(d => `<option value="${d.id}">${d.name}</option>`).join('')}</select></div>
+                        <div class="mb-3"><label class="form-label">Statut</label><select id="deliveryStatus" class="form-select"><option value="pending">En attente</option><option value="assigned">Assigné</option><option value="picked_up">Récupéré</option><option value="in_transit">En cours</option><option value="delivered">Livré</option><option value="failed">Échoué</option></select></div>
+                        <div class="mb-3"><label class="form-label">Notes</label><textarea id="deliveryNotes" class="form-control" rows="2"></textarea></div>
+                    </div>
+                    <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button><button class="btn btn-primary" onclick="saveDelivery()">Enregistrer</button></div>
+                </div>
+            </div>
+        </div>
+    `;
+    document.getElementById('pageContainer').innerHTML = html;
+
+    window.showDeliveryModal = function(id = null) {
+        document.getElementById('editDeliveryId').value = id || '';
+        document.getElementById('deliveryOrderId').value = '';
+        document.getElementById('deliveryAddress').value = '';
+        document.getElementById('deliveryDriver').value = '';
+        document.getElementById('deliveryStatus').value = 'pending';
+        document.getElementById('deliveryNotes').value = '';
+        document.getElementById('deliveryModalTitle').innerText = id ? 'Modifier livraison' : 'Nouvelle livraison';
+        if (id) {
+            const d = deliveries.find(x => x.id === id);
+            if (d) {
+                document.getElementById('deliveryOrderId').value = d.order_id;
+                document.getElementById('deliveryAddress').value = d.delivery_address;
+                document.getElementById('deliveryDriver').value = d.driver_id || '';
+                document.getElementById('deliveryStatus').value = d.status || 'pending';
+                document.getElementById('deliveryNotes').value = d.notes || '';
+            }
+        }
+        new bootstrap.Modal(document.getElementById('deliveryModal')).show();
+    };
+
+    window.editDelivery = function(id) { showDeliveryModal(id); };
+
+    window.saveDelivery = async function() {
+        const id = document.getElementById('editDeliveryId').value;
+        const order_id = parseInt(document.getElementById('deliveryOrderId').value);
+        const delivery_address = document.getElementById('deliveryAddress').value.trim();
+        const driver_id = document.getElementById('deliveryDriver').value || null;
+        const status = document.getElementById('deliveryStatus').value;
+        const notes = document.getElementById('deliveryNotes').value.trim() || null;
+
+        if (!order_id || !delivery_address) return alert('Commande et adresse requis');
+
+        const data = { order_id, delivery_address, notes };
+        try {
+            if (id) {
+                await apiCall(`/delivery/requests/${id}`, 'PUT', { driver_id, status, notes });
+            } else {
+                await apiCall('/delivery/requests', 'POST', data);
+            }
+            alert('✅ Livraison enregistrée');
+            bootstrap.Modal.getInstance(document.getElementById('deliveryModal')).hide();
+            renderDeliveries();
+        } catch(err) { alert('❌ Erreur: ' + err.message); }
+    };
+
+    window.deleteDelivery = async function(id) {
+        if (!confirm('Supprimer cette livraison ?')) return;
+        try {
+            await apiCall(`/delivery/requests/${id}`, 'DELETE');
+            alert('✅ Livraison supprimée');
+            renderDeliveries();
+        } catch(err) { alert('❌ Erreur: ' + err.message); }
+    };
+
+    window.viewDelivery = function(id) {
+        // Vous pouvez implémenter un modal de visualisation détaillée
+        alert('Détails de la livraison à venir');
+    };
 }
 // ============================================================
 //  RECHERCHE ET AJOUT DE PRODUITS DANS LE MODAL D'ÉDITION
