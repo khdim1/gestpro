@@ -8,6 +8,7 @@ const PDFDocument = require('pdfkit');
 const http = require('http');
 const https = require('https');
 const compression = require('compression');
+const QRCode = require('qrcode');
 
 const app = express();
 app.use(cors());
@@ -2556,7 +2557,7 @@ async function drawCompanyHeader(doc, company, startY = 45) {
     
     return startY + headerHeight + 20;
 }
-// ========== FACTURE OPTIMISÉE (SAUTS DE PAGE, RÉSUMÉ BIEN POSITIONNÉ) ==========
+
 app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
     try {
         const saleId = req.params.id;
@@ -2585,12 +2586,23 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
             ? parseFloat(sale.tax_rate) 
             : parseFloat(company.tax_rate || 0);
 
+        // ---- Génération du QR code ----
+        const shopId = req.user.id;
+        const storeUrl = `${req.protocol}://${req.get('host')}/store?shop=${shopId}`;
+        let qrBuffer = null;
+        try {
+            qrBuffer = await QRCode.toBuffer(storeUrl, { width: 200, margin: 2 });
+        } catch (qrErr) {
+            console.error('Erreur génération QR:', qrErr);
+            // On continue sans QR si erreur
+        }
+
         const doc = new PDFDocument({ margin: 50, size: 'A4' });
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename=facture_${saleId}.pdf`);
         doc.pipe(res);
 
-        // --- En-tête de la société ---
+        // --- En-tête société ---
         let y = await drawCompanyHeader(doc, company);
 
         // --- Titre ---
@@ -2630,12 +2642,11 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
 
         y += 85;
 
-        // --- Tableau des produits ---
+        // --- Tableau des produits (avec gestion des sauts de page) ---
         const col1 = 60, col2 = 250, col3 = 350, col4 = 450;
         const rowHeight = 22;
-        const maxRowsPerPage = 18; // pour déclencher un saut de page avant la fin
+        const maxRowsPerPage = 18;
 
-        // Fonction pour dessiner l'en-tête du tableau
         const drawTableHeader = (yPos) => {
             doc.rect(50, yPos, 500, rowHeight).fill('#2c6e9e');
             doc.fillColor('#ffffff').fontSize(9).font('Helvetica-Bold');
@@ -2650,7 +2661,6 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         let subtotal = 0;
         let rowIndex = 0;
 
-        // Parcourir les articles
         for (const item of items) {
             const productName = item.product_name || 'Produit';
             const qty = item.quantity;
@@ -2658,13 +2668,11 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
             const totalPrice = parseFloat(item.total_price);
             subtotal += totalPrice;
 
-            // Vérifier l'espace restant pour une ligne supplémentaire + marge
             if (currentY + rowHeight + 40 > 750) {
                 doc.addPage();
-                currentY = drawTableHeader(50); // nouveau header en haut de page
+                currentY = drawTableHeader(50);
             }
 
-            // Alternance de fond
             const bg = rowIndex % 2 === 0 ? '#ffffff' : '#f8fafc';
             doc.rect(50, currentY, 500, rowHeight).fill(bg);
             doc.fillColor('#1a2a3a').fontSize(9).font('Helvetica');
@@ -2677,12 +2685,11 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
             rowIndex++;
         }
 
-        // Ligne de séparation après le tableau
         doc.moveTo(50, currentY).lineTo(550, currentY).stroke('#e0e4e8');
         currentY += 12;
 
-        // --- Résumé (Sous-total, TVA, Remise, Acompte) ---
-        const summaryHeight = 90; // hauteur approximative du bloc résumé
+        // --- Résumé (Sous-total, TVA, etc.) ---
+        const summaryHeight = 90;
         if (currentY + summaryHeight > 750) {
             doc.addPage();
             currentY = 50;
@@ -2706,22 +2713,19 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
             summaryLines.push({ label: 'Acompte', value: `- ${formatPDFNumber(acompteValue)}` });
         }
 
-        // Dessiner les lignes du résumé
         summaryLines.forEach((line, idx) => {
             const yPos = currentY + idx * 22;
             const fontSize = 10;
-            const font = 'Helvetica';
             doc.fillColor('#3a4a5a');
-            doc.fontSize(fontSize).font(font);
+            doc.fontSize(fontSize).font('Helvetica');
             doc.text(line.label, totalX, yPos, { width: 100, align: 'right' });
             doc.text(`${line.value} ${company.currency}`, 450, yPos, { width: 80, align: 'right' });
         });
 
-        // Position après le résumé
         currentY += summaryLines.length * 22 + 8;
 
-        // Vérifier l'espace pour le total (bloc coloré)
-        if (currentY + 40 > 750) {
+        // Vérifier l'espace pour le total + QR + pied
+        if (currentY + 80 > 750) {
             doc.addPage();
             currentY = 50;
         }
@@ -2731,6 +2735,25 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         doc.fillColor('#ffffff').fontSize(14).font('Helvetica-Bold');
         doc.text('NET À PAYER', 360, currentY + 8);
         doc.text(`${formatPDFNumber(finalAmount)} ${company.currency}`, 450, currentY + 8, { width: 80, align: 'right' });
+
+        const totalBlockY = currentY + 30;
+        currentY += 40;
+
+        // --- QR CODE (en bas, avant le pied) ---
+        const qrSize = 100;
+        const qrX = 50 + 500 - qrSize; // aligné à droite
+        const qrY = 750 - qrSize - 25; // 25 = hauteur du pied
+
+        if (qrBuffer) {
+            try {
+                doc.image(qrBuffer, qrX, qrY, { width: qrSize, height: qrSize });
+                // Petit texte à côté ou en dessous (optionnel)
+                doc.fillColor('#7a8a9a').fontSize(7).font('Helvetica')
+                   .text('Scannez pour accéder à la boutique', qrX - 20, qrY + qrSize + 4, { width: qrSize + 40, align: 'center' });
+            } catch (imgErr) {
+                console.error('Erreur insertion QR:', imgErr);
+            }
+        }
 
         // --- Pied de page ---
         const footerY = 750;

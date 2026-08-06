@@ -18,6 +18,7 @@
     "express": "^5.2.1",
     "jsonwebtoken": "^9.0.3",
     "mysql2": "^3.22.0",
-    "pdfkit": "^0.18.0"
+    "pdfkit": "^0.18.0",
+    "qrcode": "^1.5.4"
   }
 }
