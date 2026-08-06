@@ -372,6 +372,52 @@ await pool.query(`CREATE TABLE IF NOT EXISTS deliveries (
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
     FOREIGN KEY (driver_id) REFERENCES delivery_drivers(id) ON DELETE SET NULL
 )`);
+// ============================================================
+//  AUGMENTER LA CAPACITÉ DES COLONNES MONÉTAIRES
+// ============================================================
+console.log('🔍 Vérification des colonnes DECIMAL...');
+
+const decimalColumns = [
+    { table: 'sales', columns: ['total_amount', 'final_amount', 'tax', 'acompte'] },
+    { table: 'sale_items', columns: ['unit_price', 'total_price'] },
+    { table: 'payments', columns: ['amount'] },
+    { table: 'cash_register', columns: ['amount'] },
+    { table: 'proforma_invoices', columns: ['subtotal', 'tax', 'total', 'acompte'] },
+    { table: 'proforma_items', columns: ['unit_price', 'total_price'] },
+    { table: 'orders', columns: ['total_amount'] },
+    { table: 'order_items', columns: ['unit_price', 'total_price'] }
+];
+
+for (const item of decimalColumns) {
+    for (const col of item.columns) {
+        try {
+            // Vérifier si la colonne existe
+            const [rows] = await pool.query(`SHOW COLUMNS FROM ${item.table} LIKE '${col}'`);
+            if (rows.length > 0) {
+                const type = rows[0].Type;
+                // Si le type est DECIMAL(10,2) ou DECIMAL(10,0) ou similaire
+                if (type.match(/decimal\(\s*\d+\s*,\s*\d+\s*\)/i)) {
+                    const match = type.match(/decimal\(\s*(\d+)\s*,\s*(\d+)\s*\)/i);
+                    if (match) {
+                        const precision = parseInt(match[1]);
+                        if (precision < 15) {
+                            await pool.query(`ALTER TABLE ${item.table} MODIFY COLUMN ${col} DECIMAL(15,2)`);
+                            console.log(`✅ Colonne ${item.table}.${col} passée à DECIMAL(15,2)`);
+                        }
+                    }
+                } else if (type.match(/int|bigint|float|double/i)) {
+                    // Si c'est un type entier, on le passe en DECIMAL(15,2)
+                    await pool.query(`ALTER TABLE ${item.table} MODIFY COLUMN ${col} DECIMAL(15,2)`);
+                    console.log(`✅ Colonne ${item.table}.${col} passée à DECIMAL(15,2)`);
+                }
+            }
+        } catch (err) {
+            console.log(`⚠️ Erreur pour ${item.table}.${col}:`, err.message);
+        }
+    }
+}
+
+console.log('✅ Colonnes monétaires vérifiées et ajustées');
 // ===== VÉRIFICATION ET AJOUT DES COLONNES MANQUANTES DANS deliveries ET orders =====
 console.log('🔍 Vérification des colonnes de la table deliveries...');
 
@@ -704,7 +750,8 @@ app.post('/api/register', async (req, res) => {
     try {
         const hashed = await bcrypt.hash(password, 10);
         const [result] = await pool.query('INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)', [name, email, hashed]);
-        await pool.query(`INSERT INTO settings (user_id, company_name, company_subtitle, company_activity, company_rc, company_address, company_phone, company_phone2, company_email, logo_url, tax_rate, low_stock_alert, currency) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [result.insertId, 'Mon Entreprise', '', '', '', '', '', '', '', '', 20, 5, 'FCFA']);
+       await pool.query(`INSERT INTO settings (user_id, company_name, company_subtitle, company_activity, company_rc, company_address, company_phone, company_phone2, company_email, logo_url, tax_rate, low_stock_alert, currency) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [result.insertId, 'Mon Entreprise', '', '', '', '', '', '', '', '', 0, 5, 'FCFA']); // ✅ tax_rate = 0
         res.status(201).json({ message: 'Utilisateur créé' });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -1274,7 +1321,7 @@ app.post('/api/admin/orders/:id/validate', authenticate, async (req, res) => {
             }
         }
 
-        // ✅ Calcul des totaux – on force la conversion en nombre
+        // Calcul des totaux
         let subtotal = 0;
         for (const item of items) {
             subtotal += parseFloat(item.total_price) || 0;
@@ -1286,7 +1333,15 @@ app.post('/api/admin/orders/:id/validate', authenticate, async (req, res) => {
         );
         const taxRate = parseFloat(settings[0]?.tax_rate) || 0;
         const tax = subtotal * (taxRate / 100);
-        const finalAmount = subtotal + tax;
+        let finalAmount = subtotal + tax;
+
+        // ✅ VALIDATION DU MONTANT FINAL
+        if (isNaN(finalAmount) || !isFinite(finalAmount) || finalAmount < 0) {
+            finalAmount = 0;
+        }
+        if (finalAmount > 999999999999) {
+            finalAmount = 999999999999;
+        }
 
         const saleStatus = deferred_payment ? 'pending' : 'completed';
         let finalDueDate = null;
@@ -1294,7 +1349,7 @@ app.post('/api/admin/orders/:id/validate', authenticate, async (req, res) => {
             finalDueDate = due_date || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
         }
 
-        // Créer la vente avec des placeholders
+        // Créer la vente
         const [saleResult] = await connection.query(
             `INSERT INTO sales 
              (user_id, client_id, total_amount, tax, final_amount, payment_method, status, notes, tax_rate, due_date)
@@ -1428,29 +1483,54 @@ app.delete('/api/categories/:id', authenticate, async (req, res) => {
     await pool.query('DELETE FROM categories WHERE id=? AND user_id=?', [req.params.id, req.user.id]);
     res.json({ message: 'OK' });
 });
-
-// ========== ROUTES PRODUITS (SANS LIMITE) ==========
+// ========== ROUTES PRODUITS (AVEC PAGINATION OPTIONNELLE) ==========
 app.get('/api/products', authenticate, async (req, res) => {
-    // ✅ Supprimer LIMIT 500 pour voir tous les produits
-    const [rows] = await pool.query(
-        'SELECT p.*, c.name as category_name FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE p.user_id = ? ORDER BY p.name',
-        [req.user.id]
-    );
+    const { limit, offset, search = '' } = req.query;
+    const userId = req.user.id;
+
+    // Construction de la requête de base
+    let sql = 'SELECT p.*, c.name as category_name FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE p.user_id = ?';
+    const params = [userId];
+
+    // Recherche optionnelle
+    if (search) {
+        sql += ' AND (p.name LIKE ? OR p.sku LIKE ? OR p.barcode LIKE ?)';
+        const searchTerm = `%${search}%`;
+        params.push(searchTerm, searchTerm, searchTerm);
+    }
+
+    // Tri
+    sql += ' ORDER BY p.name';
+
+    // Pagination conditionnelle
+    if (limit && offset) {
+        sql += ' LIMIT ? OFFSET ?';
+        params.push(parseInt(limit), parseInt(offset));
+    }
+
+    const [rows] = await pool.query(sql, params);
     res.json(rows);
 });
 app.get('/api/products/search', authenticate, async (req, res) => {
-    const { q, lowStock } = req.query;
-    let query = 'SELECT p.*, c.name as category_name FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE p.user_id = ?';
-    const params = [req.user.id];
+    const { q, lowStock, limit = 100, offset = 0 } = req.query;
+    const userId = req.user.id;
+
+    let sql = 'SELECT p.*, c.name as category_name FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE p.user_id = ?';
+    const params = [userId];
+
     if (q) {
-        query += ' AND (p.name LIKE ? OR p.sku LIKE ? OR p.barcode LIKE ?)';
-        params.push(`%${q}%`, `%${q}%`, `%${q}%`);
+        sql += ' AND (p.name LIKE ? OR p.sku LIKE ? OR p.barcode LIKE ?)';
+        const searchTerm = `%${q}%`;
+        params.push(searchTerm, searchTerm, searchTerm);
     }
     if (lowStock === 'true') {
-        query += ' AND p.quantity <= p.reorder_level';
+        sql += ' AND p.quantity <= p.reorder_level';
     }
-    query += ' ORDER BY p.name'; // ✅ Supprimer LIMIT 200
-    const [rows] = await pool.query(query, params);
+
+    sql += ' ORDER BY p.name LIMIT ? OFFSET ?';
+    params.push(parseInt(limit), parseInt(offset));
+
+    const [rows] = await pool.query(sql, params);
     res.json(rows);
 });
 app.post('/api/products', authenticate, async (req, res) => {
@@ -1584,8 +1664,6 @@ app.get('/api/products/barcode/:code', authenticate, async (req, res) => {
     if (rows.length === 0) return res.status(404).json({ error: 'Produit non trouvé' });
     res.json(rows[0]);
 });
-
-// ========== ROUTES VENTES ==========
 app.post('/api/sales', authenticate, async (req, res) => {
     console.log('📦 Données reçues:', req.body);
     
@@ -1647,7 +1725,6 @@ app.post('/api/sales', authenticate, async (req, res) => {
             subtotal += item.total_price;
         }
 
-        // ✅ Récupération du taux de TVA
         const [settings] = await connection.query(
             'SELECT tax_rate FROM settings WHERE user_id = ?', 
             [req.user.id]
@@ -1656,11 +1733,18 @@ app.post('/api/sales', authenticate, async (req, res) => {
             ? parseFloat(settings[0].tax_rate) 
             : 0;
 
-        // ✅ Déclaration de tax et autres calculs
         const tax = subtotal * (tax_rate / 100);
         const remise_valeur = (remise_pct || 0) / 100 * subtotal;
         const total_apres_remise = subtotal - remise_valeur;
-        const final_amount = total_apres_remise + tax - (acompte || 0);
+        let final_amount = total_apres_remise + tax - (acompte || 0);
+
+        // ✅ VALIDATION DU MONTANT FINAL
+        if (isNaN(final_amount) || !isFinite(final_amount) || final_amount < 0) {
+            final_amount = 0;
+        }
+        if (final_amount > 999999999999) {
+            final_amount = 999999999999;
+        }
 
         const finalStatus = status === 'pending' ? 'pending' : 'completed';
         const [saleResult] = await connection.query(`
@@ -1671,7 +1755,7 @@ app.post('/api/sales', authenticate, async (req, res) => {
             req.user.id, client_id, subtotal, remise_pct || 0, acompte || 0, 
             tax, final_amount, payment_method || 'cash', finalStatus, due_date || null,
             is_wholesale ? 'VENTE EN GROS' : null,
-            tax_rate   // ✅ Stockage du taux
+            tax_rate
         ]);
         const sale_id = saleResult.insertId;
 
@@ -1730,7 +1814,6 @@ app.post('/api/sales', authenticate, async (req, res) => {
         connection.release();
     }
 });
-
 app.get('/api/sales', authenticate, async (req, res) => {
     const { client_name, status, start_date, end_date, page = 1, limit = 100 } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
@@ -1757,7 +1840,6 @@ app.get('/api/sales/:id', authenticate, async (req, res) => {
     const [payments] = await pool.query('SELECT * FROM payments WHERE sale_id = ? ORDER BY payment_date', [req.params.id]);
     res.json({ sale: saleRows[0], items, payments });
 });
-// ========== MODIFIER UNE VENTE (REMISE, ACOMPTE, CLIENT) ==========
 app.put('/api/sales/:id', authenticate, async (req, res) => {
     const { remise_pct, acompte, client_name, client_email, client_phone, client_address } = req.body;
     const connection = await pool.getConnection();
@@ -1773,11 +1855,6 @@ app.put('/api/sales/:id', authenticate, async (req, res) => {
             return res.status(404).json({ error: 'Vente non trouvée' });
         }
         const sale = saleRows[0];
-
-        // ✅ SUPPRIMEZ ou COMMENTEZ cette condition :
-        // if (sale.status === 'completed') {
-        //     return res.status(400).json({ error: 'Impossible de modifier une vente déjà payée' });
-        // }
 
         // Gestion du client
         let client_id = sale.client_id;
@@ -1806,7 +1883,15 @@ app.put('/api/sales/:id', authenticate, async (req, res) => {
         const newAcompte = acompte !== undefined ? acompte : sale.acompte;
         const remise_valeur = (newRemise || 0) / 100 * sale.total_amount;
         const total_apres_remise = sale.total_amount - remise_valeur;
-        const new_final = total_apres_remise + sale.tax - (newAcompte || 0);
+        let new_final = total_apres_remise + sale.tax - (newAcompte || 0);
+
+        // ✅ VALIDATION DU MONTANT FINAL
+        if (isNaN(new_final) || !isFinite(new_final) || new_final < 0) {
+            new_final = 0;
+        }
+        if (new_final > 999999999999) {
+            new_final = 999999999999;
+        }
 
         // Mise à jour
         await connection.query(
@@ -1985,9 +2070,9 @@ app.get('/api/settings', authenticate, async (req, res) => {
             company_phone2: settings.company_phone2 || '',
             company_email: settings.company_email || '',
             logo_url: settings.logo_url || '',
-            tax_rate: settings.tax_rate !== null && settings.tax_rate !== undefined 
-                ? parseFloat(settings.tax_rate) 
-                : 20,
+           tax_rate: settings.tax_rate !== null && settings.tax_rate !== undefined 
+        ? parseFloat(settings.tax_rate) 
+        : 0, 
             low_stock_alert: parseInt(settings.low_stock_alert) || 5,
             currency: settings.currency || 'FCFA'
         });
@@ -2471,7 +2556,7 @@ async function drawCompanyHeader(doc, company, startY = 45) {
     
     return startY + headerHeight + 20;
 }
-// ========== FACTURE ÉCONOMIQUE (NET À PAYER SUR UNE LIGNE) ==========
+// ========== FACTURE OPTIMISÉE (SAUTS DE PAGE, RÉSUMÉ BIEN POSITIONNÉ) ==========
 app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
     try {
         const saleId = req.params.id;
@@ -2505,12 +2590,15 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         res.setHeader('Content-Disposition', `attachment; filename=facture_${saleId}.pdf`);
         doc.pipe(res);
 
+        // --- En-tête de la société ---
         let y = await drawCompanyHeader(doc, company);
 
+        // --- Titre ---
         doc.fillColor('#2c6e9e').fontSize(20).font('Helvetica-Bold')
            .text(`FACTURE N° ${String(saleId).padStart(5, '0')}`, 50, y, { align: 'center' });
         y += 30;
 
+        // --- Bloc client / détails ---
         doc.rect(50, y, 500, 70).fill('#f5f7fa').stroke('#e0e4e8', 0.5);
         doc.fillColor('#1a2a3a').fontSize(10).font('Helvetica-Bold')
            .text('CLIENT', 60, y + 8);
@@ -2542,31 +2630,63 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
 
         y += 85;
 
+        // --- Tableau des produits ---
         const col1 = 60, col2 = 250, col3 = 350, col4 = 450;
         const rowHeight = 22;
-        doc.rect(50, y, 500, rowHeight).fill('#2c6e9e');
-        doc.fillColor('#ffffff').fontSize(9).font('Helvetica-Bold');
-        doc.text('PRODUIT', col1, y + 6);
-        doc.text('QTÉ', col2, y + 6, { width: 60, align: 'right' });
-        doc.text('PRIX UNIT.', col3, y + 6, { width: 70, align: 'right' });
-        doc.text('TOTAL', col4, y + 6, { width: 80, align: 'right' });
-        y += rowHeight;
+        const maxRowsPerPage = 18; // pour déclencher un saut de page avant la fin
 
+        // Fonction pour dessiner l'en-tête du tableau
+        const drawTableHeader = (yPos) => {
+            doc.rect(50, yPos, 500, rowHeight).fill('#2c6e9e');
+            doc.fillColor('#ffffff').fontSize(9).font('Helvetica-Bold');
+            doc.text('PRODUIT', col1, yPos + 6);
+            doc.text('QTÉ', col2, yPos + 6, { width: 60, align: 'right' });
+            doc.text('PRIX UNIT.', col3, yPos + 6, { width: 70, align: 'right' });
+            doc.text('TOTAL', col4, yPos + 6, { width: 80, align: 'right' });
+            return yPos + rowHeight;
+        };
+
+        let currentY = drawTableHeader(y);
         let subtotal = 0;
-        items.forEach((item, idx) => {
-            const bg = idx % 2 === 0 ? '#ffffff' : '#f8fafc';
-            doc.rect(50, y, 500, rowHeight).fill(bg);
-            doc.fillColor('#1a2a3a').fontSize(9).font('Helvetica');
-            doc.text(item.product_name || 'Produit', col1 + 2, y + 5);
-            doc.text(item.quantity.toString(), col2, y + 5, { width: 60, align: 'right' });
-            doc.text(formatPDFNumber(item.unit_price), col3, y + 5, { width: 70, align: 'right' });
-            doc.text(formatPDFNumber(item.total_price), col4, y + 5, { width: 80, align: 'right' });
-            subtotal += parseFloat(item.total_price);
-            y += rowHeight;
-        });
+        let rowIndex = 0;
 
-        doc.moveTo(50, y).lineTo(550, y).stroke('#e0e4e8');
-        y += 10;
+        // Parcourir les articles
+        for (const item of items) {
+            const productName = item.product_name || 'Produit';
+            const qty = item.quantity;
+            const unitPrice = parseFloat(item.unit_price);
+            const totalPrice = parseFloat(item.total_price);
+            subtotal += totalPrice;
+
+            // Vérifier l'espace restant pour une ligne supplémentaire + marge
+            if (currentY + rowHeight + 40 > 750) {
+                doc.addPage();
+                currentY = drawTableHeader(50); // nouveau header en haut de page
+            }
+
+            // Alternance de fond
+            const bg = rowIndex % 2 === 0 ? '#ffffff' : '#f8fafc';
+            doc.rect(50, currentY, 500, rowHeight).fill(bg);
+            doc.fillColor('#1a2a3a').fontSize(9).font('Helvetica');
+            doc.text(productName, col1 + 2, currentY + 5);
+            doc.text(qty.toString(), col2, currentY + 5, { width: 60, align: 'right' });
+            doc.text(formatPDFNumber(unitPrice), col3, currentY + 5, { width: 70, align: 'right' });
+            doc.text(formatPDFNumber(totalPrice), col4, currentY + 5, { width: 80, align: 'right' });
+
+            currentY += rowHeight;
+            rowIndex++;
+        }
+
+        // Ligne de séparation après le tableau
+        doc.moveTo(50, currentY).lineTo(550, currentY).stroke('#e0e4e8');
+        currentY += 12;
+
+        // --- Résumé (Sous-total, TVA, Remise, Acompte) ---
+        const summaryHeight = 90; // hauteur approximative du bloc résumé
+        if (currentY + summaryHeight > 750) {
+            doc.addPage();
+            currentY = 50;
+        }
 
         const totalX = 360;
         const taxAmount = sale.tax || 0;
@@ -2574,60 +2694,52 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         const acompteValue = sale.acompte || 0;
         const finalAmount = sale.final_amount || 0;
 
-        const yAfterTable = y;
-        y = yAfterTable;
-
-        const totalLines = [];
-        totalLines.push({ label: 'Sous-total', value: formatPDFNumber(subtotal) });
+        const summaryLines = [];
+        summaryLines.push({ label: 'Sous-total', value: formatPDFNumber(subtotal) });
         if (taxRate > 0) {
-            totalLines.push({ label: `TVA (${taxRate}%)`, value: formatPDFNumber(taxAmount) });
+            summaryLines.push({ label: `TVA (${taxRate}%)`, value: formatPDFNumber(taxAmount) });
         }
         if (sale.remise_pct && sale.remise_pct > 0) {
-            totalLines.push({ label: `Remise (${sale.remise_pct}%)`, value: `- ${formatPDFNumber(remiseValue)}` });
+            summaryLines.push({ label: `Remise (${sale.remise_pct}%)`, value: `- ${formatPDFNumber(remiseValue)}` });
         }
         if (acompteValue > 0) {
-            totalLines.push({ label: 'Acompte', value: `- ${formatPDFNumber(acompteValue)}` });
+            summaryLines.push({ label: 'Acompte', value: `- ${formatPDFNumber(acompteValue)}` });
         }
 
-        // ✅ Ligne vide pour aérer
-        totalLines.push({ label: '', value: '' });
-
-        // ✅ NET À PAYER en plus petit et aligné
-        totalLines.push({ label: 'NET À PAYER', value: formatPDFNumber(finalAmount), isTotal: true });
-
-        totalLines.forEach((line, i) => {
-            const yPos = y + i * 22;
-            const isTotal = line.isTotal || false;
-            const isBlank = line.label === '' && line.value === '';
-            if (isBlank) {
-                // On saute une ligne
-                return;
-            }
-            
-            // ✅ Taille réduite pour NET À PAYER
-            const fontSize = isTotal ? 12 : 10;
-            const font = isTotal ? 'Helvetica-Bold' : 'Helvetica';
-            
-            doc.fillColor(isTotal ? '#1a2a3a' : '#3a4a5a');
+        // Dessiner les lignes du résumé
+        summaryLines.forEach((line, idx) => {
+            const yPos = currentY + idx * 22;
+            const fontSize = 10;
+            const font = 'Helvetica';
+            doc.fillColor('#3a4a5a');
             doc.fontSize(fontSize).font(font);
-            
-            // ✅ Label un peu plus à gauche (x = 300 au lieu de 360)
-            const labelX = isTotal ? 300 : totalX;
-            doc.text(line.label, labelX, yPos, { width: 100, align: 'right' });
-            
-            // ✅ Montant bien aligné à droite, avec espace
-            const textToDisplay = `${line.value} ${company.currency}`;
-            const xPos = isTotal ? 460 : 450;
-            const widthVal = isTotal ? 90 : 80;
-            doc.text(textToDisplay, xPos, yPos, { width: widthVal, align: 'right' });
+            doc.text(line.label, totalX, yPos, { width: 100, align: 'right' });
+            doc.text(`${line.value} ${company.currency}`, 450, yPos, { width: 80, align: 'right' });
         });
 
+        // Position après le résumé
+        currentY += summaryLines.length * 22 + 8;
+
+        // Vérifier l'espace pour le total (bloc coloré)
+        if (currentY + 40 > 750) {
+            doc.addPage();
+            currentY = 50;
+        }
+
+        // --- Bloc NET À PAYER (encadré) ---
+        doc.rect(350, currentY, 200, 30).fill('#2c6e9e');
+        doc.fillColor('#ffffff').fontSize(14).font('Helvetica-Bold');
+        doc.text('NET À PAYER', 360, currentY + 8);
+        doc.text(`${formatPDFNumber(finalAmount)} ${company.currency}`, 450, currentY + 8, { width: 80, align: 'right' });
+
+        // --- Pied de page ---
         const footerY = 750;
         doc.rect(50, footerY, 500, 25).fill('#f0f4f8');
         doc.fillColor('#7a8a9a').fontSize(8).font('Helvetica');
         doc.text('Merci de votre confiance • Facture générée par GestPro', 50, footerY + 8, { align: 'center' });
 
         doc.end();
+
     } catch (err) {
         console.error('Erreur génération facture:', err);
         res.status(500).json({ error: 'Erreur génération facture' });

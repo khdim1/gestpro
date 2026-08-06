@@ -420,9 +420,8 @@ const appCache = {
     products: { data: null, timestamp: 0 },
     clients: { data: null, timestamp: 0 },
     settings: { data: null, timestamp: 0 },
-    ttl: 60000 // 1 minute
+    ttl: 300000 // 5 minutes (au lieu de 60000)
 };
-
 async function getCachedData(key, fetchFn) {
     const cached = appCache[key];
     if (cached.data && (Date.now() - cached.timestamp < appCache.ttl)) {
@@ -1733,8 +1732,9 @@ async function renderProducts() {
 
        window.searchProducts = async (lowStock = false) => {
     const q = document.getElementById('searchProduct')?.value || '';
-    // ✅ Ajout du timestamp pour éviter le cache
-    let url = `/products/search?${q ? 'q='+encodeURIComponent(q)+'&' : ''}${lowStock ? 'lowStock=true&' : ''}_t=` + Date.now();
+    const limit = 100; // nombre de produits à afficher
+    const offset = 0;  // on pourrait ajouter une pagination "Voir plus"
+    let url = `/products/search?${q ? 'q='+encodeURIComponent(q)+'&' : ''}${lowStock ? 'lowStock=true&' : ''}limit=${limit}&offset=${offset}&_t=` + Date.now();
     try {
         const prods = await apiCall(url);
         const tbody = document.getElementById('productsTable');
@@ -1927,13 +1927,18 @@ try {
         await searchProducts();
     } catch(err) { console.error(err); document.getElementById('pageContainer').innerHTML = `<div class="alert alert-danger">Erreur : ${err.message}</div>`; }
 }
-
+window.filterProducts = async () => {
+    const term = document.getElementById('productSearch').value.trim();
+    const url = `/api/products?search=${encodeURIComponent(term)}&limit=100`;
+    const products = await apiCall(url);
+    renderProductGrid(products);
+};
 // ========================================================================
 // VENTES - AVEC PRIX EN GROS ET PAIEMENT DES FACTURES
 // ========================================================================
 async function renderSales() {
     // ✅ FORCER LE RECHARGEMENT COMPLET
-let allProducts = await getCachedData('products', () => apiCall('/products'));
+let allProducts = await getCachedData('products', () => apiCall('/products?limit=200'));
     console.log('📦 Produits chargés:', allProducts.length);
     
     // Si aucun produit, afficher un message d'avertissement

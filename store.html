@@ -15,6 +15,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/color-thief/2.3.0/color-thief.umd.min.js"></script>
 
     <style>
+        /* ===== STYLES (inchangés, sauf pour le stock) ===== */
         :root {
             --primary: #2c6e9e;
             --primary-dark: #1a4a6e;
@@ -162,11 +163,6 @@
             -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 4px;
         }
         .product-card .card-body .product-price { font-weight: 800; font-size: 1.2rem; color: var(--primary); transition: color 0.3s; }
-        .product-card .card-body .product-stock { font-size: 0.7rem; font-weight: 600; }
-        .product-card .card-body .product-stock.in-stock { color: var(--secondary); }
-        .product-card .card-body .product-stock.low-stock { color: #f39c12; }
-        .product-card .card-body .product-stock.out-of-stock { color: #e74c3c; }
-        .stock-urgency { font-size: 0.68rem; color: #f39c12; font-weight: 700; margin-top: 2px; }
 
         .qty-selector { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
         .qty-selector button {
@@ -719,7 +715,7 @@
     }
 
     // ================================================================
-    //  AFFICHAGE PRODUITS
+    //  AFFICHAGE PRODUITS (SANS STOCK)
     // ================================================================
     function isNewProduct(createdAt) {
         if (!createdAt) return false;
@@ -733,8 +729,6 @@
         const fragment = document.createDocumentFragment();
 
         items.forEach((p, index) => {
-            const stockStatus = p.quantity <= 0 ? 'out-of-stock' : (p.quantity <= 5 ? 'low-stock' : 'in-stock');
-            const stockLabel = p.quantity <= 0 ? 'Rupture' : (p.quantity <= 5 ? 'Stock faible' : 'En stock');
             const hasImage = p.image_url && p.image_url.trim() !== '';
             cardQuantities[p.id] = 1;
 
@@ -748,9 +742,6 @@
                        onmouseenter="initZoom(this)" onmousemove="moveZoom(event)" onmouseleave="hideZoom()">`
                 : `<i class="bi bi-box-seam"></i>`;
 
-            const urgencyHtml = (p.quantity > 0 && p.quantity <= 5)
-                ? `<div class="stock-urgency">⚡ Plus que ${p.quantity} en stock</div>` : '';
-
             card.innerHTML = `
                 <div class="product-img">
                     ${isNewProduct(p.created_at) ? '<span class="badge-new">Nouveau</span>' : ''}
@@ -760,11 +751,7 @@
                 <div class="card-body">
                     <div class="product-name">${escapeHtml(p.name)}</div>
                     <div class="product-desc">${escapeHtml(p.description || '')}</div>
-                    <div class="d-flex justify-content-between align-items-center">
-                        <span class="product-price">${formatNumber(p.sell_price)} ${currency}</span>
-                        <span class="product-stock ${stockStatus}">${stockLabel}</span>
-                    </div>
-                    ${urgencyHtml}
+                    <div class="product-price">${formatNumber(p.sell_price)} ${currency}</div>
                     ${p.wholesale_price > 0 ? `<div class="wholesale-badge">Gros x${p.wholesale_quantity}</div>` : ''}
                     ${p.quantity > 0 ? `
                     <div class="qty-selector">
@@ -997,79 +984,80 @@
         document.getElementById('trackingResult').innerHTML = '';
         new bootstrap.Modal(document.getElementById('trackingModal')).show();
     }
-async function trackOrder() {
-    const orderId = document.getElementById('trackOrderId').value.trim();
-    const phone = document.getElementById('trackPhone').value.trim();
-    if (!orderId || !phone) { showToast('Renseignez le numéro de commande et le téléphone', 'warning'); return; }
-    const urlParams = new URLSearchParams(window.location.search);
-    const currentShopId = urlParams.get('shop') || '';
 
-    try {
-        const res = await fetch(`/api/public/orders/track?shop=${currentShopId}&order_id=${encodeURIComponent(orderId)}&phone=${encodeURIComponent(phone)}`);
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Commande introuvable');
+    async function trackOrder() {
+        const orderId = document.getElementById('trackOrderId').value.trim();
+        const phone = document.getElementById('trackPhone').value.trim();
+        if (!orderId || !phone) { showToast('Renseignez le numéro de commande et le téléphone', 'warning'); return; }
+        const urlParams = new URLSearchParams(window.location.search);
+        const currentShopId = urlParams.get('shop') || '';
 
-        const steps = ['pending', 'confirmed', 'shipped', 'delivered'];
-        const currentIdx = data.status === 'cancelled' ? -1 : steps.indexOf(data.status);
-        const stepLabels = { pending: 'Reçue', confirmed: 'Confirmée', shipped: 'Expédiée', delivered: 'Livrée' };
-        const currency = shopSettings?.currency || 'FCFA';
+        try {
+            const res = await fetch(`/api/public/orders/track?shop=${currentShopId}&order_id=${encodeURIComponent(orderId)}&phone=${encodeURIComponent(phone)}`);
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Commande introuvable');
 
-        let stepsHtml = '';
-        if (data.status === 'cancelled') {
-            stepsHtml = `<div class="text-center"><span class="track-status-badge cancelled">Commande annulée</span></div>`;
-        } else {
-            stepsHtml = `<div class="track-steps">` + steps.map((s, i) => `
-                <div class="track-step ${i < currentIdx ? 'done' : ''} ${i === currentIdx ? 'active' : ''}">
-                    <div class="dot"><i class="bi ${i <= currentIdx ? 'bi-check-lg' : 'bi-circle'}"></i></div>
-                    <small>${stepLabels[s]}</small>
-                </div>`).join('') + `</div>`;
-        }
+            const steps = ['pending', 'confirmed', 'shipped', 'delivered'];
+            const currentIdx = data.status === 'cancelled' ? -1 : steps.indexOf(data.status);
+            const stepLabels = { pending: 'Reçue', confirmed: 'Confirmée', shipped: 'Expédiée', delivered: 'Livrée' };
+            const currency = shopSettings?.currency || 'FCFA';
 
-        // 🚚 Affichage des infos de livraison
-        const delivery = data.delivery || null;
-        let deliveryHtml = '';
-        if (delivery) {
-            const statusLabels = {
-                pending: 'En attente',
-                assigned: 'Assigné',
-                picked_up: 'Récupéré',
-                in_transit: 'En cours',
-                delivered: 'Livré',
-                failed: 'Échoué'
-            };
-            const statusClass = delivery.status === 'delivered' ? 'success' : delivery.status === 'failed' ? 'danger' : 'warning';
-            deliveryHtml = `
-                <hr>
-                <div class="mt-2">
-                    <p><strong>🚚 Livraison</strong></p>
-                    <p><span class="badge badge-${statusClass}">${statusLabels[delivery.status] || delivery.status}</span></p>
-                    ${delivery.driver_name ? `<p>Livreur : ${delivery.driver_name}</p>` : ''}
-                    ${delivery.tracking_code ? `<p>Code de suivi : <strong>${delivery.tracking_code}</strong></p>` : ''}
-                    ${delivery.delivery_address ? `<p>Adresse de livraison : ${delivery.delivery_address}</p>` : ''}
+            let stepsHtml = '';
+            if (data.status === 'cancelled') {
+                stepsHtml = `<div class="text-center"><span class="track-status-badge cancelled">Commande annulée</span></div>`;
+            } else {
+                stepsHtml = `<div class="track-steps">` + steps.map((s, i) => `
+                    <div class="track-step ${i < currentIdx ? 'done' : ''} ${i === currentIdx ? 'active' : ''}">
+                        <div class="dot"><i class="bi ${i <= currentIdx ? 'bi-check-lg' : 'bi-circle'}"></i></div>
+                        <small>${stepLabels[s]}</small>
+                    </div>`).join('') + `</div>`;
+            }
+
+            // Infos de livraison
+            const delivery = data.delivery || null;
+            let deliveryHtml = '';
+            if (delivery) {
+                const statusLabels = {
+                    pending: 'En attente',
+                    assigned: 'Assigné',
+                    picked_up: 'Récupéré',
+                    in_transit: 'En cours',
+                    delivered: 'Livré',
+                    failed: 'Échoué'
+                };
+                const statusClass = delivery.status === 'delivered' ? 'success' : delivery.status === 'failed' ? 'danger' : 'warning';
+                deliveryHtml = `
+                    <hr>
+                    <div class="mt-2">
+                        <p><strong>🚚 Livraison</strong></p>
+                        <p><span class="badge badge-${statusClass}">${statusLabels[delivery.status] || delivery.status}</span></p>
+                        ${delivery.driver_name ? `<p>Livreur : ${delivery.driver_name}</p>` : ''}
+                        ${delivery.tracking_code ? `<p>Code de suivi : <strong>${delivery.tracking_code}</strong></p>` : ''}
+                        ${delivery.delivery_address ? `<p>Adresse de livraison : ${delivery.delivery_address}</p>` : ''}
+                    </div>
+                `;
+            }
+
+            document.getElementById('trackingForm').style.display = 'none';
+            const resultBox = document.getElementById('trackingResult');
+            resultBox.style.display = 'block';
+            resultBox.innerHTML = `
+                <p><strong>Commande #${data.id}</strong> — ${new Date(data.created_at).toLocaleDateString('fr-FR')}</p>
+                ${stepsHtml}
+                <div class="table-responsive mt-3">
+                    <table class="table table-sm" style="color: var(--text-color);">
+                        <thead><tr><th>Produit</th><th>Qté</th><th>Total</th></tr></thead>
+                        <tbody>${(data.items || []).map(i => `<tr><td>${escapeHtml(i.product_name)}</td><td>${i.quantity}</td><td>${formatNumber(i.total_price)} ${currency}</td></tr>`).join('')}</tbody>
+                    </table>
                 </div>
+                <p class="text-end fw-bold">Total : ${formatNumber(data.total_amount)} ${currency}</p>
+                ${deliveryHtml}
+                <button class="btn btn-sm btn-outline-secondary w-100 mt-2" onclick="openTracking()"><i class="bi bi-arrow-left"></i> Nouvelle recherche</button>
             `;
+        } catch (err) {
+            showToast('❌ ' + err.message, 'danger');
         }
-
-        document.getElementById('trackingForm').style.display = 'none';
-        const resultBox = document.getElementById('trackingResult');
-        resultBox.style.display = 'block';
-        resultBox.innerHTML = `
-            <p><strong>Commande #${data.id}</strong> — ${new Date(data.created_at).toLocaleDateString('fr-FR')}</p>
-            ${stepsHtml}
-            <div class="table-responsive mt-3">
-                <table class="table table-sm" style="color: var(--text-color);">
-                    <thead><tr><th>Produit</th><th>Qté</th><th>Total</th></tr></thead>
-                    <tbody>${(data.items || []).map(i => `<tr><td>${escapeHtml(i.product_name)}</td><td>${i.quantity}</td><td>${formatNumber(i.total_price)} ${currency}</td></tr>`).join('')}</tbody>
-                </table>
-            </div>
-            <p class="text-end fw-bold">Total : ${formatNumber(data.total_amount)} ${currency}</p>
-            ${deliveryHtml}
-            <button class="btn btn-sm btn-outline-secondary w-100 mt-2" onclick="openTracking()"><i class="bi bi-arrow-left"></i> Nouvelle recherche</button>
-        `;
-    } catch (err) {
-        showToast('❌ ' + err.message, 'danger');
     }
-}
 
     // ================================================================
     //  UTILITAIRES
@@ -1093,117 +1081,59 @@ async function trackOrder() {
         observer = new IntersectionObserver((entries) => { if (entries[0].isIntersecting) loadMoreProducts(); }, { rootMargin: '0px 0px 200px 0px' });
         observer.observe(sentinel);
     }
-document.addEventListener('DOMContentLoaded', function() {
-    // Délégation pour les boutons "Ajouter"
-    document.getElementById('productGrid').addEventListener('click', function(e) {
-        const btn = e.target.closest('.btn-add');
-        if (btn) {
-            const productId = parseInt(btn.dataset.productId, 10);
-            if (productId) addToCart(productId);
-        }
-    });
 
-    // Récupérer le slug depuis l'URL (dernier segment du chemin)
-    const pathSegments = window.location.pathname.split('/');
-    // Filtrer les segments vides
-    const segments = pathSegments.filter(s => s.length > 0);
-    // Le dernier segment est le slug, sauf si on est à la racine
-    let slug = segments.length > 0 ? segments[segments.length - 1] : '';
-    
-    // Si l'URL contient encore le paramètre ?shop= (pour compatibilité), on le priorise
-    const urlParams = new URLSearchParams(window.location.search);
-    const shopIdParam = urlParams.get('shop');
-    
-    if (shopIdParam) {
-        // Mode classique avec ?shop=ID
+    // ================================================================
+    //  INIT - Gestion de l'identifiant boutique
+    // ================================================================
+    document.addEventListener('DOMContentLoaded', function() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const shopIdParam = urlParams.get('shop') || '';
         shopId = shopIdParam;
-        // Charger directement
-        initStore(shopId);
-    } else if (slug) {
-        // Mode slug : on interroge l'API pour obtenir l'ID
-        fetch(`/api/public/shop-id-from-slug?slug=${encodeURIComponent(slug)}`)
-            .then(response => response.json())
-            .then(data => {
-                if (data.shopId) {
-                    shopId = data.shopId;
-                    initStore(shopId);
-                } else {
-                    // Slug non trouvé : afficher une erreur
-                    showShopNotFound(slug);
-                }
-            })
-            .catch(err => {
-                console.error('Erreur lors de la conversion du slug:', err);
-                showShopNotFound(slug);
-            });
-    } else {
-        // Ni shop ni slug : afficher la page de sélection
-        showShopSelector();
-    }
 
-    // Fonction d'initialisation de la boutique
-    function initStore(id) {
+        // Vérifier la présence de shopId
+        if (!shopId) {
+            const grid = document.getElementById('productGrid');
+            grid.innerHTML = `
+                <div class="empty-state" style="grid-column: 1 / -1;">
+                    <i class="bi bi-shop"></i>
+                    <h3>Identifiant boutique requis</h3>
+                    <p>Veuillez fournir l'identifiant de la boutique dans l'URL : <code>?shop=VOTRE_ID</code></p>
+                    <div class="mt-3">
+                        <div class="input-group mx-auto" style="max-width:400px;">
+                            <input type="number" id="shopIdInput" class="form-control" placeholder="Entrez l'identifiant boutique">
+                            <button class="btn btn-primary" onclick="goToShop()">Accéder</button>
+                        </div>
+                    </div>
+                    <p class="mt-3 text-muted small">Exemple : <code>/store?shop=1</code></p>
+                </div>
+            `;
+            window.goToShop = function() {
+                const id = document.getElementById('shopIdInput').value.trim();
+                if (id) {
+                    window.location.href = `/store?shop=${id}`;
+                } else {
+                    alert('Veuillez entrer un identifiant de boutique valide.');
+                }
+            };
+            document.querySelector('.search-wrapper').style.display = 'none';
+            document.querySelector('.filters-bar').style.display = 'none';
+            document.querySelector('.contact-info').style.display = 'none';
+            document.querySelector('.results-count').style.display = 'none';
+            document.getElementById('scroll-sentinel').style.display = 'none';
+            return;
+        }
+
+        // Charger normalement
         showSkeletons();
-        Promise.all([loadShopSettings(id), loadAllProducts(id), loadCategories(id)]).then(() => {
+        Promise.all([loadShopSettings(shopId), loadAllProducts(shopId), loadCategories(shopId)]).then(() => {
             applyFilterAndReset();
             setupInfiniteScroll();
         });
+
         cart = [];
         updateCartUI();
         closeCart();
-    }
-
-    // Fonction pour afficher une erreur "boutique non trouvée"
-    function showShopNotFound(slug) {
-        const grid = document.getElementById('productGrid');
-        grid.innerHTML = `
-            <div class="empty-state" style="grid-column: 1 / -1;">
-                <i class="bi bi-shop"></i>
-                <h3>Boutique non trouvée</h3>
-                <p>Aucune boutique correspondant à "<strong>${slug}</strong>" n'a été trouvée.</p>
-                <p class="text-muted small">Vérifiez l'URL ou utilisez l'identifiant numérique : <code>?shop=VOTRE_ID</code></p>
-            </div>
-        `;
-        document.querySelector('.search-wrapper').style.display = 'none';
-        document.querySelector('.filters-bar').style.display = 'none';
-        document.querySelector('.contact-info').style.display = 'none';
-        document.querySelector('.results-count').style.display = 'none';
-        document.getElementById('scroll-sentinel').style.display = 'none';
-    }
-
-    // Fonction pour afficher le sélecteur de boutique (si aucun paramètre)
-    function showShopSelector() {
-        const grid = document.getElementById('productGrid');
-        grid.innerHTML = `
-            <div class="empty-state" style="grid-column: 1 / -1;">
-                <i class="bi bi-shop"></i>
-                <h3>Identifiant boutique requis</h3>
-                <p>Veuillez fournir l'identifiant de la boutique dans l'URL : <code>?shop=VOTRE_ID</code></p>
-                <div class="mt-3">
-                    <div class="input-group mx-auto" style="max-width:400px;">
-                        <input type="number" id="shopIdInput" class="form-control" placeholder="Entrez l'identifiant boutique">
-                        <button class="btn btn-primary" onclick="goToShop()">Accéder</button>
-                    </div>
-                </div>
-                <p class="mt-3 text-muted small">Exemple : <code>/store?shop=1</code></p>
-                <p class="text-muted small">Ou utilisez un slug : <code>/boutique/ma-boutique</code></p>
-            </div>
-        `;
-        window.goToShop = function() {
-            const id = document.getElementById('shopIdInput').value.trim();
-            if (id) {
-                window.location.href = `/store?shop=${id}`;
-            } else {
-                alert('Veuillez entrer un identifiant de boutique valide.');
-            }
-        };
-        document.querySelector('.search-wrapper').style.display = 'none';
-        document.querySelector('.filters-bar').style.display = 'none';
-        document.querySelector('.contact-info').style.display = 'none';
-        document.querySelector('.results-count').style.display = 'none';
-        document.getElementById('scroll-sentinel').style.display = 'none';
-    }
-});
+    });
 </script>
 </body>
 </html>
