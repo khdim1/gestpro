@@ -582,22 +582,7 @@ function showApp() {
         return;
     }
 
-    // ✅ S'assurer que le conteneur principal existe
-    const mainContent = document.getElementById('mainContent');
-    if (!mainContent) {
-        console.error('❌ Élément #mainContent introuvable');
-        return;
-    }
-
-    // ✅ Créer la structure de base si elle n'existe pas
-    if (!document.getElementById('pageContainer')) {
-        console.log('🔧 Création de #pageContainer');
-        const containerDiv = document.createElement('div');
-        containerDiv.id = 'pageContainer';
-        mainContent.appendChild(containerDiv);
-    }
-
-    // Afficher le nom de l'utilisateur
+    // Afficher le nom
     const userNameEl = document.getElementById('userName');
     if (userNameEl) {
         userNameEl.innerText = window.currentUser?.name || '';
@@ -605,38 +590,45 @@ function showApp() {
     
     const permissions = window.currentUser?.permissions || [];
     const isAdmin = window.currentUser?.role === 'admin' || permissions.includes('*');
+    const hasDashboard = isAdmin || permissions.includes('dashboard');
     
     console.log('👤 Utilisateur:', window.currentUser);
     console.log('🔑 Permissions:', permissions);
+    console.log('📊 Tableau de bord autorisé:', hasDashboard);
     
     // ✅ Afficher/masquer les menus selon les permissions
     document.querySelectorAll('.sidebar .nav-link[data-page]').forEach(link => {
         const page = link.dataset.page;
         let visible = false;
         
+        // 🔹 Règles d'affichage
         if (isAdmin) {
             visible = true;
         } else {
-            const permissionMap = {
-                'dashboard': 'dashboard',
-                'products': 'products_view',
-                'sales': 'sales_view',
-                'proforma': 'sales_view',
-                'invoices': 'invoices_view',
-                'clients': 'clients_view',
-                'cash': 'cash_view',
-                'inventory': 'inventory_view',
-                'reports': 'reports_view',
-                'settings': 'settings_view',
-                'history': 'sales_view',
-                'sub-users': 'sub_users_manage',
-                'orders': 'orders_view',
-                'drivers': 'sales_view',
-                'deliveries': 'sales_view'
-            };
-            const needed = permissionMap[page];
-            if (needed && permissions.includes(needed)) {
-                visible = true;
+            // 🔹 Si la page est "dashboard", elle n'est visible que si la permission existe
+            if (page === 'dashboard') {
+                visible = hasDashboard;
+            } else {
+                const permissionMap = {
+                    'products': 'products_view',
+                    'sales': 'sales_view',
+                    'proforma': 'sales_view',
+                    'invoices': 'invoices_view',
+                    'clients': 'clients_view',
+                    'cash': 'cash_view',
+                    'inventory': 'inventory_view',
+                    'reports': 'reports_view',
+                    'settings': 'settings_view',
+                    'history': 'sales_view',
+                    'sub-users': 'sub_users_manage',
+                    'orders': 'orders_view',
+                    'drivers': 'sales_view',
+                    'deliveries': 'sales_view'
+                };
+                const needed = permissionMap[page];
+                if (needed && permissions.includes(needed)) {
+                    visible = true;
+                }
             }
         }
         link.style.display = visible ? 'flex' : 'none';
@@ -648,19 +640,22 @@ function showApp() {
         link.addEventListener('click', handleNavClick);
     });
 
-    // ✅ Charger la première page accessible
+    // ✅ Charger la première page accessible (NE JAMAIS CHARGER DASHBOARD SI NON AUTORISÉ)
     const pageContainer = document.getElementById('pageContainer');
     const visibleLinks = document.querySelectorAll('.sidebar .nav-link[data-page]');
-    const firstVisible = visibleLinks.length > 0 ? visibleLinks[0] : null;
+    
+    // 🔹 Filtrer les liens visibles (dashboard exclu si non autorisé)
+    const accessibleLinks = Array.from(visibleLinks).filter(link => {
+        return link.style.display !== 'none';
+    });
+    
+    const firstVisible = accessibleLinks.length > 0 ? accessibleLinks[0] : null;
     
     if (firstVisible && pageContainer) {
-        const hasDashboard = isAdmin || permissions.includes('dashboard');
-        if (hasDashboard) {
-            loadPage('dashboard');
-        } else {
-            firstVisible.classList.add('active');
-            loadPage(firstVisible.dataset.page);
-        }
+        // ✅ Activer le premier lien visible
+        firstVisible.classList.add('active');
+        // ✅ Charger la page correspondante (jamais dashboard si non autorisé)
+        loadPage(firstVisible.dataset.page);
     } else if (pageContainer) {
         pageContainer.innerHTML = `
             <div class="alert alert-warning">
@@ -679,13 +674,26 @@ function showApp() {
         startPendingOrdersCheck();
     }
 }
-
-// Gestionnaire de navigation
+// ✅ Gestionnaire de navigation
 function handleNavClick(e) {
     e.preventDefault();
+    const page = e.currentTarget.dataset.page;
+    
+    // ✅ Vérifier si la page est dashboard et si l'utilisateur a la permission
+    if (page === 'dashboard') {
+        const permissions = window.currentUser?.permissions || [];
+        const isAdmin = window.currentUser?.role === 'admin' || permissions.includes('*');
+        const hasDashboard = isAdmin || permissions.includes('dashboard');
+        if (!hasDashboard) {
+            showToast('Accès non autorisé au tableau de bord', 'warning');
+            return;
+        }
+    }
+    
+    // Réinitialiser les classes actives
     document.querySelectorAll('.sidebar .nav-link').forEach(l => l.classList.remove('active'));
     e.currentTarget.classList.add('active');
-    loadPage(e.currentTarget.dataset.page);
+    loadPage(page);
 }
 // ===== SYNCHRONISATION ENTRE APPAREILS =====
 let syncChannel = null;
@@ -748,30 +756,49 @@ async function loadPage(page) {
     
     console.log('📄 Chargement de la page:', page);
     
-    // ✅ Vérifier que l'élément pageTitle existe
+    // ✅ Vérifier l'accès au tableau de bord
+    if (page === 'dashboard') {
+        const permissions = window.currentUser?.permissions || [];
+        const isAdmin = window.currentUser?.role === 'admin' || permissions.includes('*');
+        const hasDashboard = isAdmin || permissions.includes('dashboard');
+        if (!hasDashboard) {
+            console.warn('⚠️ Accès au tableau de bord refusé');
+            const pageContainer = document.getElementById('pageContainer');
+            if (pageContainer) {
+                pageContainer.innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="bi bi-exclamation-triangle me-2"></i>
+                        Accès non autorisé au tableau de bord.
+                        <br><small>Contactez votre administrateur.</small>
+                    </div>
+                `;
+            }
+            return;
+        }
+    }
+    
+    // Mettre à jour le titre
     const pageTitle = document.getElementById('pageTitle');
     if (pageTitle) {
         pageTitle.innerText = titles[page] || page;
-    } else {
-        console.warn('⚠️ Élément #pageTitle introuvable');
     }
     
-    // ✅ Vérifier que l'élément pageContainer existe
-    const pageContainer = document.getElementById('pageContainer');
+    // Vérifier le conteneur
+    let pageContainer = document.getElementById('pageContainer');
     if (!pageContainer) {
-        console.error('❌ Élément #pageContainer introuvable');
-        // Créer l'élément s'il n'existe pas
         const mainContent = document.getElementById('mainContent');
         if (mainContent) {
             const container = document.createElement('div');
             container.id = 'pageContainer';
             mainContent.appendChild(container);
-            console.log('✅ #pageContainer créé');
+            pageContainer = container;
+        } else {
+            console.error('❌ #mainContent introuvable');
+            return;
         }
-        return;
     }
     
-    // Charger la page demandée
+    // Charger la page
     try {
         if (page === 'dashboard') await renderDashboard();
         else if (page === 'products') await renderProducts();
