@@ -2394,11 +2394,10 @@ app.delete('/api/proforma/:id', authenticate, async (req, res) => {
     await pool.query('DELETE FROM proforma_invoices WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
     res.json({ message: 'Proforma supprimée' });
 });
-// ========== ROUTE PROFORMA PDF ==========
+// ========== ROUTE PROFORMA PDF (MODIFIÉE) ==========
 app.get('/api/proforma/:id/pdf', authenticate, async (req, res) => {
     try {
         const proformaId = req.params.id;
-        // ✅ Requête corrigée : pas d'alias 's'
         const [invoiceRows] = await pool.query(`
             SELECT * FROM proforma_invoices 
             WHERE id = ? AND user_id = ?
@@ -2412,19 +2411,20 @@ app.get('/api/proforma/:id/pdf', authenticate, async (req, res) => {
         const company = settingsRows[0] || { company_name: 'Mon Entreprise', currency: 'FCFA' };
 
         const doc = new PDFDocument({ margin: 50, size: 'A4' });
+        
+        // ✅ MODIFICATION : En-têtes pour téléchargement direct
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename=proforma_${invoice.proforma_number}.pdf`);
+        res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
+        
         doc.pipe(res);
 
-        // En-tête
         let y = await drawCompanyHeader(doc, company);
 
-        // Titre
         doc.fillColor('#2c6e9e').fontSize(20).font('Helvetica-Bold')
            .text(`FACTURE PROFORMA N° ${invoice.proforma_number}`, 50, y, { align: 'center' });
         y += 30;
 
-        // Infos client
         doc.fillColor('#1a2a3a').fontSize(11).font('Helvetica')
            .text(`Date : ${new Date(invoice.issue_date).toLocaleDateString('fr-FR')}`, 50, y);
         y += 16;
@@ -2434,7 +2434,6 @@ app.get('/api/proforma/:id/pdf', authenticate, async (req, res) => {
         if (invoice.valid_until) { y += 16; doc.text(`Valable jusqu'au : ${new Date(invoice.valid_until).toLocaleDateString('fr-FR')}`, 50, y); }
         y += 25;
 
-        // Tableau
         const col1 = 60, col2 = 250, col3 = 350, col4 = 450;
         const rowHeight = 22;
         doc.rect(50, y, 500, rowHeight).fill('#2c6e9e');
@@ -2458,11 +2457,9 @@ app.get('/api/proforma/:id/pdf', authenticate, async (req, res) => {
             y += rowHeight;
         });
 
-        // Ligne de séparation
         doc.moveTo(50, y).lineTo(550, y).stroke('#e0e4e8');
         y += 10;
 
-        // ✅ Récupération du taux de TVA depuis l'objet invoice
         const taxRate = invoice.tax_rate || 0;
         const taxAmount = invoice.tax || 0;
         const remiseValue = (invoice.remise_pct || 0) / 100 * subtotal;
@@ -2496,7 +2493,6 @@ app.get('/api/proforma/:id/pdf', authenticate, async (req, res) => {
         doc.text('NET À PAYER', 360, totalY + 8);
         doc.text(`${formatPDFNumber(total)} ${company.currency}`, 450, totalY + 8, { width: 80, align: 'right' });
 
-        // Pied
         doc.rect(50, 750, 500, 25).fill('#f0f4f8');
         doc.fillColor('#7a8a9a').fontSize(8).font('Helvetica');
         doc.text('Document non contractuel - Devis valant accord', 50, 758, { align: 'center' });
@@ -2505,19 +2501,6 @@ app.get('/api/proforma/:id/pdf', authenticate, async (req, res) => {
     } catch (err) {
         console.error('Erreur génération proforma:', err);
         res.status(500).json({ error: 'Erreur génération proforma' });
-    }
-});
-// ========== ROUTE EXPORT ==========
-app.get('/api/export', authenticate, async (req, res) => {
-    try {
-        const [users] = await pool.query('SELECT * FROM users');
-        const [products] = await pool.query('SELECT * FROM products');
-        const [sales] = await pool.query('SELECT * FROM sales');
-        const [clients] = await pool.query('SELECT * FROM clients');
-        const [categories] = await pool.query('SELECT * FROM categories');
-        res.json({ users, products, sales, clients, categories });
-    } catch(err) {
-        res.status(500).json({ error: err.message });
     }
 });
 
@@ -2719,6 +2702,7 @@ app.get('/api/public/settings', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+// ========== ROUTE FACTURE PDF (MODIFIÉE) ==========
 app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
     console.log(`📄 Génération facture #${req.params.id} - Début`);
     
@@ -2766,8 +2750,12 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
 
         // ---- DOCUMENT PDF ----
         const doc = new PDFDocument({ margin: 50, size: 'A4' });
+        
+        // ✅ MODIFICATION : En-têtes pour téléchargement direct
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename=facture_${saleId}.pdf`);
+        res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
+        
         doc.pipe(res);
 
         // ============================================================
@@ -2940,7 +2928,6 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         // ============================================================
         console.log('📄 Génération du pied de page, cachet et signature...');
 
-        // ✅ DÉCLARER footerY ICI (AVANT DE L'UTILISER)
         const footerY = 750;
         const imgWidth = 100;
         const imgHeight = 40;
@@ -2968,7 +2955,6 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
             if (footerY - spaceNeeded < 50) {
                 doc.addPage();
                 const newFooterY = 750;
-                // Pied sur la nouvelle page
                 doc.rect(50, newFooterY, 500, 25).fill('#f0f4f8');
                 doc.fillColor('#7a8a9a').fontSize(8).font('Helvetica');
                 doc.text('Merci de votre confiance • Facture générée par GestPro', 50, newFooterY + 8, { align: 'center' });
@@ -3053,7 +3039,7 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         }
     }
 });
-// ========== ROUTE BON DE COMMANDE ==========
+// ========== ROUTE BON DE COMMANDE (MODIFIÉE) ==========
 app.get('/api/sales/:id/order', authenticate, async (req, res) => {
     try {
         const saleId = req.params.id;
@@ -3063,9 +3049,14 @@ app.get('/api/sales/:id/order', authenticate, async (req, res) => {
         const [items] = await pool.query(`SELECT si.*, p.name as product_name FROM sale_items si JOIN products p ON si.product_id = p.id WHERE si.sale_id = ?`, [saleId]);
         const [settingsRows] = await pool.query('SELECT * FROM settings WHERE user_id = ?', [req.user.id]);
         const company = settingsRows[0] || { company_name: 'Mon Entreprise', currency: 'FCFA' };
+        
         const doc = new PDFDocument({ margin: 50, size: 'A4' });
+        
+        // ✅ MODIFICATION : En-têtes pour téléchargement direct
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename=bon_commande_${saleId}.pdf`);
+        res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
+        
         doc.pipe(res);
         
         let y = await drawCompanyHeader(doc, company);
@@ -3119,8 +3110,7 @@ app.get('/api/sales/:id/order', authenticate, async (req, res) => {
         res.status(500).json({ error: 'Erreur génération bon de commande' });
     }
 });
-
-// ========== ROUTE BORDEREAU DE LIVRAISON ==========
+// ========== ROUTE BORDEREAU DE LIVRAISON (MODIFIÉE) ==========
 app.get('/api/sales/:id/delivery', authenticate, async (req, res) => {
     try {
         const saleId = req.params.id;
@@ -3130,9 +3120,14 @@ app.get('/api/sales/:id/delivery', authenticate, async (req, res) => {
         const [items] = await pool.query(`SELECT si.*, p.name as product_name FROM sale_items si JOIN products p ON si.product_id = p.id WHERE si.sale_id = ?`, [saleId]);
         const [settingsRows] = await pool.query('SELECT * FROM settings WHERE user_id = ?', [req.user.id]);
         const company = settingsRows[0] || { company_name: 'Mon Entreprise', currency: 'FCFA' };
+        
         const doc = new PDFDocument({ margin: 50, size: 'A4' });
+        
+        // ✅ MODIFICATION : En-têtes pour téléchargement direct
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename=bordereau_livraison_${saleId}.pdf`);
+        res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
+        
         doc.pipe(res);
         
         let y = await drawCompanyHeader(doc, company);
