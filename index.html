@@ -709,39 +709,11 @@ function handleNavClick(e) {
     e.currentTarget.classList.add('active');
     loadPage(page);
 }
-// Synchronisation entre appareils (DÉSACTIVÉE)
-let syncChannel = null;
-try {
-    syncChannel = new BroadcastChannel('gestpro-sync');
-    syncChannel.onmessage = function(event) {
-        if (event.data.action === 'refresh') {
-            console.log('📡 Notification reçue - Pas de rechargement automatique');
-            // ❌ DÉSACTIVÉ : Ne recharge pas automatiquement
-            // const currentPage = document.querySelector('.sidebar .nav-link.active')?.dataset?.page || 'dashboard';
-            // loadPage(currentPage);
-        }
-    };
-} catch(e) {}
 function notifyOtherDevices() {
     if (syncChannel) {
         syncChannel.postMessage({ action: 'refresh', timestamp: Date.now() });
     }
 }
-
-// Recharger quand l'utilisateur revient sur l'onglet (OPTIONNEL - DÉSACTIVÉ)
-document.addEventListener('visibilitychange', function() {
-    if (!document.hidden) {
-        console.log('👁️ Onglet visible - Pas de rechargement automatique');
-        // ❌ DÉSACTIVÉ : Ne recharge pas automatiquement
-        // const currentPage = document.querySelector('.sidebar .nav-link.active')?.dataset?.page || 'dashboard';
-        // loadPage(currentPage);
-        
-        // ✅ Optionnel : Rafraîchir uniquement le compteur de commandes
-        if (typeof updatePendingOrdersBadge === 'function') {
-            updatePendingOrdersBadge();
-        }
-    }
-});
 
 function notifyOtherDevices(action = 'refresh', data = {}) {
     if (syncChannel) {
