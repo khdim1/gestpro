@@ -709,33 +709,40 @@ function handleNavClick(e) {
     e.currentTarget.classList.add('active');
     loadPage(page);
 }
-// ===== SYNCHRONISATION ENTRE APPAREILS =====
+// Synchronisation entre appareils (DÉSACTIVÉE)
 let syncChannel = null;
 try {
     syncChannel = new BroadcastChannel('gestpro-sync');
     syncChannel.onmessage = function(event) {
         if (event.data.action === 'refresh') {
-            const currentPage = document.querySelector('.sidebar .nav-link.active')?.dataset?.page || 'dashboard';
-            loadPage(currentPage);
+            console.log('📡 Notification reçue - Pas de rechargement automatique');
+            // ❌ DÉSACTIVÉ : Ne recharge pas automatiquement
+            // const currentPage = document.querySelector('.sidebar .nav-link.active')?.dataset?.page || 'dashboard';
+            // loadPage(currentPage);
         }
     };
 } catch(e) {}
-
 function notifyOtherDevices() {
     if (syncChannel) {
         syncChannel.postMessage({ action: 'refresh', timestamp: Date.now() });
     }
 }
 
-// Recharger quand l'onglet revient
+// Recharger quand l'utilisateur revient sur l'onglet (OPTIONNEL - DÉSACTIVÉ)
 document.addEventListener('visibilitychange', function() {
     if (!document.hidden) {
-        const currentPage = document.querySelector('.sidebar .nav-link.active')?.dataset?.page || 'dashboard';
-        loadPage(currentPage);
+        console.log('👁️ Onglet visible - Pas de rechargement automatique');
+        // ❌ DÉSACTIVÉ : Ne recharge pas automatiquement
+        // const currentPage = document.querySelector('.sidebar .nav-link.active')?.dataset?.page || 'dashboard';
+        // loadPage(currentPage);
+        
+        // ✅ Optionnel : Rafraîchir uniquement le compteur de commandes
+        if (typeof updatePendingOrdersBadge === 'function') {
+            updatePendingOrdersBadge();
+        }
     }
 });
 
-// Fonction pour notifier les autres appareils
 function notifyOtherDevices(action = 'refresh', data = {}) {
     if (syncChannel) {
         syncChannel.postMessage({ 
@@ -747,7 +754,6 @@ function notifyOtherDevices(action = 'refresh', data = {}) {
         console.log('📡 Notification envoyée aux autres appareils');
     }
 }
-
 // ✅ Recharger quand l'utilisateur revient sur l'onglet
 document.addEventListener('visibilitychange', function() {
     if (!document.hidden) {
