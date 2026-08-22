@@ -1193,11 +1193,13 @@ app.get('/api/public/settings', async (req, res) => {
     }
     try {
         const [rows] = await pool.query(
-            'SELECT company_name, company_subtitle, company_activity, company_rc, company_address, company_phone, company_phone2, company_email, logo_url, currency, tax_rate FROM settings WHERE user_id = ?',
+            `SELECT company_name, company_subtitle, company_activity, company_rc, 
+                    company_address, company_phone, company_phone2, company_email, 
+                    logo_url, cachet_url, signature_url, currency, tax_rate 
+             FROM settings WHERE user_id = ?`,
             [parseInt(shop)]
         );
         if (rows.length === 0) {
-            // Valeurs par défaut
             return res.json({
                 company_name: 'Mon Entreprise',
                 company_subtitle: '',
@@ -1207,6 +1209,8 @@ app.get('/api/public/settings', async (req, res) => {
                 company_phone2: '',
                 company_email: '',
                 logo_url: '',
+                cachet_url: '',
+                signature_url: '',
                 currency: 'FCFA',
                 tax_rate: 0
             });
@@ -1635,26 +1639,70 @@ app.put('/api/products/:id', authenticate, async (req, res) => {
         res.status(500).json({ error: 'Erreur serveur: ' + err.message });
     }
 });
-
-// ===== ROUTE DELETE PRODUITS (CORRIGÉE) =====
+// ===== ROUTE DELETE PRODUITS (AVEC SUPPRESSION EN CASCADE) =====
 app.delete('/api/products/:id', authenticate, async (req, res) => {
     const productId = parseInt(req.params.id);
     const userId = req.user.id;
     
-    const [existing] = await pool.query(
-        'SELECT id FROM products WHERE id = ? AND user_id = ?',
-        [productId, userId]
-    );
+    console.log(`🗑️ Suppression du produit ID: ${productId} par utilisateur ${userId}`);
     
-    if (existing.length === 0) {
-        return res.status(404).json({ error: 'Produit non trouvé' });
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+        
+        // Vérifier que le produit existe
+        const [existing] = await connection.query(
+            'SELECT id, name FROM products WHERE id = ? AND user_id = ?',
+            [productId, userId]
+        );
+        
+        if (existing.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({ error: 'Produit non trouvé' });
+        }
+        
+        // ✅ 1. Supprimer les références dans sale_items
+        await connection.query(
+            'DELETE FROM sale_items WHERE product_id = ?',
+            [productId]
+        );
+        
+        // ✅ 2. Supprimer les références dans order_items
+        await connection.query(
+            'DELETE FROM order_items WHERE product_id = ?',
+            [productId]
+        );
+        
+        // ✅ 3. Supprimer les mouvements de stock
+        await connection.query(
+            'DELETE FROM stock_movements WHERE product_id = ?',
+            [productId]
+        );
+        
+        // ✅ 4. Maintenant supprimer le produit
+        await connection.query(
+            'DELETE FROM products WHERE id = ? AND user_id = ?',
+            [productId, userId]
+        );
+        
+        await connection.commit();
+        console.log(`✅ Produit ${productId} (${existing[0].name}) supprimé avec ses dépendances`);
+        res.json({ 
+            message: 'Produit supprimé avec succès',
+            product_name: existing[0].name
+        });
+        
+    } catch (err) {
+        await connection.rollback();
+        console.error('❌ Erreur suppression produit:', err);
+        res.status(500).json({ 
+            error: 'Erreur lors de la suppression du produit',
+            details: err.message 
+        });
+    } finally {
+        connection.release();
     }
-    
-    await pool.query('DELETE FROM products WHERE id = ? AND user_id = ?', [productId, userId]);
-    res.json({ message: 'Produit supprimé' });
 });
-
-
 app.get('/api/products/barcode/:code', authenticate, async (req, res) => {
     const [rows] = await pool.query('SELECT * FROM products WHERE user_id=? AND barcode=?', [req.user.id, req.params.code]);
     if (rows.length === 0) return res.status(404).json({ error: 'Produit non trouvé' });
@@ -2210,25 +2258,27 @@ app.put('/api/sales/:id/items', authenticate, async (req, res) => {
     }
 });
 // ========== ROUTES PARAMÈTRES (CORRIGÉ DÉFINITIF) ==========
-
-// ✅ PUT : Mettre à jour les paramètres - PERMET 0%
 app.put('/api/settings', authenticate, async (req, res) => {
     const {
         company_name, company_subtitle, company_activity, company_rc,
         company_address, company_phone, company_phone2, company_email,
-        logo_url, tax_rate, low_stock_alert, currency
+        logo_url, cachet_url, signature_url, tax_rate, low_stock_alert, currency
     } = req.body;
 
-    // ✅ Gestion du taux de TVA - Permet 0
+    console.log('📥 PUT /settings reçu:', {
+        company_name,
+        cachet_url: cachet_url ? '✅ Présent (longueur: ' + cachet_url.length + ')' : '❌ Vide',
+        signature_url: signature_url ? '✅ Présent (longueur: ' + signature_url.length + ')' : '❌ Vide'
+    });
+
     let taxRateToSave;
     if (tax_rate === undefined || tax_rate === null || tax_rate === '') {
-        taxRateToSave = 0; // ✅ Changé de 20 à 0 par défaut
+        taxRateToSave = 0;
     } else {
         taxRateToSave = parseFloat(tax_rate);
         if (isNaN(taxRateToSave)) {
             return res.status(400).json({ error: 'Le taux de TVA doit être un nombre valide.' });
         }
-        // ✅ On conserve 0 si c'est 0
     }
 
     try {
@@ -2236,18 +2286,20 @@ app.put('/api/settings', authenticate, async (req, res) => {
             `UPDATE settings SET 
                 company_name = ?, company_subtitle = ?, company_activity = ?, company_rc = ?, 
                 company_address = ?, company_phone = ?, company_phone2 = ?, company_email = ?, 
-                logo_url = ?, tax_rate = ?, low_stock_alert = ?, currency = ? 
+                logo_url = ?, cachet_url = ?, signature_url = ?,
+                tax_rate = ?, low_stock_alert = ?, currency = ? 
              WHERE user_id = ?`,
             [
                 company_name, company_subtitle, company_activity, company_rc,
                 company_address, company_phone, company_phone2, company_email,
-                logo_url, taxRateToSave,
+                logo_url, cachet_url || null, signature_url || null,
+                taxRateToSave,
                 parseInt(low_stock_alert) || 5,
                 currency || 'FCFA',
                 req.user.id
             ]
         );
-        console.log(`✅ Taux de TVA mis à jour : ${taxRateToSave}%`);
+        console.log(`✅ Paramètres mis à jour (TVA: ${taxRateToSave}%)`);
         res.json({ message: 'Paramètres mis à jour avec succès' });
     } catch (err) {
         console.error('❌ Erreur PUT /settings:', err);
@@ -2552,16 +2604,140 @@ async function drawCompanyHeader(doc, company, startY = 45) {
     
     return startY + headerHeight + 20;
 }
+app.get('/api/settings', authenticate, async (req, res) => {
+    try {
+        let [rows] = await pool.query('SELECT * FROM settings WHERE user_id=?', [req.user.id]);
+
+        if (rows.length === 0) {
+            await pool.query(
+                `INSERT INTO settings (user_id, company_name, company_subtitle, company_activity, company_rc, company_address, company_phone, company_phone2, company_email, logo_url, cachet_url, signature_url, tax_rate, low_stock_alert, currency) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [req.user.id, 'Mon Entreprise', '', '', '', '', '', '', '', '', '', '', 0, 5, 'FCFA']
+            );
+            [rows] = await pool.query('SELECT * FROM settings WHERE user_id=?', [req.user.id]);
+        }
+
+        const settings = rows[0] || {};
+        res.json({
+            company_name: settings.company_name || 'Mon Entreprise',
+            company_subtitle: settings.company_subtitle || '',
+            company_activity: settings.company_activity || '',
+            company_rc: settings.company_rc || '',
+            company_address: settings.company_address || '',
+            company_phone: settings.company_phone || '',
+            company_phone2: settings.company_phone2 || '',
+            company_email: settings.company_email || '',
+            logo_url: settings.logo_url || '',
+            cachet_url: settings.cachet_url || '',
+            signature_url: settings.signature_url || '',
+            tax_rate: settings.tax_rate !== null && settings.tax_rate !== undefined 
+                ? parseFloat(settings.tax_rate) 
+                : 0, 
+            low_stock_alert: parseInt(settings.low_stock_alert) || 5,
+            currency: settings.currency || 'FCFA'
+        });
+    } catch (err) {
+        console.error('❌ Erreur GET /settings:', err);
+        res.status(500).json({ error: 'Erreur lors du chargement des paramètres.' });
+    }
+});
+app.put('/api/settings', authenticate, async (req, res) => {
+    const {
+        company_name, company_subtitle, company_activity, company_rc,
+        company_address, company_phone, company_phone2, company_email,
+        logo_url, cachet_url, signature_url, tax_rate, low_stock_alert, currency
+    } = req.body;
+
+    // ✅ Gestion du taux de TVA
+    let taxRateToSave;
+    if (tax_rate === undefined || tax_rate === null || tax_rate === '') {
+        taxRateToSave = 0;
+    } else {
+        taxRateToSave = parseFloat(tax_rate);
+        if (isNaN(taxRateToSave)) {
+            return res.status(400).json({ error: 'Le taux de TVA doit être un nombre valide.' });
+        }
+    }
+
+    try {
+        await pool.query(
+            `UPDATE settings SET 
+                company_name = ?, company_subtitle = ?, company_activity = ?, company_rc = ?, 
+                company_address = ?, company_phone = ?, company_phone2 = ?, company_email = ?, 
+                logo_url = ?, cachet_url = ?, signature_url = ?,
+                tax_rate = ?, low_stock_alert = ?, currency = ? 
+             WHERE user_id = ?`,
+            [
+                company_name, company_subtitle, company_activity, company_rc,
+                company_address, company_phone, company_phone2, company_email,
+                logo_url, cachet_url || null, signature_url || null,
+                taxRateToSave,
+                parseInt(low_stock_alert) || 5,
+                currency || 'FCFA',
+                req.user.id
+            ]
+        );
+        console.log(`✅ Paramètres mis à jour (TVA: ${taxRateToSave}%)`);
+        res.json({ message: 'Paramètres mis à jour avec succès' });
+    } catch (err) {
+        console.error('❌ Erreur PUT /settings:', err);
+        res.status(500).json({ error: 'Erreur lors de la mise à jour des paramètres.' });
+    }
+});
+app.get('/api/public/settings', async (req, res) => {
+    const { shop } = req.query;
+    if (!shop || isNaN(shop)) {
+        return res.status(400).json({ error: 'Paramètre shop invalide' });
+    }
+    try {
+        const [rows] = await pool.query(
+            `SELECT company_name, company_subtitle, company_activity, company_rc, 
+                    company_address, company_phone, company_phone2, company_email, 
+                    logo_url, cachet_url, signature_url, currency, tax_rate 
+             FROM settings WHERE user_id = ?`,
+            [parseInt(shop)]
+        );
+        if (rows.length === 0) {
+            return res.json({
+                company_name: 'Mon Entreprise',
+                company_subtitle: '',
+                company_activity: '',
+                company_address: '',
+                company_phone: '',
+                company_phone2: '',
+                company_email: '',
+                logo_url: '',
+                cachet_url: '',
+                signature_url: '',
+                currency: 'FCFA',
+                tax_rate: 0
+            });
+        }
+        res.json(rows[0]);
+    } catch (err) {
+        console.error('Erreur GET /api/public/settings:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
 app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
+    console.log(`📄 Génération facture #${req.params.id} - Début`);
+    
     try {
         const saleId = req.params.id;
+        console.log(`📄 Récupération des données de la vente...`);
+        
         const [saleRows] = await pool.query(`
             SELECT s.*, c.name as client_name, c.email as client_email, c.address as client_address 
             FROM sales s 
             LEFT JOIN clients c ON s.client_id = c.id 
             WHERE s.id = ? AND s.user_id = ?
         `, [saleId, req.user.id]);
-        if (saleRows.length === 0) return res.status(404).json({ error: 'Vente non trouvée' });
+        
+        if (saleRows.length === 0) {
+            console.log(`❌ Vente #${saleId} non trouvée`);
+            return res.status(404).json({ error: 'Vente non trouvée' });
+        }
+        console.log(`✅ Vente #${saleId} trouvée`);
         const sale = saleRows[0];
 
         const [items] = await pool.query(`
@@ -2570,19 +2746,25 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
             JOIN products p ON si.product_id = p.id 
             WHERE si.sale_id = ?
         `, [saleId]);
+        console.log(`📦 ${items.length} articles récupérés`);
 
         const [settingsRows] = await pool.query('SELECT * FROM settings WHERE user_id = ?', [req.user.id]);
         const company = settingsRows[0] || { company_name: 'Mon Entreprise', currency: 'FCFA' };
-        const taxRate = sale.tax_rate !== null ? parseFloat(sale.tax_rate) : parseFloat(company.tax_rate || 0);
 
-        // QR code
+        const taxRate = sale.tax_rate !== null && sale.tax_rate !== undefined 
+            ? parseFloat(sale.tax_rate) 
+            : parseFloat(company.tax_rate || 0);
+
+        // ---- QR code ----
         const shopId = req.user.id;
         const storeUrl = `${req.protocol}://${req.get('host')}/store?shop=${shopId}`;
         let qrBuffer = null;
         try {
             qrBuffer = await QRCode.toBuffer(storeUrl, { width: 120, margin: 1 });
+            console.log('✅ QR code généré');
         } catch (e) { console.error('QR error:', e); }
 
+        // ---- DOCUMENT PDF ----
         const doc = new PDFDocument({ margin: 50, size: 'A4' });
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename=facture_${saleId}.pdf`);
@@ -2591,7 +2773,9 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         // ============================================================
         // 1. EN-TÊTE (Société)
         // ============================================================
+        console.log('📄 Génération de l\'en-tête...');
         let y = await drawCompanyHeader(doc, company);
+
         doc.fillColor('#2c6e9e').fontSize(18).font('Helvetica-Bold')
            .text(`FACTURE N° ${String(saleId).padStart(5, '0')}`, 50, y, { align: 'center' });
         y += 30;
@@ -2599,20 +2783,30 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         // ============================================================
         // 2. BLOC CLIENT / DÉTAILS
         // ============================================================
+        console.log('📄 Génération du bloc client...');
         doc.rect(50, y, 500, 70).fill('#f5f7fa').stroke('#e0e4e8', 0.5);
         doc.fillColor('#1a2a3a').fontSize(10).font('Helvetica-Bold')
            .text('CLIENT', 60, y + 8);
         doc.fillColor('#3a4a5a').fontSize(11).font('Helvetica')
            .text(sale.client_name || 'Client particulier', 60, y + 25);
-        if (sale.client_address) doc.fontSize(9).font('Helvetica').text(sale.client_address, 60, y + 42);
-        if (sale.client_email) doc.fontSize(9).font('Helvetica').text(sale.client_email, 60, y + 58);
+        if (sale.client_address) {
+            doc.fontSize(9).font('Helvetica').text(sale.client_address, 60, y + 42);
+        }
+        if (sale.client_email) {
+            doc.fontSize(9).font('Helvetica').text(sale.client_email, 60, y + 58);
+        }
 
         const rightX = 350;
         doc.fillColor('#1a2a3a').fontSize(10).font('Helvetica-Bold')
            .text('DÉTAILS FACTURE', rightX, y + 8);
         doc.fillColor('#3a4a5a').fontSize(10).font('Helvetica')
            .text(`Date : ${new Date(sale.sale_date).toLocaleDateString('fr-FR')}`, rightX, y + 25);
-        const statusMap = { completed: { label: 'PAYÉE', color: '#27ae60' }, pending: { label: 'EN ATTENTE', color: '#f39c12' }, cancelled: { label: 'ANNULÉE', color: '#e74c3c' } };
+
+        const statusMap = {
+            'completed': { label: 'PAYÉE', color: '#27ae60' },
+            'pending': { label: 'EN ATTENTE', color: '#f39c12' },
+            'cancelled': { label: 'ANNULÉE', color: '#e74c3c' }
+        };
         const statusInfo = statusMap[sale.status] || { label: 'INCONNU', color: '#95a5a6' };
         doc.rect(400, y + 42, 90, 20).fill(statusInfo.color);
         doc.fillColor('#ffffff').fontSize(8).font('Helvetica-Bold')
@@ -2622,6 +2816,7 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         // ============================================================
         // 3. TABLEAU DES PRODUITS
         // ============================================================
+        console.log('📄 Génération du tableau des produits...');
         const colX = {
             product: 55,
             qty: 270,
@@ -2631,7 +2826,6 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         const widthQty = 50;
         const widthPrice = 80;
         const widthTotal = 90;
-
         const rowH = 20;
         const headerH = 22;
 
@@ -2682,6 +2876,7 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         // ============================================================
         // 4. RÉSUMÉ
         // ============================================================
+        console.log('📄 Génération du résumé...');
         const summaryX = 360;
         const taxAmount = sale.tax || 0;
         const remiseValue = (sale.remise_pct || 0) / 100 * subtotal;
@@ -2690,9 +2885,15 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
 
         const summaryLines = [];
         summaryLines.push({ label: 'Sous-total', value: formatPDFNumber(subtotal) });
-        if (taxRate > 0) summaryLines.push({ label: `TVA (${taxRate}%)`, value: formatPDFNumber(taxAmount) });
-        if (sale.remise_pct && sale.remise_pct > 0) summaryLines.push({ label: `Remise (${sale.remise_pct}%)`, value: `- ${formatPDFNumber(remiseValue)}` });
-        if (acompteValue > 0) summaryLines.push({ label: 'Acompte', value: `- ${formatPDFNumber(acompteValue)}` });
+        if (taxRate > 0) {
+            summaryLines.push({ label: `TVA (${taxRate}%)`, value: formatPDFNumber(taxAmount) });
+        }
+        if (sale.remise_pct && sale.remise_pct > 0) {
+            summaryLines.push({ label: `Remise (${sale.remise_pct}%)`, value: `- ${formatPDFNumber(remiseValue)}` });
+        }
+        if (acompteValue > 0) {
+            summaryLines.push({ label: 'Acompte', value: `- ${formatPDFNumber(acompteValue)}` });
+        }
 
         summaryLines.forEach((line, idx) => {
             const yPos = currentY + idx * 18;
@@ -2703,18 +2904,19 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         currentY += summaryLines.length * 18 + 8;
 
         // ============================================================
-        // 5. NET À PAYER (montant + devise sur la même ligne)
+        // 5. NET À PAYER
         // ============================================================
+        console.log('📄 Génération du NET À PAYER...');
         doc.rect(350, currentY, 200, 28).fill('#2c6e9e');
         doc.fillColor('#ffffff').fontSize(11).font('Helvetica-Bold');
         doc.text('NET À PAYER', 360, currentY + 8);
-        // Largeur augmentée à 110 pour que le montant + devise tiennent sur une ligne
         doc.text(`${formatPDFNumber(finalAmount)} ${company.currency}`, 440, currentY + 8, { width: 110, align: 'right' });
         currentY += 35;
 
         // ============================================================
         // 6. QR CODE
         // ============================================================
+        console.log('📄 Génération du QR code...');
         if (qrBuffer) {
             const qrSize = 60;
             const qrX = 500 - qrSize - 15;
@@ -2734,18 +2936,121 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         }
 
         // ============================================================
-        // 7. PIED DE PAGE
+        // 7. PIED DE PAGE + CACHET + SIGNATURE
         // ============================================================
+        console.log('📄 Génération du pied de page, cachet et signature...');
+
+        // ✅ DÉCLARER footerY ICI (AVANT DE L'UTILISER)
         const footerY = 750;
+        const imgWidth = 100;
+        const imgHeight = 40;
+        const marginLeft = 50;
+        const pageWidth = 500;
+
+        // --- Pied de page ---
         doc.rect(50, footerY, 500, 25).fill('#f0f4f8');
         doc.fillColor('#7a8a9a').fontSize(8).font('Helvetica');
         doc.text('Merci de votre confiance • Facture générée par GestPro', 50, footerY + 8, { align: 'center' });
 
+        // --- Cachet et signature ---
+        const [userSettings] = await pool.query(
+            'SELECT cachet_url, signature_url FROM settings WHERE user_id = ?',
+            [req.user.id]
+        );
+        const userCachet = userSettings[0]?.cachet_url || null;
+        const userSignature = userSettings[0]?.signature_url || null;
+
+        const hasCachet = userCachet && userCachet.trim() !== '';
+        const hasSignature = userSignature && userSignature.trim() !== '';
+
+        if (hasCachet || hasSignature) {
+            const spaceNeeded = imgHeight + 30;
+            if (footerY - spaceNeeded < 50) {
+                doc.addPage();
+                const newFooterY = 750;
+                // Pied sur la nouvelle page
+                doc.rect(50, newFooterY, 500, 25).fill('#f0f4f8');
+                doc.fillColor('#7a8a9a').fontSize(8).font('Helvetica');
+                doc.text('Merci de votre confiance • Facture générée par GestPro', 50, newFooterY + 8, { align: 'center' });
+                
+                if (hasCachet) {
+                    try {
+                        let imageBuffer;
+                        if (userCachet.startsWith('data:image')) {
+                            const base64Data = userCachet.replace(/^data:image\/\w+;base64,/, '');
+                            imageBuffer = Buffer.from(base64Data, 'base64');
+                        } else {
+                            imageBuffer = await fetchImage(userCachet);
+                        }
+                        doc.image(imageBuffer, 50, newFooterY - imgHeight - 8, { width: imgWidth, height: imgHeight });
+                        doc.fillColor('#7a8a9a').fontSize(6).font('Helvetica')
+                           .text('Cachet', 50, newFooterY - 3, { width: imgWidth, align: 'center' });
+                    } catch (e) {
+                        console.log('⚠️ Erreur chargement cachet:', e.message);
+                    }
+                }
+                if (hasSignature) {
+                    try {
+                        const sigX = 500 - imgWidth;
+                        let imageBuffer;
+                        if (userSignature.startsWith('data:image')) {
+                            const base64Data = userSignature.replace(/^data:image\/\w+;base64,/, '');
+                            imageBuffer = Buffer.from(base64Data, 'base64');
+                        } else {
+                            imageBuffer = await fetchImage(userSignature);
+                        }
+                        doc.image(imageBuffer, sigX, newFooterY - imgHeight - 8, { width: imgWidth, height: imgHeight });
+                        doc.fillColor('#7a8a9a').fontSize(6).font('Helvetica')
+                           .text('Signature', sigX, newFooterY - 3, { width: imgWidth, align: 'center' });
+                    } catch (e) {
+                        console.log('⚠️ Erreur chargement signature:', e.message);
+                    }
+                }
+            } else {
+                if (hasCachet) {
+                    try {
+                        let imageBuffer;
+                        if (userCachet.startsWith('data:image')) {
+                            const base64Data = userCachet.replace(/^data:image\/\w+;base64,/, '');
+                            imageBuffer = Buffer.from(base64Data, 'base64');
+                        } else {
+                            imageBuffer = await fetchImage(userCachet);
+                        }
+                        doc.image(imageBuffer, marginLeft, footerY - imgHeight - 8, { width: imgWidth, height: imgHeight });
+                        doc.fillColor('#7a8a9a').fontSize(6).font('Helvetica')
+                           .text('Cachet', marginLeft, footerY - 3, { width: imgWidth, align: 'center' });
+                    } catch (e) {
+                        console.log('⚠️ Erreur chargement cachet:', e.message);
+                    }
+                }
+                if (hasSignature) {
+                    try {
+                        const sigX = pageWidth + marginLeft - imgWidth;
+                        let imageBuffer;
+                        if (userSignature.startsWith('data:image')) {
+                            const base64Data = userSignature.replace(/^data:image\/\w+;base64,/, '');
+                            imageBuffer = Buffer.from(base64Data, 'base64');
+                        } else {
+                            imageBuffer = await fetchImage(userSignature);
+                        }
+                        doc.image(imageBuffer, sigX, footerY - imgHeight - 8, { width: imgWidth, height: imgHeight });
+                        doc.fillColor('#7a8a9a').fontSize(6).font('Helvetica')
+                           .text('Signature', sigX, footerY - 3, { width: imgWidth, align: 'center' });
+                    } catch (e) {
+                        console.log('⚠️ Erreur chargement signature:', e.message);
+                    }
+                }
+            }
+        }
+
+        console.log(`✅ Facture #${saleId} générée avec succès`);
         doc.end();
 
     } catch (err) {
-        console.error('Erreur génération facture:', err);
-        res.status(500).json({ error: 'Erreur génération facture' });
+        console.error(`❌ Erreur facture #${req.params.id}:`, err);
+        if (!res.headersSent) {
+            res.status(500).json({ error: 'Erreur génération facture' });
+        }
     }
 });
 // ========== ROUTE BON DE COMMANDE ==========
@@ -3612,6 +3917,22 @@ app.get('/api/public/shop-id-from-slug', async (req, res) => {
     // Logique pour trouver l'ID à partir du slug
     // ...
     res.json({ shopId: foundId });
+});
+// ===== GESTION DES ERREURS =====
+app.use((err, req, res, next) => {
+    console.error('❌ Erreur serveur:', err);
+    if (!res.headersSent) {
+        res.status(500).json({ error: err.message || 'Erreur interne du serveur' });
+    }
+});
+
+// ===== ROUTE 404 =====
+app.use((req, res) => {
+    if (req.path.startsWith('/api')) {
+        res.status(404).json({ error: 'Route API non trouvée' });
+    } else {
+        res.sendFile(path.join(__dirname, 'index.html'));
+    }
 });
 app.use((req, res, next) => {
     if (req.path.startsWith('/api')) return next();

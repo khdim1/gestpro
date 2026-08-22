@@ -2027,7 +2027,6 @@ window.editProduct = async function(id) {
         console.error(e);
     }
 };
-// ===== SUPPRIMER PRODUIT =====
 window.deleteProduct = async (id) => {
     const numericId = parseInt(id);
     if (isNaN(numericId)) {
@@ -2035,7 +2034,6 @@ window.deleteProduct = async (id) => {
         return;
     }
     
-    // ✅ Vérifier d'abord que le produit existe
     try {
         const products = await apiCall('/products?_t=' + Date.now());
         const product = products.find(p => parseInt(p.id) === numericId);
@@ -2047,16 +2045,17 @@ window.deleteProduct = async (id) => {
         
         if (!confirm(`Supprimer définitivement "${product.name}" ?`)) return;
         
+        // ✅ Appel API avec la bonne méthode
         await apiCall(`/products/${numericId}`, 'DELETE');
         alert('✅ Produit supprimé');
         searchProducts();
         renderDashboard();
     } catch(err) {
         alert('❌ Erreur: ' + err.message);
+        console.error(err);
     }
 };
-
-        const saveBtn = document.getElementById('saveProductBtn');
+      const saveBtn = document.getElementById('saveProductBtn');
         if(saveBtn) {
             const newBtn = saveBtn.cloneNode(true);
             saveBtn.parentNode.replaceChild(newBtn, saveBtn);
@@ -3564,77 +3563,216 @@ async function renderReports() {
         options: { responsive: true, plugins: { legend: { display: false } } }
     });
 }
-
-// ===== PARAMÈTRES AVEC CORRECTION TVA =====
 async function renderSettings() {
     try {
         const settings = await apiCall('/settings');
+        
+        // ✅ LOG POUR VÉRIFIER CE QUI EST RÉCUPÉRÉ
+        console.log('📥 Paramètres chargés:', settings);
+        console.log('🖨️ Cachet URL:', settings.cachet_url);
+        console.log('✍️ Signature URL:', settings.signature_url);
+        
         const html = `
             <div class="card-modern">
                 <h5><i class="bi bi-gear me-2"></i>Paramètres société</h5>
                 <div class="row g-3">
-                    <div class="col-md-6"><label class="form-label">Nom entreprise</label><input id="companyName" class="form-control" value="${settings.company_name || ''}"></div>
-                    <div class="col-md-6"><label class="form-label">Sous-titre</label><input id="companySubtitle" class="form-control" value="${settings.company_subtitle || ''}"></div>
-                    <div class="col-12"><label class="form-label">Activité</label><textarea id="companyActivity" class="form-control" rows="2">${settings.company_activity || ''}</textarea></div>
-                    <div class="col-md-6"><label class="form-label">Numéro RC</label><input id="companyRc" class="form-control" value="${settings.company_rc || ''}"></div>
-                    <div class="col-md-6"><label class="form-label">Adresse</label><input id="companyAddress" class="form-control" value="${settings.company_address || ''}"></div>
-                    <div class="col-md-4"><label class="form-label">Téléphone principal</label><input id="companyPhone" class="form-control" value="${settings.company_phone || ''}"></div>
-                    <div class="col-md-4"><label class="form-label">Téléphone secondaire</label><input id="companyPhone2" class="form-control" value="${settings.company_phone2 || ''}"></div>
-                    <div class="col-md-4"><label class="form-label">Email</label><input id="companyEmail" class="form-control" value="${settings.company_email || ''}"></div>
-                    <div class="col-md-6"><label class="form-label">URL du logo</label><input id="logoUrl" class="form-control" value="${settings.logo_url || ''}" placeholder="https://exemple.com/logo.png"></div>
-                    <div class="col-md-3"><label class="form-label">Taux TVA (%)</label><input id="taxRate" class="form-control" value="${settings.tax_rate || 20}"></div>
-                    <div class="col-md-3"><label class="form-label">Seuil stock bas</label><input id="lowStockAlert" class="form-control" value="${settings.low_stock_alert || 5}"></div>
-                    <div class="col-md-3"><label class="form-label">Devise</label><input id="currency" class="form-control" value="${settings.currency || 'FCFA'}"></div>
-                    <div class="col-12"><button class="btn btn-primary" id="saveSettingsBtn"><i class="bi bi-save me-1"></i>Enregistrer</button></div>
+                    <div class="col-md-6">
+                        <label class="form-label">Nom entreprise</label>
+                        <input id="companyName" class="form-control" value="${settings.company_name || ''}">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Sous-titre</label>
+                        <input id="companySubtitle" class="form-control" value="${settings.company_subtitle || ''}">
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Activité</label>
+                        <textarea id="companyActivity" class="form-control" rows="2">${settings.company_activity || ''}</textarea>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Numéro RC</label>
+                        <input id="companyRc" class="form-control" value="${settings.company_rc || ''}">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Adresse</label>
+                        <input id="companyAddress" class="form-control" value="${settings.company_address || ''}">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Téléphone principal</label>
+                        <input id="companyPhone" class="form-control" value="${settings.company_phone || ''}">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Téléphone secondaire</label>
+                        <input id="companyPhone2" class="form-control" value="${settings.company_phone2 || ''}">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Email</label>
+                        <input id="companyEmail" class="form-control" value="${settings.company_email || ''}">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">URL du logo</label>
+                        <input id="logoUrl" class="form-control" value="${settings.logo_url || ''}" placeholder="https://exemple.com/logo.png">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Taux TVA (%)</label>
+                        <input id="taxRate" class="form-control" value="${settings.tax_rate !== undefined && settings.tax_rate !== null ? settings.tax_rate : 0}">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Seuil stock bas</label>
+                        <input id="lowStockAlert" class="form-control" value="${settings.low_stock_alert || 5}">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Devise</label>
+                        <input id="currency" class="form-control" value="${settings.currency || 'FCFA'}">
+                    </div>
+                    
+                    <!-- ⬇️ CACHET ET SIGNATURE ⬇️ -->
+                    <div class="col-md-6">
+                        <label class="form-label">🖨️ Cachet de l'entreprise</label>
+                        <input type="file" id="cachetFile" class="form-control" accept="image/png,image/jpeg" onchange="previewCachet(event)">
+                        <div id="cachetPreviewContainer" class="mt-2" style="${settings.cachet_url ? 'display:block;' : 'display:none;'}">
+                            <img id="cachetPreview" src="${settings.cachet_url || ''}" alt="Cachet" style="max-width:150px; max-height:80px; border:1px solid #ddd; padding:4px; border-radius:8px;">
+                            <button class="btn btn-sm btn-danger ms-2" onclick="removeCachet()"><i class="bi bi-x"></i></button>
+                        </div>
+                        <input type="hidden" id="cachetUrl" value="${settings.cachet_url || ''}">
+                        <small class="text-muted">Format PNG recommandé, fond transparent</small>
+                    </div>
+                    
+                    <div class="col-md-6">
+                        <label class="form-label">✍️ Signature</label>
+                        <input type="file" id="signatureFile" class="form-control" accept="image/png,image/jpeg" onchange="previewSignature(event)">
+                        <div id="signaturePreviewContainer" class="mt-2" style="${settings.signature_url ? 'display:block;' : 'display:none;'}">
+                            <img id="signaturePreview" src="${settings.signature_url || ''}" alt="Signature" style="max-width:150px; max-height:80px; border:1px solid #ddd; padding:4px; border-radius:8px;">
+                            <button class="btn btn-sm btn-danger ms-2" onclick="removeSignature()"><i class="bi bi-x"></i></button>
+                        </div>
+                        <input type="hidden" id="signatureUrl" value="${settings.signature_url || ''}">
+                        <small class="text-muted">Format PNG recommandé, fond transparent</small>
+                    </div>
+                    
+                    <div class="col-12">
+                        <button class="btn btn-primary" id="saveSettingsBtn"><i class="bi bi-save me-1"></i>Enregistrer</button>
+                    </div>
                 </div>
             </div>
         `;
         document.getElementById('pageContainer').innerHTML = html;
         
-   window.saveSettings = async function() {
-    try {
-        const getVal = (id) => {
-            const el = document.getElementById(id);
-            return el ? el.value : '';
+        // ===== FONCTIONS DE PRÉVISUALISATION (CORRIGÉES) =====
+        window.previewCachet = function(event) {
+            const file = event.target.files[0];
+            if (file) {
+                if (file.size > 2 * 1024 * 1024) {
+                    alert('❌ L\'image est trop volumineuse (max 2MB)');
+                    event.target.value = '';
+                    return;
+                }
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const dataUrl = e.target.result;
+                    document.getElementById('cachetPreview').src = dataUrl;
+                    document.getElementById('cachetPreviewContainer').style.display = 'block';
+                    document.getElementById('cachetUrl').value = dataUrl;
+                    console.log('✅ Cachet chargé, longueur:', dataUrl.length);
+                };
+                reader.readAsDataURL(file);
+            }
         };
-
-        const taxRateValue = getVal('taxRate');
-        // ✅ Si vide, on met 20, sinon on garde la valeur (y compris 0)
-        const taxRate = taxRateValue === '' ? 20 : parseFloat(taxRateValue);
         
-        const data = {
-            company_name: getVal('companyName'),
-            company_subtitle: getVal('companySubtitle'),
-            company_activity: getVal('companyActivity'),
-            company_rc: getVal('companyRc'),
-            company_address: getVal('companyAddress'),
-            company_phone: getVal('companyPhone'),
-            company_phone2: getVal('companyPhone2'),
-            company_email: getVal('companyEmail'),
-            logo_url: getVal('logoUrl'),
-            tax_rate: taxRate, // ✅ Envoyer la valeur exacte
-            low_stock_alert: parseInt(getVal('lowStockAlert')) || 5,
-            currency: getVal('currency') || 'FCFA'
+        window.previewSignature = function(event) {
+            const file = event.target.files[0];
+            if (file) {
+                if (file.size > 2 * 1024 * 1024) {
+                    alert('❌ L\'image est trop volumineuse (max 2MB)');
+                    event.target.value = '';
+                    return;
+                }
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const dataUrl = e.target.result;
+                    document.getElementById('signaturePreview').src = dataUrl;
+                    document.getElementById('signaturePreviewContainer').style.display = 'block';
+                    document.getElementById('signatureUrl').value = dataUrl;
+                    console.log('✅ Signature chargée, longueur:', dataUrl.length);
+                };
+                reader.readAsDataURL(file);
+            }
         };
-        await apiCall('/settings', 'PUT', data);
-        alert('✅ Paramètres mis à jour');
-        renderSettings();
-    } catch(err) {
-        alert('❌ Erreur : ' + err.message);
-    }
-};   
+        
+        window.removeCachet = function() {
+            document.getElementById('cachetPreview').src = '';
+            document.getElementById('cachetPreviewContainer').style.display = 'none';
+            document.getElementById('cachetUrl').value = '';
+            document.getElementById('cachetFile').value = '';
+        };
+        
+        window.removeSignature = function() {
+            document.getElementById('signaturePreview').src = '';
+            document.getElementById('signaturePreviewContainer').style.display = 'none';
+            document.getElementById('signatureUrl').value = '';
+            document.getElementById('signatureFile').value = '';
+        };
+        
+        // ===== SAUVEGARDE DES PARAMÈTRES (CORRIGÉE) =====
+        window.saveSettings = async function() {
+            try {
+                const getVal = (id) => {
+                    const el = document.getElementById(id);
+                    return el ? el.value : '';
+                };
+
+                const taxRateValue = getVal('taxRate');
+                const taxRate = taxRateValue === '' ? 0 : parseFloat(taxRateValue);
+                
+                // ✅ Récupérer les valeurs des champs cachés
+                const cachetUrlValue = getVal('cachetUrl');
+                const signatureUrlValue = getVal('signatureUrl');
+                
+                console.log('📤 Cachet URL à sauvegarder:', cachetUrlValue ? '✅ Présent' : '❌ Vide');
+                console.log('📤 Signature URL à sauvegarder:', signatureUrlValue ? '✅ Présent' : '❌ Vide');
+                
+                const data = {
+                    company_name: getVal('companyName'),
+                    company_subtitle: getVal('companySubtitle'),
+                    company_activity: getVal('companyActivity'),
+                    company_rc: getVal('companyRc'),
+                    company_address: getVal('companyAddress'),
+                    company_phone: getVal('companyPhone'),
+                    company_phone2: getVal('companyPhone2'),
+                    company_email: getVal('companyEmail'),
+                    logo_url: getVal('logoUrl'),
+                    cachet_url: cachetUrlValue,
+                    signature_url: signatureUrlValue,
+                    tax_rate: taxRate,
+                    low_stock_alert: parseInt(getVal('lowStockAlert')) || 5,
+                    currency: getVal('currency') || 'FCFA'
+                };
+                
+                console.log('📤 Données complètes envoyées:', data);
+                
+                const result = await apiCall('/settings', 'PUT', data);
+                console.log('✅ Réponse du serveur:', result);
+                
+                alert('✅ Paramètres mis à jour avec succès');
+                renderSettings(); // Recharger la page pour afficher les images
+            } catch(err) {
+                alert('❌ Erreur : ' + err.message);
+                console.error('❌ Erreur détaillée:', err);
+            }
+        };
+        
+        // Attacher l'événement au bouton
         const saveBtn = document.getElementById('saveSettingsBtn');
         if (saveBtn) {
+            // Supprimer les anciens événements
             const newBtn = saveBtn.cloneNode(true);
             saveBtn.parentNode.replaceChild(newBtn, saveBtn);
             newBtn.addEventListener('click', window.saveSettings);
         }
+        
     } catch(err) {
         console.error('Erreur renderSettings:', err);
         document.getElementById('pageContainer').innerHTML = `<div class="alert alert-danger">Erreur chargement paramètres : ${err.message}</div>`;
     }
 }
-
 async function renderHistory() {
     const history = await apiCall('/history');
     const html = `<div class="table-wrapper"><table class="table"><thead><tr><th>Type</th><th>Référence</th><th>Montant</th><th>Date</th></tr></thead><tbody>${history.map(h=>`<tr><td><span class="badge ${h.type==='sale'?'badge-success':'badge-info'}">${h.type}</span></td><td>${h.client_name || h.product_name || h.id}</td><td>${h.amount ? formatNumber(h.amount) + ' FCFA' : ''}</td><td>${new Date(h.date).toLocaleString()}</td></tr>`).join('')}</tbody></table></div>`;
