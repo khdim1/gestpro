@@ -726,17 +726,7 @@ function notifyOtherDevices(action = 'refresh', data = {}) {
         console.log('📡 Notification envoyée aux autres appareils');
     }
 }
-// ✅ Recharger quand l'utilisateur revient sur l'onglet
-document.addEventListener('visibilitychange', function() {
-    if (!document.hidden) {
-        console.log('👁️ Onglet visible, rechargement des données...');
-        const currentPage = document.querySelector('.sidebar .nav-link.active')?.dataset?.page || 'dashboard';
-        // Ne recharger que si on est sur une page qui affiche des données
-        if (['dashboard', 'products', 'sales', 'invoices', 'clients', 'inventory', 'reports'].includes(currentPage)) {
-            loadPage(currentPage);
-        }
-    }
-});
+
 async function loadPage(page) {
     const titles = {
         dashboard: 'Tableau de bord', products: 'Produits', sales: 'Ventes',
