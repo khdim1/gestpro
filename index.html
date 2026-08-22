@@ -3014,10 +3014,13 @@ window.updateUnitPrice = (idx, newPrice) => {
     };
     function renderSalesTable(sales) {
     const tbody = document.getElementById('salesList');
-    if (!tbody) return;
+    if (!tbody) {
+        console.log('⚠️ #salesList introuvable');
+        return;
+    }
     
     if (!sales || sales.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted">Aucune vente trouvée</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted">Aucune vente trouvée</td></tr>';
         return;
     }
     
@@ -3037,7 +3040,7 @@ window.updateUnitPrice = (idx, newPrice) => {
                 <td>
                     <div class="btn-group btn-group-sm" role="group">
                         <button class="btn btn-info" onclick="downloadInvoice(${s.id})" title="Télécharger la facture">
-                            <i class="bi bi-file-pdf"></i>
+                            <i class="bi bi-file-pdf"></i> PDF
                         </button>
                         <button class="btn btn-primary" onclick="downloadOrder(${s.id})" title="Télécharger le bon de commande">
                             <i class="bi bi-clipboard-check"></i>
