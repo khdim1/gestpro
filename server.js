@@ -1511,14 +1511,18 @@ app.get('/api/products', authenticate, async (req, res) => {
     const [rows] = await pool.query(sql, params);
     res.json(rows);
 });
+// ===== ROUTE RECHERCHE PRODUITS AVEC PAGINATION =====
 app.get('/api/products/search', authenticate, async (req, res) => {
-    const { q, lowStock, limit = 100, offset = 0 } = req.query;
+    const { q, lowStock, limit = 30, offset = 0 } = req.query;
     const userId = req.user.id;
 
-    let sql = 'SELECT p.*, c.name as category_name FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE p.user_id = ?';
+    let sql = `SELECT p.*, c.name as category_name 
+               FROM products p 
+               LEFT JOIN categories c ON p.category_id = c.id 
+               WHERE p.user_id = ?`;
     const params = [userId];
 
-    if (q) {
+    if (q && q.trim() !== '') {
         sql += ' AND (p.name LIKE ? OR p.sku LIKE ? OR p.barcode LIKE ?)';
         const searchTerm = `%${q}%`;
         params.push(searchTerm, searchTerm, searchTerm);
@@ -1530,8 +1534,119 @@ app.get('/api/products/search', authenticate, async (req, res) => {
     sql += ' ORDER BY p.name LIMIT ? OFFSET ?';
     params.push(parseInt(limit), parseInt(offset));
 
-    const [rows] = await pool.query(sql, params);
-    res.json(rows);
+    try {
+        const [rows] = await pool.query(sql, params);
+        res.json(rows);
+    } catch (err) {
+        console.error('❌ Erreur search products:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+// ===== ROUTE COMPTER LES PRODUITS =====
+app.get('/api/products/count', authenticate, async (req, res) => {
+    const { q, lowStock } = req.query;
+    const userId = req.user.id;
+
+    let sql = 'SELECT COUNT(*) as count FROM products WHERE user_id = ?';
+    const params = [userId];
+
+    if (q && q.trim() !== '') {
+        sql += ' AND (name LIKE ? OR sku LIKE ? OR barcode LIKE ?)';
+        const searchTerm = `%${q}%`;
+        params.push(searchTerm, searchTerm, searchTerm);
+    }
+    if (lowStock === 'true') {
+        sql += ' AND quantity <= reorder_level';
+    }
+
+    try {
+        const [rows] = await pool.query(sql, params);
+        res.json({ count: rows[0].count });
+    } catch (err) {
+        console.error('❌ Erreur count products:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+// ===== ROUTE RÉCUPÉRER UN SEUL PRODUIT =====
+app.get('/api/products/:id', authenticate, async (req, res) => {
+    const productId = parseInt(req.params.id);
+    const userId = req.user.id;
+
+    if (isNaN(productId)) {
+        return res.status(400).json({ error: 'ID invalide' });
+    }
+
+    try {
+        const [rows] = await pool.query(
+            `SELECT p.*, c.name as category_name 
+             FROM products p 
+             LEFT JOIN categories c ON p.category_id = c.id 
+             WHERE p.id = ? AND p.user_id = ?`,
+            [productId, userId]
+        );
+
+        if (rows.length === 0) {
+            return res.status(404).json({ error: 'Produit non trouvé' });
+        }
+
+        res.json(rows[0]);
+    } catch (err) {
+        console.error('❌ Erreur get product:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+// ===== ROUTE RÉCUPÉRER UN SEUL PRODUIT =====
+app.get('/api/products/:id', authenticate, async (req, res) => {
+    const productId = parseInt(req.params.id);
+    const userId = req.user.id;
+
+    if (isNaN(productId)) {
+        return res.status(400).json({ error: 'ID invalide' });
+    }
+
+    try {
+        const [rows] = await pool.query(
+            `SELECT p.*, c.name as category_name 
+             FROM products p 
+             LEFT JOIN categories c ON p.category_id = c.id 
+             WHERE p.id = ? AND p.user_id = ?`,
+            [productId, userId]
+        );
+
+        if (rows.length === 0) {
+            return res.status(404).json({ error: 'Produit non trouvé' });
+        }
+
+        res.json(rows[0]);
+    } catch (err) {
+        console.error('❌ Erreur get product:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+// ===== ROUTE COMPTER LES PRODUITS =====
+app.get('/api/products/count', authenticate, async (req, res) => {
+    const { q, lowStock } = req.query;
+    const userId = req.user.id;
+
+    let sql = 'SELECT COUNT(*) as count FROM products WHERE user_id = ?';
+    const params = [userId];
+
+    if (q && q.trim() !== '') {
+        sql += ' AND (name LIKE ? OR sku LIKE ? OR barcode LIKE ?)';
+        const searchTerm = `%${q}%`;
+        params.push(searchTerm, searchTerm, searchTerm);
+    }
+    if (lowStock === 'true') {
+        sql += ' AND quantity <= reorder_level';
+    }
+
+    try {
+        const [rows] = await pool.query(sql, params);
+        res.json({ count: rows[0].count });
+    } catch (err) {
+        console.error('❌ Erreur count products:', err);
+        res.status(500).json({ error: err.message });
+    }
 });
 app.post('/api/products', authenticate, async (req, res) => {
     const { sku, barcode, name, description, category_id, category_name, supplier_id, quantity, unit, reorder_level, buy_price, sell_price, wholesale_price, wholesale_quantity, location, image_url } = req.body;
