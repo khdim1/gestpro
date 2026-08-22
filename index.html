@@ -1524,6 +1524,415 @@ async function confirmOrder(orderId, deferred, dueDate) {
         console.error(err);
     }
 }
+// ========================================================================
+// TÉLÉCHARGEMENT DE PDF SUR MOBILE - SOLUTION COMPLÈTE
+// ========================================================================
+
+// ----- DÉTECTION DU NAVIGATEUR -----
+function isIOS() {
+    return /iPad|iPhone|iPod/.test(navigator.userAgent) || 
+           (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+function isAndroid() {
+    return /Android/.test(navigator.userAgent);
+}
+
+function isMobile() {
+    return isIOS() || isAndroid() || window.innerWidth < 768;
+}
+
+// ----- API CALL AVEC TÉLÉCHARGEMENT -----
+async function apiCall(endpoint, method = 'GET', body = null, isDownload = false) {
+    try {
+        const headers = { 
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+        };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        
+        let url = `/api${endpoint}`;
+        if (method === 'GET' && !url.includes('_t=')) {
+            url += (url.includes('?') ? '&' : '?') + '_t=' + Date.now();
+        }
+        
+        const res = await fetch(url, { 
+            method, 
+            headers, 
+            body: body ? JSON.stringify(body) : undefined 
+        });
+        
+        if (res.status === 401) { 
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            token = null;
+            currentUser = null;
+            showAuthPage();
+            throw new Error('Session expirée'); 
+        }
+        
+        if (isDownload) {
+            const blob = await res.blob();
+            if (!res.ok) {
+                const text = await blob.text();
+                try {
+                    const error = JSON.parse(text);
+                    throw new Error(error.error || 'Erreur téléchargement');
+                } catch(e) {
+                    throw new Error('Erreur lors du téléchargement');
+                }
+            }
+            return blob;
+        }
+        
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Erreur serveur');
+        return data;
+    } catch(err) {
+        console.error('API Error:', err);
+        throw err;
+    }
+}
+
+// ----- TÉLÉCHARGEMENT DE FICHIER (UNIVERSEL) -----
+function downloadFile(blob, filename) {
+    console.log('📥 Téléchargement de:', filename);
+    console.log('📱 Mobile détecté:', isMobile());
+    console.log('🍎 iOS:', isIOS());
+    console.log('🤖 Android:', isAndroid());
+    
+    // ✅ SOLUTION 1 : Pour iOS - Ouvrir dans un nouvel onglet avec un bouton
+    if (isIOS()) {
+        downloadForIOS(blob, filename);
+        return;
+    }
+    
+    // ✅ SOLUTION 2 : Pour Android - Téléchargement direct
+    if (isAndroid()) {
+        downloadForAndroid(blob, filename);
+        return;
+    }
+    
+    // ✅ SOLUTION 3 : Pour Desktop - Méthode standard
+    downloadForDesktop(blob, filename);
+}
+
+// ===== TÉLÉCHARGEMENT POUR iOS (iPhone/iPad) =====
+function downloadForIOS(blob, filename) {
+    // iOS ne permet pas le téléchargement direct
+    // On crée un lien qui s'ouvre dans un nouvel onglet
+    // L'utilisateur peut ensuite partager ou enregistrer le PDF
+    
+    const url = URL.createObjectURL(blob);
+    
+    // Créer un bouton flottant pour faciliter le téléchargement
+    const overlay = document.createElement('div');
+    overlay.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 99999;
+        background: #2c6e9e;
+        color: white;
+        padding: 16px 24px;
+        border-radius: 16px;
+        box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+        text-align: center;
+        max-width: 90%;
+        animation: slideUp 0.5s ease;
+    `;
+    
+    overlay.innerHTML = `
+        <div style="font-size: 16px; font-weight: 600; margin-bottom: 8px;">
+            📄 PDF prêt à être enregistré
+        </div>
+        <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+            <a href="${url}" target="_blank" style="
+                background: white;
+                color: #2c6e9e;
+                padding: 10px 20px;
+                border-radius: 30px;
+                text-decoration: none;
+                font-weight: 600;
+                display: inline-block;
+            ">
+                <i class="bi bi-eye"></i> Ouvrir le PDF
+            </a>
+            <button onclick="this.closest('div').remove(); URL.revokeObjectURL('${url}')" style="
+                background: rgba(255,255,255,0.2);
+                color: white;
+                border: 1px solid rgba(255,255,255,0.3);
+                padding: 10px 20px;
+                border-radius: 30px;
+                cursor: pointer;
+                font-weight: 600;
+            ">
+                <i class="bi bi-x"></i> Fermer
+            </button>
+        </div>
+        <div style="font-size: 12px; margin-top: 8px; opacity: 0.8;">
+            Sur iPhone, ouvrez le PDF puis utilisez le bouton <i class="bi bi-square-arrow-up"></i> pour l'enregistrer
+        </div>
+    `;
+    
+    document.body.appendChild(overlay);
+    
+    // Supprimer automatiquement après 30 secondes
+    setTimeout(() => {
+        if (overlay.parentNode) {
+            overlay.remove();
+            URL.revokeObjectURL(url);
+        }
+    }, 30000);
+    
+    showToast('📄 PDF prêt - Ouvrez-le pour l\'enregistrer', 'info');
+}
+
+// ===== TÉLÉCHARGEMENT POUR ANDROID =====
+function downloadForAndroid(blob, filename) {
+    // Android supporte le téléchargement direct
+    const url = URL.createObjectURL(blob);
+    
+    // Vérifier si l'API de téléchargement est disponible (Chrome Android)
+    if (navigator.share) {
+        // Sur certains appareils, on peut utiliser l'API Share
+        const file = new File([blob], filename, { type: 'application/pdf' });
+        navigator.share({
+            title: filename,
+            files: [file]
+        }).then(() => {
+            URL.revokeObjectURL(url);
+            showToast('✅ PDF partagé/enregistré !', 'success');
+        }).catch(err => {
+            if (err.name !== 'AbortError') {
+                // Fallback : téléchargement standard
+                fallbackDownload(blob, filename);
+            }
+        });
+        return;
+    }
+    
+    // Téléchargement standard
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.target = '_blank';
+    document.body.appendChild(link);
+    
+    setTimeout(() => {
+        link.click();
+        setTimeout(() => {
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            showToast('✅ PDF téléchargé !', 'success');
+        }, 300);
+    }, 300);
+}
+
+// ===== TÉLÉCHARGEMENT POUR DESKTOP =====
+function downloadForDesktop(blob, filename) {
+    // Méthode standard pour desktop
+    const url = URL.createObjectURL(blob);
+    
+    // Utiliser l'API File System si disponible
+    if (window.showSaveFilePicker) {
+        const opts = {
+            suggestedName: filename,
+            types: [{
+                description: 'PDF Document',
+                accept: { 'application/pdf': ['.pdf'] }
+            }]
+        };
+        
+        window.showSaveFilePicker(opts).then(async (fileHandle) => {
+            const writable = await fileHandle.createWritable();
+            await writable.write(blob);
+            await writable.close();
+            URL.revokeObjectURL(url);
+            showToast('✅ PDF enregistré avec succès !', 'success');
+        }).catch(err => {
+            if (err.name !== 'AbortError') {
+                fallbackDownload(blob, filename);
+            }
+        });
+        return;
+    }
+    
+    // Fallback
+    fallbackDownload(blob, filename);
+}
+
+// ===== FALLBACK POUR TOUS LES NAVIGATEURS =====
+function fallbackDownload(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.target = '_blank';
+    document.body.appendChild(link);
+    
+    setTimeout(() => {
+        link.click();
+        setTimeout(() => {
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            showToast('✅ PDF téléchargé !', 'success');
+        }, 300);
+    }, 300);
+}
+
+// ===== TOAST DE NOTIFICATION =====
+function showToast(message, type = 'success') {
+    let toastContainer = document.querySelector('.toast-container');
+    if (!toastContainer) {
+        toastContainer = document.createElement('div');
+        toastContainer.className = 'toast-container position-fixed bottom-0 end-0 p-3';
+        toastContainer.style.zIndex = '9999';
+        document.body.appendChild(toastContainer);
+    }
+    
+    const toastId = 'toast-' + Date.now();
+    const bgClass = type === 'success' ? 'text-bg-success' : 
+                    type === 'danger' ? 'text-bg-danger' : 
+                    type === 'warning' ? 'text-bg-warning' : 'text-bg-info';
+    
+    const toastHtml = `
+        <div id="${toastId}" class="toast align-items-center ${bgClass} border-0" role="alert">
+            <div class="d-flex">
+                <div class="toast-body">${message}</div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+            </div>
+        </div>
+    `;
+    toastContainer.insertAdjacentHTML('beforeend', toastHtml);
+    
+    const toastElement = document.getElementById(toastId);
+    const toast = new bootstrap.Toast(toastElement, { autohide: true, delay: 5000 });
+    toast.show();
+    
+    toastElement.addEventListener('hidden.bs.toast', function() {
+        this.remove();
+    });
+}
+
+// ===== FONCTIONS DE TÉLÉCHARGEMENT DES DOCUMENTS =====
+
+// Télécharger la facture
+window.downloadInvoice = async function(saleId) {
+    try {
+        showToast('📄 Génération de la facture...', 'info');
+        const blob = await apiCall(`/sales/${saleId}/invoice`, 'GET', null, true);
+        downloadFile(blob, `facture_${saleId}.pdf`);
+    } catch(err) {
+        showToast('❌ Erreur: ' + err.message, 'danger');
+        console.error(err);
+    }
+};
+
+// Télécharger le bon de commande
+window.downloadOrder = async function(saleId) {
+    try {
+        showToast('📄 Génération du bon de commande...', 'info');
+        const blob = await apiCall(`/sales/${saleId}/order`, 'GET', null, true);
+        downloadFile(blob, `bon_commande_${saleId}.pdf`);
+    } catch(err) {
+        showToast('❌ Erreur: ' + err.message, 'danger');
+        console.error(err);
+    }
+};
+
+// Télécharger le bordereau de livraison
+window.downloadDelivery = async function(saleId) {
+    try {
+        showToast('📄 Génération du bordereau de livraison...', 'info');
+        const blob = await apiCall(`/sales/${saleId}/delivery`, 'GET', null, true);
+        downloadFile(blob, `bordereau_livraison_${saleId}.pdf`);
+    } catch(err) {
+        showToast('❌ Erreur: ' + err.message, 'danger');
+        console.error(err);
+    }
+};
+
+// Télécharger la proforma
+window.downloadProforma = async function(proformaId) {
+    try {
+        showToast('📄 Génération de la proforma...', 'info');
+        const blob = await apiCall(`/proforma/${proformaId}/pdf`, 'GET', null, true);
+        downloadFile(blob, `proforma_${proformaId}.pdf`);
+    } catch(err) {
+        showToast('❌ Erreur: ' + err.message, 'danger');
+        console.error(err);
+    }
+};
+
+// Ajouter le style CSS pour l'animation
+const style = document.createElement('style');
+style.textContent = `
+    @keyframes slideUp {
+        from { transform: translateX(-50%) translateY(100px); opacity: 0; }
+        to { transform: translateX(-50%) translateY(0); opacity: 1; }
+    }
+`;
+document.head.appendChild(style);
+// Ajouter ce bouton dans la page de détail d'une vente
+function renderSaleDetail(sale) {
+    return `
+        <div class="card-modern">
+            <div class="d-flex justify-content-between align-items-center">
+                <h5>Facture #${sale.id}</h5>
+                <div class="btn-group">
+                    <button class="btn btn-primary" onclick="downloadInvoice(${sale.id})">
+                        <i class="bi bi-download"></i> Télécharger PDF
+                    </button>
+                    <button class="btn btn-outline-secondary" onclick="sharePDF(${sale.id})">
+                        <i class="bi bi-share"></i> Partager
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// Fonction de partage (pour mobile)
+window.sharePDF = async function(saleId) {
+    try {
+        if (!navigator.share) {
+            showToast('📱 Le partage n\'est pas disponible sur ce navigateur', 'warning');
+            downloadInvoice(saleId);
+            return;
+        }
+        
+        showToast('📄 Génération du PDF...', 'info');
+        const blob = await apiCall(`/sales/${saleId}/invoice`, 'GET', null, true);
+        const file = new File([blob], `facture_${saleId}.pdf`, { type: 'application/pdf' });
+        
+        await navigator.share({
+            title: `Facture #${saleId}`,
+            files: [file]
+        });
+        
+        showToast('✅ PDF partagé !', 'success');
+    } catch(err) {
+        if (err.name !== 'AbortError') {
+            showToast('❌ Erreur: ' + err.message, 'danger');
+        }
+    }
+};
+// Fonction pour iOS - Ouvrir le PDF dans l'application native
+window.openPDFInNativeApp = async function(saleId) {
+    try {
+        const blob = await apiCall(`/sales/${saleId}/invoice`, 'GET', null, true);
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank');
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+        showToast('📄 PDF ouvert - Utilisez le bouton de partage pour l\'enregistrer', 'info');
+    } catch(err) {
+        showToast('❌ Erreur: ' + err.message, 'danger');
+    }
+};
 window.changeOrderStatus = async (orderId) => {
     const newStatus = prompt('Nouveau statut (pending, confirmed, shipped, delivered, cancelled) :', 'confirmed');
     if (!newStatus) return;
