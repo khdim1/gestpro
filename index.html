@@ -7,6 +7,20 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Pour Android Chrome -->
+<meta name="theme-color" content="#2c6e9e">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="application-name" content="GestPro">
+
+<!-- Pour iOS Safari -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="GestPro">
+<link rel="apple-touch-icon" href="/icon-192.png">
+
+<!-- Icônes pour différentes tailles -->
+<link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png">
     <style>
         :root {
             --primary: #2c6e9e;
@@ -3039,9 +3053,10 @@ window.updateUnitPrice = (idx, newPrice) => {
                 <td>${saleDate}</td>
                 <td>
                     <div class="btn-group btn-group-sm" role="group">
-                        <button class="btn btn-info" onclick="downloadInvoice(${s.id})" title="Télécharger la facture">
-                            <i class="bi bi-file-pdf"></i> PDF
-                        </button>
+                        // Dans renderSalesTable
+<button class="btn btn-info" onclick="sharePDF(${s.id})" title="Partager ou télécharger la facture">
+    <i class="bi bi-file-pdf"></i> 📄
+</button>
                         <button class="btn btn-primary" onclick="downloadOrder(${s.id})" title="Télécharger le bon de commande">
                             <i class="bi bi-clipboard-check"></i>
                         </button>
@@ -3736,7 +3751,87 @@ function fallbackDownload(blob, filename) {
         }, 100);
     }, 200);
 }
+// ===== GESTION DES TÉLÉCHARGEMENTS SUR MOBILE =====
+function downloadFile(blob, filename) {
+    // Vérifier si on est en mode standalone (PWA)
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
+    
+    if (isStandalone) {
+        // Mode PWA - utiliser une approche différente
+        downloadForPWA(blob, filename);
+        return;
+    }
+    
+    // Méthode standard
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    
+    setTimeout(() => {
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        showToast('✅ PDF téléchargé !', 'success');
+    }, 500);
+}
 
+// ===== TÉLÉCHARGEMENT POUR PWA =====
+function downloadForPWA(blob, filename) {
+    // En mode PWA, on utilise l'API de partage si disponible
+    if (navigator.share) {
+        const file = new File([blob], filename, { type: 'application/pdf' });
+        navigator.share({
+            title: filename,
+            files: [file]
+        }).then(() => {
+            showToast('✅ PDF partagé/enregistré !', 'success');
+        }).catch(err => {
+            if (err.name !== 'AbortError') {
+                // Fallback : ouvrir dans un nouvel onglet
+                const url = URL.createObjectURL(blob);
+                window.open(url, '_blank');
+                setTimeout(() => URL.revokeObjectURL(url), 60000);
+                showToast('📄 PDF ouvert - Enregistrez-le manuellement', 'info');
+            }
+        });
+        return;
+    }
+    
+    // Fallback
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    showToast('📄 PDF ouvert - Enregistrez-le manuellement', 'info');
+}
+// ===== BOUTON DE PARTAGE =====
+window.sharePDF = async function(saleId) {
+    try {
+        // Vérifier si l'API de partage est disponible
+        if (!navigator.share) {
+            // Fallback : téléchargement direct
+            downloadInvoice(saleId);
+            return;
+        }
+        
+        showToast('📄 Génération du PDF...', 'info');
+        const blob = await apiCall(`/sales/${saleId}/invoice`, 'GET', null, true);
+        const file = new File([blob], `facture_${saleId}.pdf`, { type: 'application/pdf' });
+        
+        await navigator.share({
+            title: `Facture #${saleId}`,
+            files: [file]
+        });
+        
+        showToast('✅ PDF partagé !', 'success');
+    } catch(err) {
+        if (err.name !== 'AbortError') {
+            // Si le partage échoue, essayer le téléchargement direct
+            downloadInvoice(saleId);
+        }
+    }
+};
 // ===== TOAST DE NOTIFICATION =====
 function showToast(message, type = 'success') {
     // Vérifier si un toast existe déjà
