@@ -1605,7 +1605,7 @@ app.get('/api/products/:id', authenticate, async (req, res) => {
     }
 });
 // Cache pour le comptage
-const countCache = new Map();
+
 const CACHE_TTL = 30000; // 30 secondes
 
 app.get('/api/products/count', authenticate, async (req, res) => {
