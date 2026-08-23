@@ -33,10 +33,10 @@ const DB_CONFIG = {
 const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_key_2025';
 const PORT = process.env.PORT || 3000;
 // ===== CACHE POUR LE COMPTAGE DES PRODUITS =====
-const countCache = new Map();
+
 const CACHE_TTL = 30000; // 30 secondes
 let pool;
-
+const countCache = new Map();
 function fetchImage(url) {
     return new Promise((resolve, reject) => {
         if (url.startsWith('data:')) {
