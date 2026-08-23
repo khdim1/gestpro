@@ -714,6 +714,31 @@ function notifyOtherDevices() {
         syncChannel.postMessage({ action: 'refresh', timestamp: Date.now() });
     }
 }
+window.editProduct = async function(id) {
+    const numericId = parseInt(id);
+    if (isNaN(numericId)) {
+        alert('❌ ID de produit invalide');
+        return;
+    }
+    
+    // ✅ Afficher un spinner dans la modal
+    const modal = new bootstrap.Modal(document.getElementById('productModal'));
+    document.getElementById('prodId').value = numericId;
+    document.getElementById('prodName').value = 'Chargement...';
+    document.getElementById('prodName').disabled = true;
+    modal.show();
+    
+    try {
+        const p = await apiCall(`/products/${numericId}`);
+        // Remplir le formulaire
+        document.getElementById('prodName').value = p.name;
+        document.getElementById('prodName').disabled = false;
+        // ... remplir les autres champs ...
+    } catch(e) {
+        alert('❌ Erreur chargement: ' + e.message);
+        modal.hide();
+    }
+};
 
 function notifyOtherDevices(action = 'refresh', data = {}) {
     if (syncChannel) {
