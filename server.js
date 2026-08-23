@@ -2151,24 +2151,29 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         doc.text(`${formatPDFNumber(finalAmount)} ${company.currency}`, 440, currentY + 8, { width: 110, align: 'right' });
         currentY += 35;
 
-        // QR code
-        if (qrBuffer) {
-            const qrSize = 60;
-            const qrX = 500 - qrSize - 15;
-            const qrY = 750 - qrSize - 30;
-            if (qrY < currentY + 20) {
-                doc.addPage();
-                currentY = 50;
-                const newQrY = 750 - qrSize - 30;
-                doc.image(qrBuffer, qrX, newQrY, { width: qrSize, height: qrSize });
-                doc.fillColor('#7a8a9a').fontSize(6).font('Helvetica')
-                   .text('Scannez pour accéder à la boutique', qrX - 5, newQrY + qrSize + 4, { width: qrSize + 10, align: 'center' });
-            } else {
-                doc.image(qrBuffer, qrX, qrY, { width: qrSize, height: qrSize });
-                doc.fillColor('#7a8a9a').fontSize(6).font('Helvetica')
-                   .text('Scannez pour accéder à la boutique', qrX - 5, qrY + qrSize + 4, { width: qrSize + 10, align: 'center' });
-            }
-        }
+        // ============================================================
+// 6. QR CODE (placé à gauche)
+// ============================================================
+console.log('📄 Génération du QR code...');
+if (qrBuffer) {
+    const qrSize = 60;
+    const qrX = 50; // ✅ Position à gauche (marge de 50px)
+    const qrY = 750 - qrSize - 30; // En bas (inchangé)
+    
+    // Vérifier si la place est suffisante, sinon nouvelle page
+    if (qrY < currentY + 20) {
+        doc.addPage();
+        currentY = 50;
+        const newQrY = 750 - qrSize - 30;
+        doc.image(qrBuffer, qrX, newQrY, { width: qrSize, height: qrSize });
+        doc.fillColor('#7a8a9a').fontSize(6).font('Helvetica')
+           .text('Scannez pour accéder à la boutique', qrX, newQrY + qrSize + 4, { width: qrSize + 10, align: 'center' });
+    } else {
+        doc.image(qrBuffer, qrX, qrY, { width: qrSize, height: qrSize });
+        doc.fillColor('#7a8a9a').fontSize(6).font('Helvetica')
+           .text('Scannez pour accéder à la boutique', qrX, qrY + qrSize + 4, { width: qrSize + 10, align: 'center' });
+    }
+}
 
         // Pied de page, cachet, signature
         const footerY = 750;
