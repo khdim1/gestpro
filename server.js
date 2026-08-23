@@ -1813,110 +1813,377 @@ app.delete('/api/proforma/:id', authenticate, async (req, res) => {
     await pool.query('DELETE FROM proforma_invoices WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
     res.json({ message: 'Proforma supprimée' });
 });
-
-// ========== PDF PROFORMA ==========
+// ========== ROUTE PROFORMA PDF (VERSION COMPLÈTE ET AUTONOME) ==========
 app.get('/api/proforma/:id/pdf', authenticate, async (req, res) => {
     try {
         const proformaId = req.params.id;
-        const [invoiceRows] = await pool.query(`SELECT * FROM proforma_invoices WHERE id = ? AND user_id = ?`, [proformaId, req.user.id]);
-        if (invoiceRows.length === 0) return res.status(404).json({ error: 'Proforma non trouvée' });
+
+        // 1. Récupérer les infos de la proforma
+        const [invoiceRows] = await pool.query(`
+            SELECT * FROM proforma_invoices 
+            WHERE id = ? AND user_id = ?
+        `, [proformaId, req.user.id]);
+
+        if (invoiceRows.length === 0) {
+            return res.status(404).json({ error: 'Proforma non trouvée' });
+        }
         const invoice = invoiceRows[0];
 
-        const [items] = await pool.query('SELECT * FROM proforma_items WHERE proforma_id = ?', [proformaId]);
-        const [settingsRows] = await pool.query('SELECT * FROM settings WHERE user_id = ?', [req.user.id]);
-        const company = settingsRows[0] || { company_name: 'Mon Entreprise', currency: 'FCFA' };
+        // 2. Récupérer les articles
+        const [items] = await pool.query(
+            'SELECT * FROM proforma_items WHERE proforma_id = ?',
+            [proformaId]
+        );
 
+        // 3. Récupérer les paramètres de la société
+        const [settingsRows] = await pool.query(
+            'SELECT * FROM settings WHERE user_id = ?',
+            [req.user.id]
+        );
+        const company = settingsRows[0] || {
+            company_name: 'Mon Entreprise',
+            currency: 'FCFA'
+        };
+
+        // 4. Récupérer le cachet et la signature
+        const [userSettings] = await pool.query(
+            'SELECT cachet_url, signature_url FROM settings WHERE user_id = ?',
+            [req.user.id]
+        );
+        const userCachet = userSettings[0]?.cachet_url || null;
+        const userSignature = userSettings[0]?.signature_url || null;
+        const hasCachet = userCachet && userCachet.trim() !== '';
+        const hasSignature = userSignature && userSignature.trim() !== '';
+
+        // 5. Créer le document PDF
         const doc = new PDFDocument({ margin: 50, size: 'A4' });
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename=proforma_${invoice.proforma_number}.pdf`);
         res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
         doc.pipe(res);
 
-        let y = await drawCompanyHeader(doc, company);
+        // ============================================================
+        // FONCTION LOCALE POUR L'EN-TÊTE (si drawCompanyHeader n'est pas définie globalement)
+        // ============================================================
+        async function drawCompanyHeaderLocal(doc, company, startY = 45) {
+            const fullWidth = 500;
+            const headerHeight = 110;
+            doc.rect(50, startY, fullWidth, headerHeight).fill('#ffffff');
 
+            let textStartX = 50;
+            let textWidth = 500;
+
+            if (company.logo_url && company.logo_url.trim() !== '') {
+                try {
+                    const logoBuffer = await fetchImage(company.logo_url);
+                    doc.image(logoBuffer, 50, startY + 5, { width: 80 });
+                    textStartX = 150;
+                    textWidth = 400;
+                } catch(e) { /* ignorer */ }
+            }
+
+            doc.fillColor('#2c3e50');
+            doc.fontSize(18).font('Helvetica-Bold')
+               .text(company.company_name, textStartX, startY + 10, { width: textWidth - 20, align: 'center' });
+
+            let currentY = startY + 35;
+            if (company.company_subtitle && company.company_subtitle.trim() !== '') {
+                doc.fontSize(10).font('Helvetica')
+                   .text(company.company_subtitle, textStartX, currentY, { width: textWidth - 20, align: 'center' });
+                currentY += 15;
+            }
+            if (company.company_activity && company.company_activity.trim() !== '') {
+                doc.fontSize(9).font('Helvetica-Oblique')
+                   .text(company.company_activity, textStartX, currentY, { width: textWidth - 20, align: 'center' });
+                currentY += 15;
+            }
+            if (company.company_rc && company.company_rc.trim() !== '') {
+                doc.fontSize(8).font('Helvetica')
+                   .text(company.company_rc, textStartX, currentY, { width: textWidth - 20, align: 'center' });
+                currentY += 15;
+            }
+            if (company.company_address && company.company_address.trim() !== '') {
+                doc.fontSize(9).font('Helvetica')
+                   .text(company.company_address, textStartX, currentY, { width: textWidth - 20, align: 'center' });
+                currentY += 15;
+            }
+
+            let phoneLine = '';
+            if (company.company_phone) phoneLine += `Tél : ${company.company_phone}`;
+            if (company.company_phone2) phoneLine += ` // ${company.company_phone2}`;
+            if (phoneLine) {
+                doc.fontSize(9).font('Helvetica')
+                   .text(phoneLine, textStartX, currentY, { width: textWidth - 20, align: 'center' });
+            }
+
+            doc.moveTo(50, startY + headerHeight + 5)
+               .lineTo(550, startY + headerHeight + 5)
+               .stroke('#cccccc');
+
+            return startY + headerHeight + 20;
+        }
+
+        // ============================================================
+        // EN-TÊTE (société)
+        // ============================================================
+        let y = await drawCompanyHeaderLocal(doc, company);
+
+        // Titre
         doc.fillColor('#2c6e9e').fontSize(20).font('Helvetica-Bold')
            .text(`FACTURE PROFORMA N° ${invoice.proforma_number}`, 50, y, { align: 'center' });
         y += 30;
 
-        doc.fillColor('#1a2a3a').fontSize(11).font('Helvetica')
-           .text(`Date : ${new Date(invoice.issue_date).toLocaleDateString('fr-FR')}`, 50, y);
-        y += 16;
-        doc.text(`Client : ${invoice.client_name || 'Client particulier'}`, 50, y);
-        if (invoice.client_address) { y += 16; doc.text(`Adresse : ${invoice.client_address}`, 50, y); }
-        if (invoice.client_email) { y += 16; doc.text(`Email : ${invoice.client_email}`, 50, y); }
-        if (invoice.valid_until) { y += 16; doc.text(`Valable jusqu'au : ${new Date(invoice.valid_until).toLocaleDateString('fr-FR')}`, 50, y); }
-        y += 25;
+        // ============================================================
+        // BLOC CLIENT / DÉTAILS
+        // ============================================================
+        doc.rect(50, y, 500, 80).fill('#f5f7fa').stroke('#e0e4e8', 0.5);
+        doc.fillColor('#1a2a3a').fontSize(10).font('Helvetica-Bold')
+           .text('CLIENT', 60, y + 8);
+        doc.fillColor('#3a4a5a').fontSize(11).font('Helvetica')
+           .text(invoice.client_name || 'Client particulier', 60, y + 25);
+        let clientY = y + 42;
+        if (invoice.client_address) {
+            doc.fontSize(9).font('Helvetica').text(invoice.client_address, 60, clientY);
+            clientY += 16;
+        }
+        if (invoice.client_email) {
+            doc.fontSize(9).font('Helvetica').text(`Email : ${invoice.client_email}`, 60, clientY);
+            clientY += 16;
+        }
+        if (invoice.client_phone) {
+            doc.fontSize(9).font('Helvetica').text(`Tél : ${invoice.client_phone}`, 60, clientY);
+        }
 
-        const col1 = 60, col2 = 250, col3 = 350, col4 = 450;
-        const rowHeight = 22;
-        doc.rect(50, y, 500, rowHeight).fill('#2c6e9e');
-        doc.fillColor('#ffffff').fontSize(9).font('Helvetica-Bold');
-        doc.text('DESIGNATION', col1, y + 6);
-        doc.text('QTE', col2, y + 6, { width: 60, align: 'right' });
-        doc.text('PRIX UNIT.', col3, y + 6, { width: 70, align: 'right' });
-        doc.text('MONTANT', col4, y + 6, { width: 80, align: 'right' });
-        y += rowHeight;
+        const rightX = 350;
+        doc.fillColor('#1a2a3a').fontSize(10).font('Helvetica-Bold')
+           .text('DÉTAILS PROFORMA', rightX, y + 8);
+        doc.fillColor('#3a4a5a').fontSize(10).font('Helvetica')
+           .text(`Date : ${new Date(invoice.issue_date).toLocaleDateString('fr-FR')}`, rightX, y + 25);
+        if (invoice.valid_until) {
+            doc.text(`Valable jusqu'au : ${new Date(invoice.valid_until).toLocaleDateString('fr-FR')}`, rightX, y + 42);
+        }
+        const statusMap = {
+            'draft': { label: 'BROUILLON', color: '#95a5a6' },
+            'sent': { label: 'ENVOYÉE', color: '#3498db' },
+            'accepted': { label: 'ACCEPTÉE', color: '#27ae60' },
+            'rejected': { label: 'REJETÉE', color: '#e74c3c' }
+        };
+        const statusInfo = statusMap[invoice.status] || { label: 'INCONNU', color: '#95a5a6' };
+        doc.rect(400, y + 42, 90, 20).fill(statusInfo.color);
+        doc.fillColor('#ffffff').fontSize(8).font('Helvetica-Bold')
+           .text(statusInfo.label, 418, y + 48);
 
+        y += 95;
+
+        // ============================================================
+        // TABLEAU DES PRODUITS
+        // ============================================================
+        const colX = {
+            product: 55,
+            qty: 270,
+            price: 355,
+            total: 460
+        };
+        const widthQty = 50;
+        const widthPrice = 80;
+        const widthTotal = 90;
+        const rowH = 20;
+        const headerH = 22;
+
+        const drawTableHeader = (yPos) => {
+            doc.rect(50, yPos, 500, headerH).fill('#2c6e9e');
+            doc.fillColor('#ffffff').fontSize(8).font('Helvetica-Bold');
+            doc.text('DESIGNATION', colX.product, yPos + 6);
+            doc.text('QTÉ', colX.qty, yPos + 6, { width: widthQty, align: 'right' });
+            doc.text('PRIX UNIT.', colX.price, yPos + 6, { width: widthPrice, align: 'right' });
+            doc.text('MONTANT', colX.total, yPos + 6, { width: widthTotal, align: 'right' });
+            return yPos + headerH;
+        };
+
+        let currentY = drawTableHeader(y);
         let subtotal = 0;
-        items.forEach((item, idx) => {
-            const bg = idx % 2 === 0 ? '#ffffff' : '#f8fafc';
-            doc.rect(50, y, 500, rowHeight).fill(bg);
-            doc.fillColor('#1a2a3a').fontSize(9).font('Helvetica');
-            doc.text(item.description, col1 + 2, y + 5);
-            doc.text(item.quantity.toString(), col2, y + 5, { width: 60, align: 'right' });
-            doc.text(`${formatPDFNumber(item.unit_price)} ${company.currency}`, col3, y + 5, { width: 70, align: 'right' });
-            doc.text(`${formatPDFNumber(item.total_price)} ${company.currency}`, col4, y + 5, { width: 80, align: 'right' });
-            subtotal += parseFloat(item.total_price);
-            y += rowHeight;
-        });
+        let rowIndex = 0;
+        const maxY = 750 - 100;
 
-        doc.moveTo(50, y).lineTo(550, y).stroke('#e0e4e8');
-        y += 10;
+        for (const item of items) {
+            const description = item.description || 'Article';
+            const qty = item.quantity;
+            const unitPrice = parseFloat(item.unit_price);
+            const totalPrice = parseFloat(item.total_price);
+            subtotal += totalPrice;
 
+            if (currentY + rowH > maxY) {
+                doc.addPage();
+                currentY = drawTableHeader(50);
+                rowIndex = 0;
+            }
+
+            const bg = rowIndex % 2 === 0 ? '#ffffff' : '#f8fafc';
+            doc.rect(50, currentY, 500, rowH).fill(bg);
+            doc.fillColor('#1a2a3a').fontSize(8).font('Helvetica');
+            const truncated = description.length > 40 ? description.substring(0, 38) + '…' : description;
+            doc.text(truncated, colX.product + 2, currentY + 4);
+            doc.text(qty.toString(), colX.qty, currentY + 4, { width: widthQty, align: 'right' });
+            doc.text(`${formatPDFNumber(unitPrice)} ${company.currency}`, colX.price, currentY + 4, { width: widthPrice, align: 'right' });
+            doc.text(`${formatPDFNumber(totalPrice)} ${company.currency}`, colX.total, currentY + 4, { width: widthTotal, align: 'right' });
+
+            currentY += rowH;
+            rowIndex++;
+        }
+
+        doc.moveTo(50, currentY).lineTo(550, currentY).stroke('#e0e4e8');
+        currentY += 10;
+
+        // ============================================================
+        // RÉSUMÉ DES TOTAUX
+        // ============================================================
+        const summaryX = 360;
         const taxRate = invoice.tax_rate || 0;
         const taxAmount = invoice.tax || 0;
         const remiseValue = (invoice.remise_pct || 0) / 100 * subtotal;
         const acompteValue = invoice.acompte || 0;
         const total = invoice.total || 0;
 
-        const totalX = 370;
-        const lines = [];
-        lines.push({ label: 'Sous-total', value: formatPDFNumber(subtotal) });
+        const summaryLines = [];
+        summaryLines.push({ label: 'Sous-total', value: formatPDFNumber(subtotal) });
         if (taxRate > 0) {
-            lines.push({ label: `TVA (${taxRate}%)`, value: formatPDFNumber(taxAmount) });
+            summaryLines.push({ label: `TVA (${taxRate}%)`, value: formatPDFNumber(taxAmount) });
         }
         if (invoice.remise_pct && invoice.remise_pct > 0) {
-            lines.push({ label: `Remise (${invoice.remise_pct}%)`, value: `- ${formatPDFNumber(remiseValue)}` });
+            summaryLines.push({ label: `Remise (${invoice.remise_pct}%)`, value: `- ${formatPDFNumber(remiseValue)}` });
         }
         if (acompteValue > 0) {
-            lines.push({ label: 'Acompte', value: `- ${formatPDFNumber(acompteValue)}` });
+            summaryLines.push({ label: 'Acompte', value: `- ${formatPDFNumber(acompteValue)}` });
         }
 
-        lines.forEach((line, i) => {
-            const yPos = y + i * 22;
-            doc.fillColor(i === lines.length - 1 ? '#1a2a3a' : '#3a4a5a');
-            doc.fontSize(i === lines.length - 1 ? 11 : 10).font(i === lines.length - 1 ? 'Helvetica-Bold' : 'Helvetica');
-            doc.text(line.label, totalX, yPos, { width: 100, align: 'right' });
+        summaryLines.forEach((line, idx) => {
+            const yPos = currentY + idx * 18;
+            doc.fillColor('#3a4a5a').fontSize(9).font('Helvetica');
+            doc.text(line.label, summaryX, yPos, { width: 100, align: 'right' });
             doc.text(`${line.value} ${company.currency}`, 450, yPos, { width: 80, align: 'right' });
         });
+        currentY += summaryLines.length * 18 + 8;
 
-        const totalY = y + lines.length * 22 + 8;
-        doc.rect(350, totalY, 200, 30).fill('#2c6e9e');
-        doc.fillColor('#ffffff').fontSize(14).font('Helvetica-Bold');
-        doc.text('NET À PAYER', 360, totalY + 8);
-        doc.text(`${formatPDFNumber(total)} ${company.currency}`, 450, totalY + 8, { width: 80, align: 'right' });
+        // ============================================================
+        // NET À PAYER
+        // ============================================================
+        doc.rect(350, currentY, 200, 28).fill('#2c6e9e');
+        doc.fillColor('#ffffff').fontSize(11).font('Helvetica-Bold');
+        doc.text('NET À PAYER', 360, currentY + 8);
+        doc.text(`${formatPDFNumber(total)} ${company.currency}`, 440, currentY + 8, { width: 110, align: 'right' });
+        currentY += 35;
 
-        doc.rect(50, 750, 500, 25).fill('#f0f4f8');
+        // ============================================================
+        // QR CODE (optionnel)
+        // ============================================================
+        // (Optionnel : décommentez si vous voulez un QR code)
+
+        // ============================================================
+        // PIED DE PAGE + CACHET + SIGNATURE
+        // ============================================================
+        const footerY = 750;
+        const imgWidth = 100;
+        const imgHeight = 40;
+        const marginLeft = 50;
+        const pageWidth = 500;
+
+        // Pied de page
+        doc.rect(50, footerY, 500, 25).fill('#f0f4f8');
         doc.fillColor('#7a8a9a').fontSize(8).font('Helvetica');
-        doc.text('Document non contractuel - Devis valant accord', 50, 758, { align: 'center' });
+        doc.text('Document non contractuel – Devis valant accord', 50, footerY + 8, { align: 'center' });
+
+        // Cachet et signature
+        const spaceNeeded = imgHeight + 30;
+        if (hasCachet || hasSignature) {
+            if (footerY - spaceNeeded < 50) {
+                // Nouvelle page si besoin
+                doc.addPage();
+                const newFooterY = 750;
+                doc.rect(50, newFooterY, 500, 25).fill('#f0f4f8');
+                doc.fillColor('#7a8a9a').fontSize(8).font('Helvetica');
+                doc.text('Document non contractuel – Devis valant accord', 50, newFooterY + 8, { align: 'center' });
+
+                if (hasCachet) {
+                    try {
+                        let imageBuffer;
+                        if (userCachet.startsWith('data:image')) {
+                            const base64Data = userCachet.replace(/^data:image\/\w+;base64,/, '');
+                            imageBuffer = Buffer.from(base64Data, 'base64');
+                        } else {
+                            imageBuffer = await fetchImage(userCachet);
+                        }
+                        doc.image(imageBuffer, 50, newFooterY - imgHeight - 8, { width: imgWidth, height: imgHeight });
+                        doc.fillColor('#7a8a9a').fontSize(6).font('Helvetica')
+                           .text('Cachet', 50, newFooterY - 3, { width: imgWidth, align: 'center' });
+                    } catch (e) {
+                        console.log('⚠️ Erreur chargement cachet proforma:', e.message);
+                    }
+                }
+                if (hasSignature) {
+                    try {
+                        const sigX = 500 - imgWidth;
+                        let imageBuffer;
+                        if (userSignature.startsWith('data:image')) {
+                            const base64Data = userSignature.replace(/^data:image\/\w+;base64,/, '');
+                            imageBuffer = Buffer.from(base64Data, 'base64');
+                        } else {
+                            imageBuffer = await fetchImage(userSignature);
+                        }
+                        doc.image(imageBuffer, sigX, newFooterY - imgHeight - 8, { width: imgWidth, height: imgHeight });
+                        doc.fillColor('#7a8a9a').fontSize(6).font('Helvetica')
+                           .text('Signature', sigX, newFooterY - 3, { width: imgWidth, align: 'center' });
+                    } catch (e) {
+                        console.log('⚠️ Erreur chargement signature proforma:', e.message);
+                    }
+                }
+            } else {
+                // Place disponible sur la page en cours
+                if (hasCachet) {
+                    try {
+                        let imageBuffer;
+                        if (userCachet.startsWith('data:image')) {
+                            const base64Data = userCachet.replace(/^data:image\/\w+;base64,/, '');
+                            imageBuffer = Buffer.from(base64Data, 'base64');
+                        } else {
+                            imageBuffer = await fetchImage(userCachet);
+                        }
+                        doc.image(imageBuffer, marginLeft, footerY - imgHeight - 8, { width: imgWidth, height: imgHeight });
+                        doc.fillColor('#7a8a9a').fontSize(6).font('Helvetica')
+                           .text('Cachet', marginLeft, footerY - 3, { width: imgWidth, align: 'center' });
+                    } catch (e) {
+                        console.log('⚠️ Erreur chargement cachet proforma:', e.message);
+                    }
+                }
+                if (hasSignature) {
+                    try {
+                        const sigX = pageWidth + marginLeft - imgWidth;
+                        let imageBuffer;
+                        if (userSignature.startsWith('data:image')) {
+                            const base64Data = userSignature.replace(/^data:image\/\w+;base64,/, '');
+                            imageBuffer = Buffer.from(base64Data, 'base64');
+                        } else {
+                            imageBuffer = await fetchImage(userSignature);
+                        }
+                        doc.image(imageBuffer, sigX, footerY - imgHeight - 8, { width: imgWidth, height: imgHeight });
+                        doc.fillColor('#7a8a9a').fontSize(6).font('Helvetica')
+                           .text('Signature', sigX, footerY - 3, { width: imgWidth, align: 'center' });
+                    } catch (e) {
+                        console.log('⚠️ Erreur chargement signature proforma:', e.message);
+                    }
+                }
+            }
+        }
 
         doc.end();
+        console.log(`✅ Proforma ${invoice.proforma_number} générée avec succès`);
+
     } catch (err) {
         console.error('Erreur génération proforma:', err);
-        res.status(500).json({ error: 'Erreur génération proforma' });
+        if (!res.headersSent) {
+            res.status(500).json({ error: 'Erreur génération proforma' });
+        }
     }
 });
-
 // ========== PDF HEADER ==========
 async function drawCompanyHeader(doc, company, startY = 45) {
     const fullWidth = 500;
@@ -2281,86 +2548,376 @@ if (qrBuffer) {
         }
     }
 });
-
-// ========== BON DE COMMANDE PDF ==========
+// ========== ROUTE BON DE COMMANDE (VERSION COMPLÈTE ET LISIBLE) ==========
 app.get('/api/sales/:id/order', authenticate, async (req, res) => {
     try {
         const saleId = req.params.id;
-        const [saleRows] = await pool.query(`SELECT s.*, c.name as client_name FROM sales s LEFT JOIN clients c ON s.client_id = c.id WHERE s.id = ? AND s.user_id = ?`, [saleId, req.user.id]);
-        if (saleRows.length === 0) return res.status(404).json({ error: 'Vente non trouvée' });
-        const sale = saleRows[0];
-        const [items] = await pool.query(`SELECT si.*, p.name as product_name FROM sale_items si JOIN products p ON si.product_id = p.id WHERE si.sale_id = ?`, [saleId]);
-        const [settingsRows] = await pool.query('SELECT * FROM settings WHERE user_id = ?', [req.user.id]);
-        const company = settingsRows[0] || { company_name: 'Mon Entreprise', currency: 'FCFA' };
 
+        // Récupérer la vente
+        const [saleRows] = await pool.query(`
+            SELECT s.*, c.name as client_name, c.email as client_email, c.address as client_address
+            FROM sales s
+            LEFT JOIN clients c ON s.client_id = c.id
+            WHERE s.id = ? AND s.user_id = ?
+        `, [saleId, req.user.id]);
+
+        if (saleRows.length === 0) {
+            return res.status(404).json({ error: 'Vente non trouvée' });
+        }
+        const sale = saleRows[0];
+
+        // Récupérer les articles
+        const [items] = await pool.query(`
+            SELECT si.*, p.name as product_name
+            FROM sale_items si
+            JOIN products p ON si.product_id = p.id
+            WHERE si.sale_id = ?
+        `, [saleId]);
+
+        // Récupérer les paramètres société
+        const [settingsRows] = await pool.query(
+            'SELECT * FROM settings WHERE user_id = ?',
+            [req.user.id]
+        );
+        const company = settingsRows[0] || {
+            company_name: 'Mon Entreprise',
+            currency: 'FCFA'
+        };
+
+        // Récupérer cachet et signature
+        const [userSettings] = await pool.query(
+            'SELECT cachet_url, signature_url FROM settings WHERE user_id = ?',
+            [req.user.id]
+        );
+        const userCachet = userSettings[0]?.cachet_url || null;
+        const userSignature = userSettings[0]?.signature_url || null;
+        const hasCachet = userCachet && userCachet.trim() !== '';
+        const hasSignature = userSignature && userSignature.trim() !== '';
+
+        // Créer le document PDF
         const doc = new PDFDocument({ margin: 50, size: 'A4' });
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename=bon_commande_${saleId}.pdf`);
         res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
         doc.pipe(res);
 
-        let y = await drawCompanyHeader(doc, company);
-        doc.fillColor('#3498db').fontSize(18).font('Helvetica-Bold').text(`BON DE COMMANDE N° ${saleId}`, 50, y, { align: 'center' });
-        y += 30;
-        doc.fillColor('#ecf0f1').rect(50, y, 500, 80).fill();
-        doc.fillColor('black').fontSize(10);
-        doc.text(`Date : ${new Date(sale.sale_date).toLocaleString()}`, 60, y + 10);
-        doc.text(`Client : ${sale.client_name || 'Client particulier'}`, 60, y + 25);
-        if (sale.client_address) doc.text(`Adresse de livraison : ${sale.client_address}`, 60, y + 55);
-        y += 90;
+        // Fonction d'en-tête locale
+        async function drawCompanyHeaderLocal(doc, company, startY = 45) {
+            const fullWidth = 500;
+            const headerHeight = 110;
+            doc.rect(50, startY, fullWidth, headerHeight).fill('#ffffff');
 
-        const tableTop = y;
-        doc.fillColor('#2c3e50').rect(50, tableTop, 500, 20).fill();
-        doc.fillColor('white').fontSize(10).font('Helvetica-Bold');
-        doc.text('Produit', 60, tableTop + 5);
-        doc.text('Quantité', 250, tableTop + 5);
-        doc.text('Prix unit.', 350, tableTop + 5);
-        doc.text('Total', 450, tableTop + 5);
-        let rowY = tableTop + 25;
-        doc.fillColor('black').font('Helvetica');
-        items.forEach(item => {
-            doc.text(item.product_name, 60, rowY);
-            doc.text(item.quantity.toString(), 250, rowY);
-            doc.text(`${item.unit_price.toLocaleString()} ${company.currency}`, 350, rowY);
-            doc.text(`${item.total_price.toLocaleString()} ${company.currency}`, 450, rowY);
-            rowY += 20;
-        });
-        for (let i = 0; i <= items.length; i++) doc.lineWidth(0.5).strokeColor('#bdc3c7').moveTo(50, tableTop + 20 + i * 20).lineTo(550, tableTop + 20 + i * 20).stroke();
-        rowY += 10;
-        doc.font('Helvetica-Bold');
-        doc.text(`Sous-total : ${sale.total_amount.toLocaleString()} ${company.currency}`, 350, rowY);
-        rowY += 15;
-        doc.text(`TVA (${company.tax_rate || 20}%) : ${sale.tax.toLocaleString()} ${company.currency}`, 350, rowY);
-        rowY += 15;
+            let textStartX = 50;
+            let textWidth = 500;
+
+            if (company.logo_url && company.logo_url.trim() !== '') {
+                try {
+                    const logoBuffer = await fetchImage(company.logo_url);
+                    doc.image(logoBuffer, 50, startY + 5, { width: 80 });
+                    textStartX = 150;
+                    textWidth = 400;
+                } catch(e) { /* ignorer */ }
+            }
+
+            doc.fillColor('#2c3e50');
+            doc.fontSize(18).font('Helvetica-Bold')
+               .text(company.company_name, textStartX, startY + 10, { width: textWidth - 20, align: 'center' });
+
+            let currentY = startY + 35;
+            if (company.company_subtitle && company.company_subtitle.trim() !== '') {
+                doc.fontSize(10).font('Helvetica')
+                   .text(company.company_subtitle, textStartX, currentY, { width: textWidth - 20, align: 'center' });
+                currentY += 15;
+            }
+            if (company.company_activity && company.company_activity.trim() !== '') {
+                doc.fontSize(9).font('Helvetica-Oblique')
+                   .text(company.company_activity, textStartX, currentY, { width: textWidth - 20, align: 'center' });
+                currentY += 15;
+            }
+            if (company.company_rc && company.company_rc.trim() !== '') {
+                doc.fontSize(8).font('Helvetica')
+                   .text(company.company_rc, textStartX, currentY, { width: textWidth - 20, align: 'center' });
+                currentY += 15;
+            }
+            if (company.company_address && company.company_address.trim() !== '') {
+                doc.fontSize(9).font('Helvetica')
+                   .text(company.company_address, textStartX, currentY, { width: textWidth - 20, align: 'center' });
+                currentY += 15;
+            }
+
+            let phoneLine = '';
+            if (company.company_phone) phoneLine += `Tél : ${company.company_phone}`;
+            if (company.company_phone2) phoneLine += ` // ${company.company_phone2}`;
+            if (phoneLine) {
+                doc.fontSize(9).font('Helvetica')
+                   .text(phoneLine, textStartX, currentY, { width: textWidth - 20, align: 'center' });
+            }
+
+            doc.moveTo(50, startY + headerHeight + 5)
+               .lineTo(550, startY + headerHeight + 5)
+               .stroke('#cccccc');
+
+            return startY + headerHeight + 20;
+        }
+
+        // En-tête
+        let y = await drawCompanyHeaderLocal(doc, company);
+
+        // Titre
+        doc.fillColor('#2c6e9e').fontSize(18).font('Helvetica-Bold')
+           .text(`BON DE COMMANDE N° ${String(saleId).padStart(5, '0')}`, 50, y, { align: 'center' });
+        y += 30;
+
+        // Bloc client / détails
+        doc.rect(50, y, 500, 70).fill('#f5f7fa').stroke('#e0e4e8', 0.5);
+        doc.fillColor('#1a2a3a').fontSize(10).font('Helvetica-Bold')
+           .text('CLIENT', 60, y + 8);
+        doc.fillColor('#3a4a5a').fontSize(11).font('Helvetica')
+           .text(sale.client_name || 'Client particulier', 60, y + 25);
+        if (sale.client_address) {
+            doc.fontSize(9).font('Helvetica').text(sale.client_address, 60, y + 42);
+        }
+        if (sale.client_email) {
+            doc.fontSize(9).font('Helvetica').text(sale.client_email, 60, y + 58);
+        }
+
+        const rightX = 350;
+        doc.fillColor('#1a2a3a').fontSize(10).font('Helvetica-Bold')
+           .text('DÉTAILS COMMANDE', rightX, y + 8);
+        doc.fillColor('#3a4a5a').fontSize(10).font('Helvetica')
+           .text(`Date : ${new Date(sale.sale_date).toLocaleDateString('fr-FR')}`, rightX, y + 25);
+        if (sale.due_date) {
+            doc.text(`Échéance : ${new Date(sale.due_date).toLocaleDateString('fr-FR')}`, rightX, y + 42);
+        }
+        const statusMap = {
+            'completed': { label: 'TERMINÉE', color: '#27ae60' },
+            'pending': { label: 'EN ATTENTE', color: '#f39c12' },
+            'cancelled': { label: 'ANNULÉE', color: '#e74c3c' }
+        };
+        const statusInfo = statusMap[sale.status] || { label: 'INCONNU', color: '#95a5a6' };
+        doc.rect(400, y + 42, 90, 20).fill(statusInfo.color);
+        doc.fillColor('#ffffff').fontSize(8).font('Helvetica-Bold')
+           .text(statusInfo.label, 418, y + 48);
+
+        y += 85;
+
+        // Tableau des produits
+        const colX = { product: 55, qty: 270, price: 355, total: 460 };
+        const widthQty = 50, widthPrice = 80, widthTotal = 90;
+        const rowH = 20, headerH = 22;
+        const drawTableHeader = (yPos) => {
+            doc.rect(50, yPos, 500, headerH).fill('#2c6e9e');
+            doc.fillColor('#ffffff').fontSize(8).font('Helvetica-Bold');
+            doc.text('PRODUIT', colX.product, yPos + 6);
+            doc.text('QTÉ', colX.qty, yPos + 6, { width: widthQty, align: 'right' });
+            doc.text('PRIX UNIT.', colX.price, yPos + 6, { width: widthPrice, align: 'right' });
+            doc.text('TOTAL', colX.total, yPos + 6, { width: widthTotal, align: 'right' });
+            return yPos + headerH;
+        };
+
+        let currentY = drawTableHeader(y);
+        let subtotal = 0;
+        let rowIndex = 0;
+        const maxY = 750 - 100;
+
+        for (const item of items) {
+            const productName = item.product_name || 'Produit';
+            const qty = item.quantity;
+            const unitPrice = parseFloat(item.unit_price);
+            const totalPrice = parseFloat(item.total_price);
+            subtotal += totalPrice;
+
+            if (currentY + rowH > maxY) {
+                doc.addPage();
+                currentY = drawTableHeader(50);
+                rowIndex = 0;
+            }
+
+            const bg = rowIndex % 2 === 0 ? '#ffffff' : '#f8fafc';
+            doc.rect(50, currentY, 500, rowH).fill(bg);
+            doc.fillColor('#1a2a3a').fontSize(8).font('Helvetica');
+            const truncated = productName.length > 30 ? productName.substring(0, 28) + '…' : productName;
+            doc.text(truncated, colX.product + 2, currentY + 4);
+            doc.text(qty.toString(), colX.qty, currentY + 4, { width: widthQty, align: 'right' });
+            doc.text(`${formatPDFNumber(unitPrice)} ${company.currency}`, colX.price, currentY + 4, { width: widthPrice, align: 'right' });
+            doc.text(`${formatPDFNumber(totalPrice)} ${company.currency}`, colX.total, currentY + 4, { width: widthTotal, align: 'right' });
+
+            currentY += rowH;
+            rowIndex++;
+        }
+
+        doc.moveTo(50, currentY).lineTo(550, currentY).stroke('#e0e4e8');
+        currentY += 10;
+
+        // Résumé
+        const summaryX = 360;
+        const taxRate = sale.tax_rate || 0;
+        const taxAmount = sale.tax || 0;
+        const remiseValue = (sale.remise_pct || 0) / 100 * subtotal;
+        const acompteValue = sale.acompte || 0;
+        const finalAmount = sale.final_amount || 0;
+
+        const summaryLines = [];
+        summaryLines.push({ label: 'Sous-total', value: formatPDFNumber(subtotal) });
+        if (taxRate > 0) {
+            summaryLines.push({ label: `TVA (${taxRate}%)`, value: formatPDFNumber(taxAmount) });
+        }
         if (sale.remise_pct && sale.remise_pct > 0) {
-            const remise_valeur = (sale.remise_pct / 100) * sale.total_amount;
-            doc.text(`Remise (${sale.remise_pct}%) : ${remise_valeur.toLocaleString()} ${company.currency}`, 350, rowY);
-            rowY += 15;
+            summaryLines.push({ label: `Remise (${sale.remise_pct}%)`, value: `- ${formatPDFNumber(remiseValue)}` });
         }
-        if (sale.acompte && sale.acompte > 0) {
-            doc.text(`Acompte versé : ${sale.acompte.toLocaleString()} ${company.currency}`, 350, rowY);
-            rowY += 15;
+        if (acompteValue > 0) {
+            summaryLines.push({ label: 'Acompte', value: `- ${formatPDFNumber(acompteValue)}` });
         }
-        doc.fillColor('#3498db').fontSize(12).text(`Net à payer : ${sale.final_amount.toLocaleString()} ${company.currency}`, 350, rowY, { bold: true });
-        doc.fillColor('#2c3e50').rect(50, 750, 500, 30).fill();
-        doc.fillColor('white').fontSize(8).text('Merci de votre commande', 50, 760, { align: 'center' });
+
+        summaryLines.forEach((line, idx) => {
+            const yPos = currentY + idx * 18;
+            doc.fillColor('#3a4a5a').fontSize(9).font('Helvetica');
+            doc.text(line.label, summaryX, yPos, { width: 100, align: 'right' });
+            doc.text(`${line.value} ${company.currency}`, 450, yPos, { width: 80, align: 'right' });
+        });
+        currentY += summaryLines.length * 18 + 8;
+
+        // Net à payer
+        doc.rect(350, currentY, 200, 28).fill('#2c6e9e');
+        doc.fillColor('#ffffff').fontSize(11).font('Helvetica-Bold');
+        doc.text('NET À PAYER', 360, currentY + 8);
+        doc.text(`${formatPDFNumber(finalAmount)} ${company.currency}`, 440, currentY + 8, { width: 110, align: 'right' });
+        currentY += 35;
+
+        // Pied de page + cachet + signature
+        const footerY = 750;
+        const imgWidth = 100, imgHeight = 40, marginLeft = 50, pageWidth = 500;
+
+        doc.rect(50, footerY, 500, 25).fill('#f0f4f8');
+        doc.fillColor('#7a8a9a').fontSize(8).font('Helvetica');
+        doc.text('Merci de votre commande', 50, footerY + 8, { align: 'center' });
+
+        const spaceNeeded = imgHeight + 30;
+        if (hasCachet || hasSignature) {
+            if (footerY - spaceNeeded < 50) {
+                doc.addPage();
+                const newFooterY = 750;
+                doc.rect(50, newFooterY, 500, 25).fill('#f0f4f8');
+                doc.fillColor('#7a8a9a').fontSize(8).font('Helvetica');
+                doc.text('Merci de votre commande', 50, newFooterY + 8, { align: 'center' });
+
+                if (hasCachet) {
+                    try {
+                        let imageBuffer;
+                        if (userCachet.startsWith('data:image')) {
+                            const base64Data = userCachet.replace(/^data:image\/\w+;base64,/, '');
+                            imageBuffer = Buffer.from(base64Data, 'base64');
+                        } else {
+                            imageBuffer = await fetchImage(userCachet);
+                        }
+                        doc.image(imageBuffer, 50, newFooterY - imgHeight - 8, { width: imgWidth, height: imgHeight });
+                        doc.fillColor('#7a8a9a').fontSize(6).font('Helvetica')
+                           .text('Cachet', 50, newFooterY - 3, { width: imgWidth, align: 'center' });
+                    } catch (e) { console.log('⚠️ Erreur cachet:', e.message); }
+                }
+                if (hasSignature) {
+                    try {
+                        const sigX = 500 - imgWidth;
+                        let imageBuffer;
+                        if (userSignature.startsWith('data:image')) {
+                            const base64Data = userSignature.replace(/^data:image\/\w+;base64,/, '');
+                            imageBuffer = Buffer.from(base64Data, 'base64');
+                        } else {
+                            imageBuffer = await fetchImage(userSignature);
+                        }
+                        doc.image(imageBuffer, sigX, newFooterY - imgHeight - 8, { width: imgWidth, height: imgHeight });
+                        doc.fillColor('#7a8a9a').fontSize(6).font('Helvetica')
+                           .text('Signature', sigX, newFooterY - 3, { width: imgWidth, align: 'center' });
+                    } catch (e) { console.log('⚠️ Erreur signature:', e.message); }
+                }
+            } else {
+                if (hasCachet) {
+                    try {
+                        let imageBuffer;
+                        if (userCachet.startsWith('data:image')) {
+                            const base64Data = userCachet.replace(/^data:image\/\w+;base64,/, '');
+                            imageBuffer = Buffer.from(base64Data, 'base64');
+                        } else {
+                            imageBuffer = await fetchImage(userCachet);
+                        }
+                        doc.image(imageBuffer, marginLeft, footerY - imgHeight - 8, { width: imgWidth, height: imgHeight });
+                        doc.fillColor('#7a8a9a').fontSize(6).font('Helvetica')
+                           .text('Cachet', marginLeft, footerY - 3, { width: imgWidth, align: 'center' });
+                    } catch (e) { console.log('⚠️ Erreur cachet:', e.message); }
+                }
+                if (hasSignature) {
+                    try {
+                        const sigX = pageWidth + marginLeft - imgWidth;
+                        let imageBuffer;
+                        if (userSignature.startsWith('data:image')) {
+                            const base64Data = userSignature.replace(/^data:image\/\w+;base64,/, '');
+                            imageBuffer = Buffer.from(base64Data, 'base64');
+                        } else {
+                            imageBuffer = await fetchImage(userSignature);
+                        }
+                        doc.image(imageBuffer, sigX, footerY - imgHeight - 8, { width: imgWidth, height: imgHeight });
+                        doc.fillColor('#7a8a9a').fontSize(6).font('Helvetica')
+                           .text('Signature', sigX, footerY - 3, { width: imgWidth, align: 'center' });
+                    } catch (e) { console.log('⚠️ Erreur signature:', e.message); }
+                }
+            }
+        }
+
         doc.end();
-    } catch(err) {
-        console.error(err);
-        res.status(500).json({ error: 'Erreur génération bon de commande' });
+        console.log(`✅ Bon de commande #${saleId} généré avec succès`);
+
+    } catch (err) {
+        console.error('Erreur bon de commande:', err);
+        if (!res.headersSent) {
+            res.status(500).json({ error: 'Erreur génération bon de commande' });
+        }
     }
 });
-
-// ========== BORDEREAU DE LIVRAISON PDF ==========
+// ========== ROUTE BORDEREAU DE LIVRAISON (VERSION COMPLÈTE) ==========
 app.get('/api/sales/:id/delivery', authenticate, async (req, res) => {
     try {
         const saleId = req.params.id;
-        const [saleRows] = await pool.query(`SELECT s.*, c.name as client_name FROM sales s LEFT JOIN clients c ON s.client_id = c.id WHERE s.id = ? AND s.user_id = ?`, [saleId, req.user.id]);
-        if (saleRows.length === 0) return res.status(404).json({ error: 'Vente non trouvée' });
+
+        // Récupérer la vente
+        const [saleRows] = await pool.query(`
+            SELECT s.*, c.name as client_name, c.address as client_address
+            FROM sales s
+            LEFT JOIN clients c ON s.client_id = c.id
+            WHERE s.id = ? AND s.user_id = ?
+        `, [saleId, req.user.id]);
+
+        if (saleRows.length === 0) {
+            return res.status(404).json({ error: 'Vente non trouvée' });
+        }
         const sale = saleRows[0];
-        const [items] = await pool.query(`SELECT si.*, p.name as product_name FROM sale_items si JOIN products p ON si.product_id = p.id WHERE si.sale_id = ?`, [saleId]);
-        const [settingsRows] = await pool.query('SELECT * FROM settings WHERE user_id = ?', [req.user.id]);
-        const company = settingsRows[0] || { company_name: 'Mon Entreprise', currency: 'FCFA' };
+
+        // Récupérer les articles
+        const [items] = await pool.query(`
+            SELECT si.*, p.name as product_name
+            FROM sale_items si
+            JOIN products p ON si.product_id = p.id
+            WHERE si.sale_id = ?
+        `, [saleId]);
+
+        // Paramètres société
+        const [settingsRows] = await pool.query(
+            'SELECT * FROM settings WHERE user_id = ?',
+            [req.user.id]
+        );
+        const company = settingsRows[0] || {
+            company_name: 'Mon Entreprise',
+            currency: 'FCFA'
+        };
+
+        // Cachet et signature
+        const [userSettings] = await pool.query(
+            'SELECT cachet_url, signature_url FROM settings WHERE user_id = ?',
+            [req.user.id]
+        );
+        const userCachet = userSettings[0]?.cachet_url || null;
+        const userSignature = userSettings[0]?.signature_url || null;
+        const hasCachet = userCachet && userCachet.trim() !== '';
+        const hasSignature = userSignature && userSignature.trim() !== '';
 
         const doc = new PDFDocument({ margin: 50, size: 'A4' });
         res.setHeader('Content-Type', 'application/pdf');
@@ -2368,40 +2925,232 @@ app.get('/api/sales/:id/delivery', authenticate, async (req, res) => {
         res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
         doc.pipe(res);
 
-        let y = await drawCompanyHeader(doc, company);
-        doc.fillColor('#3498db').fontSize(18).font('Helvetica-Bold').text(`BORDEREAU DE LIVRAISON N° ${saleId}`, 50, y, { align: 'center' });
-        y += 30;
-        doc.fillColor('#ecf0f1').rect(50, y, 500, 80).fill();
-        doc.fillColor('black').fontSize(10);
-        doc.text(`Date de commande : ${new Date(sale.sale_date).toLocaleString()}`, 60, y + 10);
-        doc.text(`Client : ${sale.client_name || 'Client particulier'}`, 60, y + 25);
-        if (sale.client_address) doc.text(`Adresse de livraison : ${sale.client_address}`, 60, y + 55);
-        y += 90;
+        // Fonction en-tête locale (identique aux précédentes)
+        async function drawCompanyHeaderLocal(doc, company, startY = 45) {
+            const fullWidth = 500;
+            const headerHeight = 110;
+            doc.rect(50, startY, fullWidth, headerHeight).fill('#ffffff');
 
-        const tableTop = y;
-        doc.fillColor('#2c3e50').rect(50, tableTop, 500, 20).fill();
-        doc.fillColor('white').fontSize(10).font('Helvetica-Bold');
-        doc.text('Produit', 60, tableTop + 5);
-        doc.text('Quantité', 250, tableTop + 5);
-        doc.text('Remarque', 350, tableTop + 5);
-        let rowY = tableTop + 25;
-        doc.fillColor('black').font('Helvetica');
-        items.forEach(item => {
-            doc.text(item.product_name, 60, rowY);
-            doc.text(item.quantity.toString(), 250, rowY);
-            doc.text('', 350, rowY);
-            rowY += 20;
-        });
-        for (let i = 0; i <= items.length; i++) doc.lineWidth(0.5).strokeColor('#bdc3c7').moveTo(50, tableTop + 20 + i * 20).lineTo(550, tableTop + 20 + i * 20).stroke();
-        rowY += 30;
-        doc.text(`Date de livraison : _____________`, 50, rowY);
-        doc.text(`Signature du client : _____________`, 300, rowY);
-        doc.fillColor('#2c3e50').rect(50, 750, 500, 30).fill();
-        doc.fillColor('white').fontSize(8).text('Bon de livraison à conserver', 50, 760, { align: 'center' });
+            let textStartX = 50;
+            let textWidth = 500;
+
+            if (company.logo_url && company.logo_url.trim() !== '') {
+                try {
+                    const logoBuffer = await fetchImage(company.logo_url);
+                    doc.image(logoBuffer, 50, startY + 5, { width: 80 });
+                    textStartX = 150;
+                    textWidth = 400;
+                } catch(e) { /* ignorer */ }
+            }
+
+            doc.fillColor('#2c3e50');
+            doc.fontSize(18).font('Helvetica-Bold')
+               .text(company.company_name, textStartX, startY + 10, { width: textWidth - 20, align: 'center' });
+
+            let currentY = startY + 35;
+            if (company.company_subtitle && company.company_subtitle.trim() !== '') {
+                doc.fontSize(10).font('Helvetica')
+                   .text(company.company_subtitle, textStartX, currentY, { width: textWidth - 20, align: 'center' });
+                currentY += 15;
+            }
+            if (company.company_activity && company.company_activity.trim() !== '') {
+                doc.fontSize(9).font('Helvetica-Oblique')
+                   .text(company.company_activity, textStartX, currentY, { width: textWidth - 20, align: 'center' });
+                currentY += 15;
+            }
+            if (company.company_rc && company.company_rc.trim() !== '') {
+                doc.fontSize(8).font('Helvetica')
+                   .text(company.company_rc, textStartX, currentY, { width: textWidth - 20, align: 'center' });
+                currentY += 15;
+            }
+            if (company.company_address && company.company_address.trim() !== '') {
+                doc.fontSize(9).font('Helvetica')
+                   .text(company.company_address, textStartX, currentY, { width: textWidth - 20, align: 'center' });
+                currentY += 15;
+            }
+
+            let phoneLine = '';
+            if (company.company_phone) phoneLine += `Tél : ${company.company_phone}`;
+            if (company.company_phone2) phoneLine += ` // ${company.company_phone2}`;
+            if (phoneLine) {
+                doc.fontSize(9).font('Helvetica')
+                   .text(phoneLine, textStartX, currentY, { width: textWidth - 20, align: 'center' });
+            }
+
+            doc.moveTo(50, startY + headerHeight + 5)
+               .lineTo(550, startY + headerHeight + 5)
+               .stroke('#cccccc');
+
+            return startY + headerHeight + 20;
+        }
+
+        let y = await drawCompanyHeaderLocal(doc, company);
+
+        // Titre
+        doc.fillColor('#2c6e9e').fontSize(18).font('Helvetica-Bold')
+           .text(`BORDEREAU DE LIVRAISON N° ${String(saleId).padStart(5, '0')}`, 50, y, { align: 'center' });
+        y += 30;
+
+        // Bloc client
+        doc.rect(50, y, 500, 70).fill('#f5f7fa').stroke('#e0e4e8', 0.5);
+        doc.fillColor('#1a2a3a').fontSize(10).font('Helvetica-Bold')
+           .text('CLIENT', 60, y + 8);
+        doc.fillColor('#3a4a5a').fontSize(11).font('Helvetica')
+           .text(sale.client_name || 'Client particulier', 60, y + 25);
+        if (sale.client_address) {
+            doc.fontSize(9).font('Helvetica').text(`Adresse : ${sale.client_address}`, 60, y + 42);
+        }
+
+        const rightX = 350;
+        doc.fillColor('#1a2a3a').fontSize(10).font('Helvetica-Bold')
+           .text('DÉTAILS LIVRAISON', rightX, y + 8);
+        doc.fillColor('#3a4a5a').fontSize(10).font('Helvetica')
+           .text(`Date commande : ${new Date(sale.sale_date).toLocaleDateString('fr-FR')}`, rightX, y + 25);
+        if (sale.due_date) {
+            doc.text(`Livraison souhaitée : ${new Date(sale.due_date).toLocaleDateString('fr-FR')}`, rightX, y + 42);
+        }
+        doc.rect(400, y + 42, 90, 20).fill('#3498db');
+        doc.fillColor('#ffffff').fontSize(8).font('Helvetica-Bold')
+           .text('À LIVRER', 418, y + 48);
+
+        y += 85;
+
+        // Tableau des produits (colonne "Remarque" vide)
+        const colX = { product: 55, qty: 270, remark: 355 };
+        const rowH = 20, headerH = 22;
+        const drawTableHeader = (yPos) => {
+            doc.rect(50, yPos, 500, headerH).fill('#2c6e9e');
+            doc.fillColor('#ffffff').fontSize(8).font('Helvetica-Bold');
+            doc.text('PRODUIT', colX.product, yPos + 6);
+            doc.text('QTÉ', colX.qty, yPos + 6, { width: 50, align: 'right' });
+            doc.text('REMARQUE', colX.remark, yPos + 6, { width: 130, align: 'left' });
+            return yPos + headerH;
+        };
+
+        let currentY = drawTableHeader(y);
+        let rowIndex = 0;
+        const maxY = 750 - 100;
+
+        for (const item of items) {
+            const productName = item.product_name || 'Produit';
+            const qty = item.quantity;
+
+            if (currentY + rowH > maxY) {
+                doc.addPage();
+                currentY = drawTableHeader(50);
+                rowIndex = 0;
+            }
+
+            const bg = rowIndex % 2 === 0 ? '#ffffff' : '#f8fafc';
+            doc.rect(50, currentY, 500, rowH).fill(bg);
+            doc.fillColor('#1a2a3a').fontSize(8).font('Helvetica');
+            const truncated = productName.length > 30 ? productName.substring(0, 28) + '…' : productName;
+            doc.text(truncated, colX.product + 2, currentY + 4);
+            doc.text(qty.toString(), colX.qty, currentY + 4, { width: 50, align: 'right' });
+            doc.text('', colX.remark, currentY + 4, { width: 130, align: 'left' });
+
+            currentY += rowH;
+            rowIndex++;
+        }
+
+        // Ligne séparatrice
+        doc.moveTo(50, currentY).lineTo(550, currentY).stroke('#e0e4e8');
+        currentY += 20;
+
+        // Zones de signature
+        doc.fillColor('#1a2a3a').fontSize(10).font('Helvetica');
+        doc.text('Date de livraison : _________________________________', 60, currentY);
+        doc.text('Signature du client : _________________________________', 60, currentY + 20);
+
+        currentY += 50;
+
+        // Pied de page + cachet + signature
+        const footerY = 750;
+        const imgWidth = 100, imgHeight = 40, marginLeft = 50, pageWidth = 500;
+
+        doc.rect(50, footerY, 500, 25).fill('#f0f4f8');
+        doc.fillColor('#7a8a9a').fontSize(8).font('Helvetica');
+        doc.text('Bon de livraison à conserver', 50, footerY + 8, { align: 'center' });
+
+        const spaceNeeded = imgHeight + 30;
+        if (hasCachet || hasSignature) {
+            if (footerY - spaceNeeded < 50) {
+                doc.addPage();
+                const newFooterY = 750;
+                doc.rect(50, newFooterY, 500, 25).fill('#f0f4f8');
+                doc.fillColor('#7a8a9a').fontSize(8).font('Helvetica');
+                doc.text('Bon de livraison à conserver', 50, newFooterY + 8, { align: 'center' });
+
+                if (hasCachet) {
+                    try {
+                        let imageBuffer;
+                        if (userCachet.startsWith('data:image')) {
+                            const base64Data = userCachet.replace(/^data:image\/\w+;base64,/, '');
+                            imageBuffer = Buffer.from(base64Data, 'base64');
+                        } else {
+                            imageBuffer = await fetchImage(userCachet);
+                        }
+                        doc.image(imageBuffer, 50, newFooterY - imgHeight - 8, { width: imgWidth, height: imgHeight });
+                        doc.fillColor('#7a8a9a').fontSize(6).font('Helvetica')
+                           .text('Cachet', 50, newFooterY - 3, { width: imgWidth, align: 'center' });
+                    } catch (e) { console.log('⚠️ Erreur cachet:', e.message); }
+                }
+                if (hasSignature) {
+                    try {
+                        const sigX = 500 - imgWidth;
+                        let imageBuffer;
+                        if (userSignature.startsWith('data:image')) {
+                            const base64Data = userSignature.replace(/^data:image\/\w+;base64,/, '');
+                            imageBuffer = Buffer.from(base64Data, 'base64');
+                        } else {
+                            imageBuffer = await fetchImage(userSignature);
+                        }
+                        doc.image(imageBuffer, sigX, newFooterY - imgHeight - 8, { width: imgWidth, height: imgHeight });
+                        doc.fillColor('#7a8a9a').fontSize(6).font('Helvetica')
+                           .text('Signature', sigX, newFooterY - 3, { width: imgWidth, align: 'center' });
+                    } catch (e) { console.log('⚠️ Erreur signature:', e.message); }
+                }
+            } else {
+                if (hasCachet) {
+                    try {
+                        let imageBuffer;
+                        if (userCachet.startsWith('data:image')) {
+                            const base64Data = userCachet.replace(/^data:image\/\w+;base64,/, '');
+                            imageBuffer = Buffer.from(base64Data, 'base64');
+                        } else {
+                            imageBuffer = await fetchImage(userCachet);
+                        }
+                        doc.image(imageBuffer, marginLeft, footerY - imgHeight - 8, { width: imgWidth, height: imgHeight });
+                        doc.fillColor('#7a8a9a').fontSize(6).font('Helvetica')
+                           .text('Cachet', marginLeft, footerY - 3, { width: imgWidth, align: 'center' });
+                    } catch (e) { console.log('⚠️ Erreur cachet:', e.message); }
+                }
+                if (hasSignature) {
+                    try {
+                        const sigX = pageWidth + marginLeft - imgWidth;
+                        let imageBuffer;
+                        if (userSignature.startsWith('data:image')) {
+                            const base64Data = userSignature.replace(/^data:image\/\w+;base64,/, '');
+                            imageBuffer = Buffer.from(base64Data, 'base64');
+                        } else {
+                            imageBuffer = await fetchImage(userSignature);
+                        }
+                        doc.image(imageBuffer, sigX, footerY - imgHeight - 8, { width: imgWidth, height: imgHeight });
+                        doc.fillColor('#7a8a9a').fontSize(6).font('Helvetica')
+                           .text('Signature', sigX, footerY - 3, { width: imgWidth, align: 'center' });
+                    } catch (e) { console.log('⚠️ Erreur signature:', e.message); }
+                }
+            }
+        }
+
         doc.end();
-    } catch(err) {
-        console.error(err);
-        res.status(500).json({ error: 'Erreur génération bordereau de livraison' });
+        console.log(`✅ Bordereau de livraison #${saleId} généré avec succès`);
+
+    } catch (err) {
+        console.error('Erreur bordereau livraison:', err);
+        if (!res.headersSent) {
+            res.status(500).json({ error: 'Erreur génération bordereau de livraison' });
+        }
     }
 });
 
