@@ -32,7 +32,9 @@ const DB_CONFIG = {
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super_secret_key_2025';
 const PORT = process.env.PORT || 3000;
-
+// ===== CACHE POUR LE COMPTAGE DES PRODUITS =====
+const countCache = new Map();
+const CACHE_TTL = 30000; // 30 secondes
 let pool;
 
 function fetchImage(url) {
@@ -1511,7 +1513,6 @@ app.get('/api/products', authenticate, async (req, res) => {
     const [rows] = await pool.query(sql, params);
     res.json(rows);
 });
-// ===== ROUTE RECHERCHE PRODUITS AVEC PAGINATION =====
 app.get('/api/products/search', authenticate, async (req, res) => {
     const { q, lowStock, limit = 30, offset = 0 } = req.query;
     const userId = req.user.id;
@@ -1523,9 +1524,10 @@ app.get('/api/products/search', authenticate, async (req, res) => {
     const params = [userId];
 
     if (q && q.trim() !== '') {
-        sql += ' AND (p.name LIKE ? OR p.sku LIKE ? OR p.barcode LIKE ?)';
-        const searchTerm = `%${q}%`;
-        params.push(searchTerm, searchTerm, searchTerm);
+        // Utiliser MATCH AGAINST pour une recherche full-text en mode booléen
+        const searchTerm = q.trim().split(' ').map(word => `+${word}*`).join(' ');
+        sql += ` AND MATCH(p.name, p.sku, p.barcode) AGAINST (? IN BOOLEAN MODE)`;
+        params.push(searchTerm);
     }
     if (lowStock === 'true') {
         sql += ' AND p.quantity <= p.reorder_level';
@@ -1542,18 +1544,23 @@ app.get('/api/products/search', authenticate, async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
-// ===== ROUTE COMPTER LES PRODUITS =====
 app.get('/api/products/count', authenticate, async (req, res) => {
     const { q, lowStock } = req.query;
     const userId = req.user.id;
+    const cacheKey = `count_${userId}_${q || ''}_${lowStock || ''}`;
+    
+    const cached = countCache.get(cacheKey);
+    if (cached && (Date.now() - cached.timestamp < CACHE_TTL)) {
+        return res.json({ count: cached.count });
+    }
 
     let sql = 'SELECT COUNT(*) as count FROM products WHERE user_id = ?';
     const params = [userId];
 
     if (q && q.trim() !== '') {
-        sql += ' AND (name LIKE ? OR sku LIKE ? OR barcode LIKE ?)';
-        const searchTerm = `%${q}%`;
-        params.push(searchTerm, searchTerm, searchTerm);
+        const searchTerm = q.trim().split(' ').map(word => `+${word}*`).join(' ');
+        sql += ` AND MATCH(name, sku, barcode) AGAINST (? IN BOOLEAN MODE)`;
+        params.push(searchTerm);
     }
     if (lowStock === 'true') {
         sql += ' AND quantity <= reorder_level';
@@ -1561,7 +1568,9 @@ app.get('/api/products/count', authenticate, async (req, res) => {
 
     try {
         const [rows] = await pool.query(sql, params);
-        res.json({ count: rows[0].count });
+        const count = rows[0].count;
+        countCache.set(cacheKey, { count, timestamp: Date.now() });
+        res.json({ count });
     } catch (err) {
         console.error('❌ Erreur count products:', err);
         res.status(500).json({ error: err.message });
@@ -1592,6 +1601,43 @@ app.get('/api/products/:id', authenticate, async (req, res) => {
         res.json(rows[0]);
     } catch (err) {
         console.error('❌ Erreur get product:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+// Cache pour le comptage
+const countCache = new Map();
+const CACHE_TTL = 30000; // 30 secondes
+
+app.get('/api/products/count', authenticate, async (req, res) => {
+    const { q, lowStock } = req.query;
+    const userId = req.user.id;
+    const cacheKey = `count_${userId}_${q || ''}_${lowStock || ''}`;
+    
+    // Vérifier le cache
+    const cached = countCache.get(cacheKey);
+    if (cached && (Date.now() - cached.timestamp < CACHE_TTL)) {
+        return res.json({ count: cached.count });
+    }
+
+    let sql = 'SELECT COUNT(*) as count FROM products WHERE user_id = ?';
+    const params = [userId];
+
+    if (q && q.trim() !== '') {
+        sql += ' AND (name LIKE ? OR sku LIKE ? OR barcode LIKE ?)';
+        const searchTerm = `%${q}%`;
+        params.push(searchTerm, searchTerm, searchTerm);
+    }
+    if (lowStock === 'true') {
+        sql += ' AND quantity <= reorder_level';
+    }
+
+    try {
+        const [rows] = await pool.query(sql, params);
+        const count = rows[0].count;
+        countCache.set(cacheKey, { count, timestamp: Date.now() });
+        res.json({ count });
+    } catch (err) {
+        console.error('❌ Erreur count products:', err);
         res.status(500).json({ error: err.message });
     }
 });
