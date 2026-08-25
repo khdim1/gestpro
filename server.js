@@ -1697,9 +1697,12 @@ app.get('/api/settings', authenticate, async (req, res) => {
         res.status(500).json({ error: 'Erreur lors du chargement des paramètres.' });
     }
 });
-
 app.put('/api/settings', authenticate, async (req, res) => {
-    const { company_name, company_subtitle, company_activity, company_rc, company_address, company_phone, company_phone2, company_email, logo_url, cachet_url, signature_url, tax_rate, low_stock_alert, currency } = req.body;
+    const {
+        company_name, company_subtitle, company_activity, company_rc,
+        company_address, company_phone, company_phone2, company_email,
+        logo_url, cachet_url, signature_url, tax_rate, low_stock_alert, currency
+    } = req.body;
 
     console.log('📥 PUT /settings reçu:', {
         company_name,
@@ -1718,24 +1721,29 @@ app.put('/api/settings', authenticate, async (req, res) => {
     }
 
     try {
-        await pool.query(
+        const result = await pool.query(
             `UPDATE settings SET 
                 company_name = ?, company_subtitle = ?, company_activity = ?, company_rc = ?, 
                 company_address = ?, company_phone = ?, company_phone2 = ?, company_email = ?, 
                 logo_url = ?, cachet_url = ?, signature_url = ?,
                 tax_rate = ?, low_stock_alert = ?, currency = ? 
              WHERE user_id = ?`,
-            [company_name, company_subtitle, company_activity, company_rc,
-             company_address, company_phone, company_phone2, company_email,
-             logo_url, cachet_url || null, signature_url || null,
-             taxRateToSave, parseInt(low_stock_alert) || 5, currency || 'FCFA',
-             req.user.id]
+            [
+                company_name, company_subtitle, company_activity, company_rc,
+                company_address, company_phone, company_phone2, company_email,
+                logo_url, cachet_url || null, signature_url || null,
+                taxRateToSave,
+                parseInt(low_stock_alert) || 5,
+                currency || 'FCFA',
+                req.user.id
+            ]
         );
-        console.log(`✅ Paramètres mis à jour (TVA: ${taxRateToSave}%)`);
+        console.log('✅ Mise à jour réussie, result:', result);
         res.json({ message: 'Paramètres mis à jour avec succès' });
     } catch (err) {
         console.error('❌ Erreur PUT /settings:', err);
-        res.status(500).json({ error: 'Erreur lors de la mise à jour des paramètres.' });
+        console.error('❌ SQL Error details:', err.sql, err.sqlMessage);
+        res.status(500).json({ error: 'Erreur lors de la mise à jour des paramètres: ' + err.message });
     }
 });
 
