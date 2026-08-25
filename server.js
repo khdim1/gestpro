@@ -2439,16 +2439,15 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         doc.text(`${formatPDFNumber(finalAmount)} ${company.currency}`, 440, currentY + 8, { width: 110, align: 'right' });
         currentY += 35;
 
-        // ============================================================
-// 6. QR CODE (placé à gauche)
+  // ============================================================
+// 6. QR CODE (remis à droite)
 // ============================================================
 console.log('📄 Génération du QR code...');
 if (qrBuffer) {
     const qrSize = 60;
-    const qrX = 50; // ✅ Position à gauche (marge de 50px)
+    const qrX = 500 - qrSize - 15; // ✅ Position à droite (marge de 15px)
     const qrY = 750 - qrSize - 30; // En bas (inchangé)
-    
-    // Vérifier si la place est suffisante, sinon nouvelle page
+
     if (qrY < currentY + 20) {
         doc.addPage();
         currentY = 50;
