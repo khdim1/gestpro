@@ -2443,9 +2443,8 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         // ============================================================
         console.log('📄 Génération du bas de page (cachet, signature, QR code)...');
 
-        const footerY = 750; // ✅ UNE SEULE DÉCLARATION
+        const footerY = 750; // ✅ UNIQUE DÉCLARATION
 
-        // Dimensions
         const cachetWidth = 120;
         const cachetHeight = 50;
         const signatureWidth = 120;
@@ -2454,17 +2453,15 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         const marginLeft = 50;
         const pageWidth = 500;
 
-        // Positions horizontales (réparties)
-        const cachetX = marginLeft;                                          // 50
-        const signatureX = marginLeft + cachetWidth + 30;                   // 50 + 120 + 30 = 200
-        const qrX = pageWidth + marginLeft - qrSize - 10;                   // 500 + 50 - 60 - 10 = 480
+        const cachetX = marginLeft;
+        const signatureX = marginLeft + cachetWidth + 30;
+        const qrX = pageWidth + marginLeft - qrSize - 10;
 
-        // --- Pied de page (fond gris) ---
+        // Pied de page
         doc.rect(50, footerY, 500, 25).fill('#f0f4f8');
         doc.fillColor('#7a8a9a').fontSize(8).font('Helvetica');
         doc.text('Merci de votre confiance • Facture générée par GestPro', 50, footerY + 8, { align: 'center' });
 
-        // --- Récupérer les images du cachet et de la signature ---
         const [userSettings] = await pool.query(
             'SELECT cachet_url, signature_url FROM settings WHERE user_id = ?',
             [req.user.id]
@@ -2474,7 +2471,6 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         const hasCachet = userCachet && userCachet.trim() !== '';
         const hasSignature = userSignature && userSignature.trim() !== '';
 
-        // --- Dessiner le cachet (à gauche) ---
         if (hasCachet) {
             try {
                 let imageBuffer;
@@ -2493,7 +2489,6 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
             }
         }
 
-        // --- Dessiner la signature (au centre) ---
         if (hasSignature) {
             try {
                 let imageBuffer;
@@ -2512,7 +2507,6 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
             }
         }
 
-        // --- Dessiner le QR code (à droite) ---
         if (qrBuffer) {
             const qrY = footerY - qrSize - 8;
             doc.image(qrBuffer, qrX, qrY, { width: qrSize, height: qrSize });
