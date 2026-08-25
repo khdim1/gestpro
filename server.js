@@ -2263,7 +2263,6 @@ async function drawCompanyHeader(doc, company, startY = 45) {
 
     return startY + headerHeight + 20;
 }
-
 // ========== ROUTE FACTURE PDF ==========
 app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
     console.log(`📄 Génération facture #${req.params.id} - Début`);
@@ -2274,9 +2273,8 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
             SELECT s.*, c.name as client_name, c.email as client_email, c.address as client_address 
             FROM sales s 
             LEFT JOIN clients c ON s.client_id = c.id 
-            WHERE s.id = ? AND s.user_id = ?`,
-            [saleId, req.user.id]
-        );
+            WHERE s.id = ? AND s.user_id = ?
+        `, [saleId, req.user.id]);
         if (saleRows.length === 0) {
             console.log(`❌ Vente #${saleId} non trouvée`);
             return res.status(404).json({ error: 'Vente non trouvée' });
@@ -2287,9 +2285,8 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
             SELECT si.*, p.name as product_name 
             FROM sale_items si 
             JOIN products p ON si.product_id = p.id 
-            WHERE si.sale_id = ?`,
-            [saleId]
-        );
+            WHERE si.sale_id = ?
+        `, [saleId]);
         console.log(`📦 ${items.length} articles récupérés`);
 
         const [settingsRows] = await pool.query('SELECT * FROM settings WHERE user_id = ?', [req.user.id]);
@@ -2312,13 +2309,18 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
         doc.pipe(res);
 
+        // ============================================================
+        // EN-TÊTE
+        // ============================================================
         let y = await drawCompanyHeader(doc, company);
 
         doc.fillColor('#2c6e9e').fontSize(18).font('Helvetica-Bold')
            .text(`FACTURE N° ${String(saleId).padStart(5, '0')}`, 50, y, { align: 'center' });
         y += 30;
 
-        // Bloc client
+        // ============================================================
+        // BLOC CLIENT / DÉTAILS
+        // ============================================================
         doc.rect(50, y, 500, 70).fill('#f5f7fa').stroke('#e0e4e8', 0.5);
         doc.fillColor('#1a2a3a').fontSize(10).font('Helvetica-Bold')
            .text('CLIENT', 60, y + 8);
@@ -2348,7 +2350,9 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
            .text(statusInfo.label, 418, y + 48);
         y += 85;
 
-        // Tableau des produits
+        // ============================================================
+        // TABLEAU DES PRODUITS
+        // ============================================================
         const colX = {
             product: 55,
             qty: 270,
@@ -2374,7 +2378,7 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         let currentY = drawTableHeader(y);
         let subtotal = 0;
         let rowIndex = 0;
-        const maxY = 750 - 100;
+        const maxY = 750 - 100; // Reserve space for footer
 
         for (const item of items) {
             const productName = item.product_name || 'Produit';
@@ -2405,7 +2409,9 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         doc.moveTo(50, currentY).lineTo(550, currentY).stroke('#e0e4e8');
         currentY += 10;
 
-        // Résumé
+        // ============================================================
+        // RÉSUMÉ
+        // ============================================================
         const summaryX = 360;
         const taxAmount = sale.tax || 0;
         const remiseValue = (sale.remise_pct || 0) / 100 * subtotal;
@@ -2432,19 +2438,23 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         });
         currentY += summaryLines.length * 18 + 8;
 
-        // Net à payer
+        // ============================================================
+        // NET À PAYER
+        // ============================================================
         doc.rect(350, currentY, 200, 28).fill('#2c6e9e');
         doc.fillColor('#ffffff').fontSize(11).font('Helvetica-Bold');
         doc.text('NET À PAYER', 360, currentY + 8);
         doc.text(`${formatPDFNumber(finalAmount)} ${company.currency}`, 440, currentY + 8, { width: 110, align: 'right' });
         currentY += 35;
-        // ============================================================
-        // 6. QR CODE + CACHET + SIGNATURE (disposition en bas)
-        // ============================================================
-        console.log('📄 Génération du bas de page (cachet, signature, QR code)...');
 
-        const footerY = 750; // ✅ UNIQUE DÉCLARATION
+        // ============================================================
+        // PIED DE PAGE : CACHET, SIGNATURE, QR CODE
+        // ============================================================
+        console.log('📄 Génération du bas de page...');
 
+        const footerY = 750; // Position verticale de base
+
+        // Dimensions et positions
         const cachetWidth = 120;
         const cachetHeight = 50;
         const signatureWidth = 120;
@@ -2457,11 +2467,12 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         const signatureX = marginLeft + cachetWidth + 30;
         const qrX = pageWidth + marginLeft - qrSize - 10;
 
-        // Pied de page
+        // --- Pied de page (fond gris) ---
         doc.rect(50, footerY, 500, 25).fill('#f0f4f8');
         doc.fillColor('#7a8a9a').fontSize(8).font('Helvetica');
         doc.text('Merci de votre confiance • Facture générée par GestPro', 50, footerY + 8, { align: 'center' });
 
+        // --- Récupérer le cachet et la signature ---
         const [userSettings] = await pool.query(
             'SELECT cachet_url, signature_url FROM settings WHERE user_id = ?',
             [req.user.id]
@@ -2471,6 +2482,7 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         const hasCachet = userCachet && userCachet.trim() !== '';
         const hasSignature = userSignature && userSignature.trim() !== '';
 
+        // --- Cachet (à gauche) ---
         if (hasCachet) {
             try {
                 let imageBuffer;
@@ -2489,6 +2501,7 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
             }
         }
 
+        // --- Signature (au centre) ---
         if (hasSignature) {
             try {
                 let imageBuffer;
@@ -2507,6 +2520,7 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
             }
         }
 
+        // --- QR code (à droite) ---
         if (qrBuffer) {
             const qrY = footerY - qrSize - 8;
             doc.image(qrBuffer, qrX, qrY, { width: qrSize, height: qrSize });
@@ -2517,106 +2531,6 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         console.log(`✅ Facture #${saleId} générée avec succès`);
         doc.end();
 
-
-        // Pied de page, cachet, signature
-        const footerY = 750;
-const imgWidth = 150;   // ✅ plus large
-const imgHeight = 60;   // ✅ plus haut
-        const marginLeft = 50;
-        const pageWidth = 500;
-
-        doc.rect(50, footerY, 500, 25).fill('#f0f4f8');
-        doc.fillColor('#7a8a9a').fontSize(8).font('Helvetica');
-        doc.text('Merci de votre confiance • Facture générée par GestPro', 50, footerY + 8, { align: 'center' });
-
-        const [userSettings] = await pool.query('SELECT cachet_url, signature_url FROM settings WHERE user_id = ?', [req.user.id]);
-        const userCachet = userSettings[0]?.cachet_url || null;
-        const userSignature = userSettings[0]?.signature_url || null;
-
-        const hasCachet = userCachet && userCachet.trim() !== '';
-        const hasSignature = userSignature && userSignature.trim() !== '';
-
-        if (hasCachet || hasSignature) {
-            const spaceNeeded = imgHeight + 30;
-            if (footerY - spaceNeeded < 50) {
-                doc.addPage();
-                const newFooterY = 750;
-                doc.rect(50, newFooterY, 500, 25).fill('#f0f4f8');
-                doc.fillColor('#7a8a9a').fontSize(8).font('Helvetica');
-                doc.text('Merci de votre confiance • Facture générée par GestPro', 50, newFooterY + 8, { align: 'center' });
-
-                if (hasCachet) {
-                    try {
-                        let imageBuffer;
-                        if (userCachet.startsWith('data:image')) {
-                            const base64Data = userCachet.replace(/^data:image\/\w+;base64,/, '');
-                            imageBuffer = Buffer.from(base64Data, 'base64');
-                        } else {
-                            imageBuffer = await fetchImage(userCachet);
-                        }
-                        doc.image(imageBuffer, 50, newFooterY - imgHeight - 8, { width: imgWidth, height: imgHeight });
-                        doc.fillColor('#7a8a9a').fontSize(6).font('Helvetica')
-                           .text('Cachet', 50, newFooterY - 3, { width: imgWidth, align: 'center' });
-                    } catch (e) {
-                        console.log('⚠️ Erreur chargement cachet:', e.message);
-                    }
-                }
-                if (hasSignature) {
-                    try {
-                        const sigX = 500 - imgWidth;
-                        let imageBuffer;
-                        if (userSignature.startsWith('data:image')) {
-                            const base64Data = userSignature.replace(/^data:image\/\w+;base64,/, '');
-                            imageBuffer = Buffer.from(base64Data, 'base64');
-                        } else {
-                            imageBuffer = await fetchImage(userSignature);
-                        }
-                        doc.image(imageBuffer, sigX, newFooterY - imgHeight - 8, { width: imgWidth, height: imgHeight });
-                        doc.fillColor('#7a8a9a').fontSize(6).font('Helvetica')
-                           .text('Signature', sigX, newFooterY - 3, { width: imgWidth, align: 'center' });
-                    } catch (e) {
-                        console.log('⚠️ Erreur chargement signature:', e.message);
-                    }
-                }
-            } else {
-                if (hasCachet) {
-                    try {
-                        let imageBuffer;
-                        if (userCachet.startsWith('data:image')) {
-                            const base64Data = userCachet.replace(/^data:image\/\w+;base64,/, '');
-                            imageBuffer = Buffer.from(base64Data, 'base64');
-                        } else {
-                            imageBuffer = await fetchImage(userCachet);
-                        }
-                        doc.image(imageBuffer, marginLeft, footerY - imgHeight - 8, { width: imgWidth, height: imgHeight });
-                        doc.fillColor('#7a8a9a').fontSize(6).font('Helvetica')
-                           .text('Cachet', marginLeft, footerY - 3, { width: imgWidth, align: 'center' });
-                    } catch (e) {
-                        console.log('⚠️ Erreur chargement cachet:', e.message);
-                    }
-                }
-                if (hasSignature) {
-                    try {
-                        const sigX = pageWidth + marginLeft - imgWidth;
-                        let imageBuffer;
-                        if (userSignature.startsWith('data:image')) {
-                            const base64Data = userSignature.replace(/^data:image\/\w+;base64,/, '');
-                            imageBuffer = Buffer.from(base64Data, 'base64');
-                        } else {
-                            imageBuffer = await fetchImage(userSignature);
-                        }
-                        doc.image(imageBuffer, sigX, footerY - imgHeight - 8, { width: imgWidth, height: imgHeight });
-                        doc.fillColor('#7a8a9a').fontSize(6).font('Helvetica')
-                           .text('Signature', sigX, footerY - 3, { width: imgWidth, align: 'center' });
-                    } catch (e) {
-                        console.log('⚠️ Erreur chargement signature:', e.message);
-                    }
-                }
-            }
-        }
-
-        console.log(`✅ Facture #${saleId} générée avec succès`);
-        doc.end();
     } catch (err) {
         console.error(`❌ Erreur facture #${req.params.id}:`, err);
         if (!res.headersSent) {
