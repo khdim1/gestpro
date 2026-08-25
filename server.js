@@ -2464,8 +2464,8 @@ if (qrBuffer) {
 
         // Pied de page, cachet, signature
         const footerY = 750;
-        const imgWidth = 100;
-        const imgHeight = 40;
+const imgWidth = 150;   // ✅ plus large
+const imgHeight = 60;   // ✅ plus haut
         const marginLeft = 50;
         const pageWidth = 500;
 
