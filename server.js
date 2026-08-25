@@ -92,8 +92,8 @@ async function initAndStart() {
             company_phone2 VARCHAR(50),
             company_email VARCHAR(100),
             logo_url TEXT,
-            cachet_url TEXT,
-            signature_url TEXT,
+            cachet_url LONGTEXT,
+            signature_url LONGTEXT,
             tax_rate DECIMAL(5,2) DEFAULT 0.00,
             low_stock_alert INT DEFAULT 5,
             currency VARCHAR(10) DEFAULT 'FCFA',
@@ -1803,7 +1803,20 @@ app.post('/api/proforma', authenticate, async (req, res) => {
         connection.release();
     }
 });
-
+// ===== ROUTE ADMIN : COMPTER LES COMMANDES EN ATTENTE =====
+app.get('/api/admin/orders/pending-count', authenticate, async (req, res) => {
+    const userId = req.user.id;
+    try {
+        const [rows] = await pool.query(
+            'SELECT COUNT(*) as count FROM orders WHERE user_id = ? AND status = ?',
+            [userId, 'pending']
+        );
+        res.json({ count: rows[0].count || 0 });
+    } catch (err) {
+        console.error('Erreur comptage commandes en attente:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
 app.get('/api/proforma', authenticate, async (req, res) => {
     const [rows] = await pool.query('SELECT * FROM proforma_invoices WHERE user_id = ? ORDER BY issue_date DESC', [req.user.id]);
     res.json(rows);
