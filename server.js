@@ -2438,90 +2438,92 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         doc.text('NET À PAYER', 360, currentY + 8);
         doc.text(`${formatPDFNumber(finalAmount)} ${company.currency}`, 440, currentY + 8, { width: 110, align: 'right' });
         currentY += 35;
-// ============================================================
-// 6. QR CODE + CACHET + SIGNATURE (disposition en bas)
-// ============================================================
-console.log('📄 Génération du bas de page (cachet, signature, QR code)...');
+        // ============================================================
+        // 6. QR CODE + CACHET + SIGNATURE (disposition en bas)
+        // ============================================================
+        console.log('📄 Génération du bas de page (cachet, signature, QR code)...');
 
-const footerY = 750; // Position verticale de base
+        const footerY = 750; // ✅ UNE SEULE DÉCLARATION
 
-// Dimensions
-const cachetWidth = 120;
-const cachetHeight = 50;
-const signatureWidth = 120;
-const signatureHeight = 50;
-const qrSize = 60;
-const marginLeft = 50;
-const pageWidth = 500;
+        // Dimensions
+        const cachetWidth = 120;
+        const cachetHeight = 50;
+        const signatureWidth = 120;
+        const signatureHeight = 50;
+        const qrSize = 60;
+        const marginLeft = 50;
+        const pageWidth = 500;
 
-// Positions horizontales (réparties)
-const cachetX = marginLeft;                                          // 50
-const signatureX = marginLeft + cachetWidth + 30;                   // 50 + 120 + 30 = 200
-const qrX = pageWidth + marginLeft - qrSize - 10;                   // 500 + 50 - 60 - 10 = 480
+        // Positions horizontales (réparties)
+        const cachetX = marginLeft;                                          // 50
+        const signatureX = marginLeft + cachetWidth + 30;                   // 50 + 120 + 30 = 200
+        const qrX = pageWidth + marginLeft - qrSize - 10;                   // 500 + 50 - 60 - 10 = 480
 
-// --- Pied de page (fond gris) ---
-doc.rect(50, footerY, 500, 25).fill('#f0f4f8');
-doc.fillColor('#7a8a9a').fontSize(8).font('Helvetica');
-doc.text('Merci de votre confiance • Facture générée par GestPro', 50, footerY + 8, { align: 'center' });
+        // --- Pied de page (fond gris) ---
+        doc.rect(50, footerY, 500, 25).fill('#f0f4f8');
+        doc.fillColor('#7a8a9a').fontSize(8).font('Helvetica');
+        doc.text('Merci de votre confiance • Facture générée par GestPro', 50, footerY + 8, { align: 'center' });
 
-// --- Récupérer les images du cachet et de la signature ---
-const [userSettings] = await pool.query(
-    'SELECT cachet_url, signature_url FROM settings WHERE user_id = ?',
-    [req.user.id]
-);
-const userCachet = userSettings[0]?.cachet_url || null;
-const userSignature = userSettings[0]?.signature_url || null;
-const hasCachet = userCachet && userCachet.trim() !== '';
-const hasSignature = userSignature && userSignature.trim() !== '';
+        // --- Récupérer les images du cachet et de la signature ---
+        const [userSettings] = await pool.query(
+            'SELECT cachet_url, signature_url FROM settings WHERE user_id = ?',
+            [req.user.id]
+        );
+        const userCachet = userSettings[0]?.cachet_url || null;
+        const userSignature = userSettings[0]?.signature_url || null;
+        const hasCachet = userCachet && userCachet.trim() !== '';
+        const hasSignature = userSignature && userSignature.trim() !== '';
 
-// --- Dessiner le cachet (à gauche) ---
-if (hasCachet) {
-    try {
-        let imageBuffer;
-        if (userCachet.startsWith('data:image')) {
-            const base64Data = userCachet.replace(/^data:image\/\w+;base64,/, '');
-            imageBuffer = Buffer.from(base64Data, 'base64');
-        } else {
-            imageBuffer = await fetchImage(userCachet);
+        // --- Dessiner le cachet (à gauche) ---
+        if (hasCachet) {
+            try {
+                let imageBuffer;
+                if (userCachet.startsWith('data:image')) {
+                    const base64Data = userCachet.replace(/^data:image\/\w+;base64,/, '');
+                    imageBuffer = Buffer.from(base64Data, 'base64');
+                } else {
+                    imageBuffer = await fetchImage(userCachet);
+                }
+                const yPos = footerY - cachetHeight - 8;
+                doc.image(imageBuffer, cachetX, yPos, { width: cachetWidth, height: cachetHeight });
+                doc.fillColor('#7a8a9a').fontSize(6).font('Helvetica')
+                   .text('Cachet', cachetX, footerY - 3, { width: cachetWidth, align: 'center' });
+            } catch (e) {
+                console.log('⚠️ Erreur chargement cachet:', e.message);
+            }
         }
-        // Placer le cachet juste au-dessus du pied de page
-        const yPos = footerY - cachetHeight - 8;
-        doc.image(imageBuffer, cachetX, yPos, { width: cachetWidth, height: cachetHeight });
-        doc.fillColor('#7a8a9a').fontSize(6).font('Helvetica')
-           .text('Cachet', cachetX, footerY - 3, { width: cachetWidth, align: 'center' });
-    } catch (e) {
-        console.log('⚠️ Erreur chargement cachet:', e.message);
-    }
-}
 
-// --- Dessiner la signature (au centre) ---
-if (hasSignature) {
-    try {
-        let imageBuffer;
-        if (userSignature.startsWith('data:image')) {
-            const base64Data = userSignature.replace(/^data:image\/\w+;base64,/, '');
-            imageBuffer = Buffer.from(base64Data, 'base64');
-        } else {
-            imageBuffer = await fetchImage(userSignature);
+        // --- Dessiner la signature (au centre) ---
+        if (hasSignature) {
+            try {
+                let imageBuffer;
+                if (userSignature.startsWith('data:image')) {
+                    const base64Data = userSignature.replace(/^data:image\/\w+;base64,/, '');
+                    imageBuffer = Buffer.from(base64Data, 'base64');
+                } else {
+                    imageBuffer = await fetchImage(userSignature);
+                }
+                const yPos = footerY - signatureHeight - 8;
+                doc.image(imageBuffer, signatureX, yPos, { width: signatureWidth, height: signatureHeight });
+                doc.fillColor('#7a8a9a').fontSize(6).font('Helvetica')
+                   .text('Signature', signatureX, footerY - 3, { width: signatureWidth, align: 'center' });
+            } catch (e) {
+                console.log('⚠️ Erreur chargement signature:', e.message);
+            }
         }
-        const yPos = footerY - signatureHeight - 8;
-        doc.image(imageBuffer, signatureX, yPos, { width: signatureWidth, height: signatureHeight });
-        doc.fillColor('#7a8a9a').fontSize(6).font('Helvetica')
-           .text('Signature', signatureX, footerY - 3, { width: signatureWidth, align: 'center' });
-    } catch (e) {
-        console.log('⚠️ Erreur chargement signature:', e.message);
-    }
-}
 
-// --- Dessiner le QR code (à droite) ---
-if (qrBuffer) {
-    const qrY = footerY - qrSize - 8;
-    doc.image(qrBuffer, qrX, qrY, { width: qrSize, height: qrSize });
-    doc.fillColor('#7a8a9a').fontSize(6).font('Helvetica')
-       .text('Scannez', qrX, footerY - 3, { width: qrSize, align: 'center' });
-}
+        // --- Dessiner le QR code (à droite) ---
+        if (qrBuffer) {
+            const qrY = footerY - qrSize - 8;
+            doc.image(qrBuffer, qrX, qrY, { width: qrSize, height: qrSize });
+            doc.fillColor('#7a8a9a').fontSize(6).font('Helvetica')
+               .text('Scannez', qrX, footerY - 3, { width: qrSize, align: 'center' });
+        }
 
-    
+        console.log(`✅ Facture #${saleId} générée avec succès`);
+        doc.end();
+
+
         // Pied de page, cachet, signature
         const footerY = 750;
 const imgWidth = 150;   // ✅ plus large
