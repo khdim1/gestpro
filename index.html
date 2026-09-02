@@ -3041,7 +3041,7 @@ async function renderSales() {
                 </div>
             </div>
         </div>
-       <!-- MODAL MODIFICATION VENTE -->
+ <!-- MODAL MODIFICATION VENTE -->
 <div class="modal fade" id="editSaleModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
@@ -3050,7 +3050,7 @@ async function renderSales() {
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-                <!-- ====== CHAMPS CLIENT ====== -->
+                <!-- CHAMPS CLIENT -->
                 <div class="row mb-3">
                     <div class="col-md-6">
                         <label class="form-label">👤 Nom du client *</label>
@@ -3073,7 +3073,7 @@ async function renderSales() {
                 </div>
                 <hr>
 
-                <!-- ====== ARTICLES ====== -->
+                <!-- TABLEAU DES ARTICLES -->
                 <div id="editSaleItems">
                     <table class="table table-sm">
                         <thead>
@@ -3090,9 +3090,28 @@ async function renderSales() {
                         </tbody>
                     </table>
                 </div>
-                <hr>
 
-                <!-- ====== RÉSUMÉ ====== -->
+                <!-- ====== NOUVEAU : AJOUTER UN ARTICLE ====== -->
+                <div class="mt-2 border-top pt-2">
+                    <div class="d-flex gap-2 align-items-center flex-wrap">
+                        <div class="flex-grow-1 position-relative">
+                            <input type="text" id="editProductSearch" class="form-control form-control-sm" 
+                                   placeholder="🔍 Rechercher un produit..." oninput="filterEditProducts()">
+                            <div id="editProductSuggestions" class="client-suggestion" style="display:none; position:absolute; z-index:1050; width:100%;"></div>
+                        </div>
+                        <div class="d-flex gap-1">
+                            <input type="text" id="editBarcodeScan" class="form-control form-control-sm" 
+                                   placeholder="📷 Code-barres" style="width:150px;" 
+                                   onkeydown="if(event.key==='Enter') addProductByBarcode(this.value)">
+                            <button class="btn btn-sm btn-success" onclick="addSelectedEditProduct()">
+                                <i class="bi bi-plus-circle"></i> Ajouter
+                            </button>
+                        </div>
+                    </div>
+                    <small class="text-muted">Scannez un code-barres ou recherchez un produit, puis cliquez sur <strong>Ajouter</strong>.</small>
+                </div>
+
+                <hr>
                 <div class="row">
                     <div class="col-6">
                         <strong>Sous-total :</strong>
@@ -3100,8 +3119,6 @@ async function renderSales() {
                     </div>
                 </div>
                 <hr>
-
-                <!-- ====== REMISE & ACOMPTE ====== -->
                 <div class="row">
                     <div class="col-md-6">
                         <label class="form-label">Remise (%)</label>
