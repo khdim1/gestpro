@@ -965,15 +965,15 @@ async function renderDashboard() {
         const data = await apiCall('/reports/dashboard');
         const lowStockLink = `<a href="#" onclick="loadPage('products'); setTimeout(() => document.getElementById('lowStockFilter')?.click(), 500);" class="stat-link">Voir les produits en stock faible</a>`;
         
-        // 🔗 Lien vers la boutique personnalisée
-        const shopUrl = currentUser?.id ? `/store?shop=${currentUser.id}` : '/store';
-        const shopButton = `
-            <div class="text-end mb-3">
-                <a href="${shopUrl}" target="_blank" class="btn btn-outline-primary btn-sm">
-                    <i class="bi bi-bag"></i> Voir ma boutique
-                </a>
-            </div>
-        `;
+       // 🔗 Lien vers la boutique personnalisée (toujours affiché)
+const shopUrl = window.currentUser?.id ? `/store?shop=${window.currentUser.id}` : '/store';
+const shopButton = `
+    <div class="text-end mb-3">
+        <a href="${shopUrl}" target="_blank" rel="noopener noreferrer" class="btn btn-outline-primary btn-sm">
+            <i class="bi bi-bag"></i> Voir ma boutique
+        </a>
+    </div>
+`;
 
         const html = `
             ${shopButton}
