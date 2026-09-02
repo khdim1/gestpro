@@ -747,7 +747,13 @@ window.editSale = async function(saleId) {
         const sale = data.sale;
         const items = data.items;
 
-        // Remplir la modal
+        // Remplir les champs client
+        document.getElementById('editClientName').value = sale.client_name || '';
+        document.getElementById('editClientEmail').value = sale.client_email || '';
+        document.getElementById('editClientPhone').value = sale.client_phone || '';
+        document.getElementById('editClientAddress').value = sale.client_address || '';
+
+        // Remplir la modal (numéro, remise, acompte)
         document.getElementById('editSaleId').textContent = saleId;
         document.getElementById('editRemisePct').value = sale.remise_pct || 0;
         document.getElementById('editAcompte').value = sale.acompte || 0;
@@ -804,7 +810,6 @@ window.editSale = async function(saleId) {
         alert('❌ Impossible de charger les détails de la vente : ' + err.message);
     }
 };
-
 // ===== RECALCUL DES TOTAUX DANS LA MODAL =====
 window.recalcEditTotals = function() {
     let subtotal = 0;
@@ -820,7 +825,7 @@ window.recalcEditTotals = function() {
     if (display) display.innerText = formatNumber(subtotal) + ' FCFA';
 };
 
-// ===== SAUVEGARDER LES MODIFICATIONS =====
+  // ===== SAUVEGARDER LES MODIFICATIONS =====
 window.saveSaleModification = async function() {
     const saleId = document.getElementById('editSaleId').dataset.saleId;
     if (!saleId) {
@@ -844,16 +849,30 @@ window.saveSaleModification = async function() {
         return;
     }
 
+    // Récupérer les données client
+    const clientData = {
+        client_name: document.getElementById('editClientName').value.trim(),
+        client_email: document.getElementById('editClientEmail').value.trim(),
+        client_phone: document.getElementById('editClientPhone').value.trim(),
+        client_address: document.getElementById('editClientAddress').value.trim()
+    };
+
     const remise_pct = parseFloat(document.getElementById('editRemisePct').value) || 0;
     const acompte = parseFloat(document.getElementById('editAcompte').value) || 0;
 
     try {
-        // Mettre à jour les articles de la vente
+        // 1. Mettre à jour les articles de la vente
         await apiCall(`/sales/${saleId}/items`, 'PUT', { items });
 
-        // Mettre à jour les informations générales (remise, acompte, client, etc.)
-        // On peut aussi appeler une autre route pour mettre à jour le client, mais ici on se contente des montants
-        await apiCall(`/sales/${saleId}`, 'PUT', { remise_pct, acompte });
+        // 2. Mettre à jour les informations générales (client, remise, acompte)
+        await apiCall(`/sales/${saleId}`, 'PUT', {
+            remise_pct,
+            acompte,
+            client_name: clientData.client_name,
+            client_email: clientData.client_email,
+            client_phone: clientData.client_phone,
+            client_address: clientData.client_address
+        });
 
         alert('✅ Vente modifiée avec succès !');
         bootstrap.Modal.getInstance(document.getElementById('editSaleModal')).hide();
@@ -3022,60 +3041,87 @@ async function renderSales() {
                 </div>
             </div>
         </div>
-        <!-- MODAL MODIFICATION VENTE -->
-        <div class="modal fade" id="editSaleModal" tabindex="-1">
-            <div class="modal-dialog modal-lg">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5><i class="bi bi-pencil me-2"></i>Modifier la vente #<span id="editSaleId"></span></h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+       <!-- MODAL MODIFICATION VENTE -->
+<div class="modal fade" id="editSaleModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5><i class="bi bi-pencil me-2"></i>Modifier la vente #<span id="editSaleId"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <!-- ====== CHAMPS CLIENT ====== -->
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label">👤 Nom du client *</label>
+                        <input type="text" id="editClientName" class="form-control" placeholder="Nom">
                     </div>
-                    <div class="modal-body">
-                        <div id="editSaleItems">
-                            <!-- TABLEAU DES ARTICLES -->
-                            <table class="table table-sm">
-                                <thead>
-                                    <tr>
-                                        <th>Produit</th>
-                                        <th>Qté</th>
-                                        <th>Prix unit.</th>
-                                        <th>Total</th>
-                                        <th>Action</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="editItemsBody">
-                                    <!-- Rempli par JavaScript -->
-                                </tbody>
-                            </table>
-                        </div>
-                        <hr>
-                        <div class="row">
-                            <div class="col-6">
-                                <strong>Sous-total :</strong>
-                                <span id="editSubtotalDisplay">0 FCFA</span>
-                            </div>
-                        </div>
-                        <hr>
-                        <div class="row">
-                            <div class="col-md-6">
-                                <label class="form-label">Remise (%)</label>
-                                <input type="number" id="editRemisePct" class="form-control" step="0.01">
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label">Acompte (FCFA)</label>
-                                <input type="number" id="editAcompte" class="form-control" step="0.01">
-                            </div>
-                        </div>
+                    <div class="col-md-6">
+                        <label class="form-label">📧 Email</label>
+                        <input type="email" id="editClientEmail" class="form-control" placeholder="Email">
                     </div>
-                    <div class="modal-footer">
-                        <button class="btn btn-primary" onclick="saveSaleModification()">
-                            <i class="bi bi-save me-1"></i>Enregistrer
-                        </button>
-                        <button class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label">📞 Téléphone</label>
+                        <input type="text" id="editClientPhone" class="form-control" placeholder="Téléphone">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">📍 Adresse</label>
+                        <input type="text" id="editClientAddress" class="form-control" placeholder="Adresse">
+                    </div>
+                </div>
+                <hr>
+
+                <!-- ====== ARTICLES ====== -->
+                <div id="editSaleItems">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Produit</th>
+                                <th>Qté</th>
+                                <th>Prix unit.</th>
+                                <th>Total</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="editItemsBody">
+                            <!-- Rempli par JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+                <hr>
+
+                <!-- ====== RÉSUMÉ ====== -->
+                <div class="row">
+                    <div class="col-6">
+                        <strong>Sous-total :</strong>
+                        <span id="editSubtotalDisplay">0 FCFA</span>
+                    </div>
+                </div>
+                <hr>
+
+                <!-- ====== REMISE & ACOMPTE ====== -->
+                <div class="row">
+                    <div class="col-md-6">
+                        <label class="form-label">Remise (%)</label>
+                        <input type="number" id="editRemisePct" class="form-control" step="0.01" value="0">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Acompte (FCFA)</label>
+                        <input type="number" id="editAcompte" class="form-control" step="0.01" value="0">
                     </div>
                 </div>
             </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" onclick="saveSaleModification()">
+                    <i class="bi bi-save me-1"></i>Enregistrer
+                </button>
+                <button class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+            </div>
         </div>
+    </div>
+</div>
     `;
     document.getElementById('pageContainer').innerHTML = html;
 
