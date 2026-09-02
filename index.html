@@ -2909,11 +2909,13 @@ async function renderSales() {
     try {
         const data = await apiCall(`/products/search?limit=${itemsPerPage}&offset=0`);
         allProducts = data;
+         window.allProducts = allProducts; // ✅ AJOUTE CETTE LIGNE
         const countData = await apiCall(`/products/count`);
         totalProducts = countData.count || 0;
     } catch(e) {
         console.error('Erreur chargement produits:', e);
         allProducts = [];
+         window.allProducts = allProducts; // ✅ AJOUTE AUSSI ICI
         totalProducts = 0;
     }
     
@@ -3156,6 +3158,8 @@ async function renderSales() {
             
             const data = await apiCall(url);
             allProducts = data;
+                    window.allProducts = allProducts; // ✅ AJOUTE CETTE LIGNE
+
             currentPage = page;
             currentSearch = search;
             
