@@ -3022,7 +3022,6 @@ async function renderSales() {
                 </div>
             </div>
         </div>
-
         <!-- MODAL MODIFICATION VENTE -->
         <div class="modal fade" id="editSaleModal" tabindex="-1">
             <div class="modal-dialog modal-lg">
@@ -3032,7 +3031,23 @@ async function renderSales() {
                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body">
-                        <div id="editSaleItems"></div>
+                        <div id="editSaleItems">
+                            <!-- TABLEAU DES ARTICLES -->
+                            <table class="table table-sm">
+                                <thead>
+                                    <tr>
+                                        <th>Produit</th>
+                                        <th>Qté</th>
+                                        <th>Prix unit.</th>
+                                        <th>Total</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="editItemsBody">
+                                    <!-- Rempli par JavaScript -->
+                                </tbody>
+                            </table>
+                        </div>
                         <hr>
                         <div class="row">
                             <div class="col-6">
@@ -3042,12 +3057,20 @@ async function renderSales() {
                         </div>
                         <hr>
                         <div class="row">
-                            <div class="col-md-6"><label class="form-label">Remise (%)</label><input type="number" id="editRemisePct" class="form-control" step="0.01"></div>
-                            <div class="col-md-6"><label class="form-label">Acompte (FCFA)</label><input type="number" id="editAcompte" class="form-control" step="0.01"></div>
+                            <div class="col-md-6">
+                                <label class="form-label">Remise (%)</label>
+                                <input type="number" id="editRemisePct" class="form-control" step="0.01">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Acompte (FCFA)</label>
+                                <input type="number" id="editAcompte" class="form-control" step="0.01">
+                            </div>
                         </div>
                     </div>
                     <div class="modal-footer">
-                        <button class="btn btn-primary" onclick="saveSaleModification()"><i class="bi bi-save me-1"></i>Enregistrer</button>
+                        <button class="btn btn-primary" onclick="saveSaleModification()">
+                            <i class="bi bi-save me-1"></i>Enregistrer
+                        </button>
                         <button class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
                     </div>
                 </div>
