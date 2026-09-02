@@ -2410,13 +2410,13 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         currentY += 10;
 
         // ============================================================
-        // RÉSUMÉ
+        // RÉSUMÉ ET NET À PAYER (recalcul explicite)
         // ============================================================
         const summaryX = 360;
         const taxAmount = sale.tax || 0;
         const remiseValue = (sale.remise_pct || 0) / 100 * subtotal;
         const acompteValue = sale.acompte || 0;
-        const finalAmount = sale.final_amount || 0;
+        const netAPayer = subtotal - remiseValue + taxAmount - acompteValue;
 
         const summaryLines = [];
         summaryLines.push({ label: 'Sous-total', value: formatPDFNumber(subtotal) });
@@ -2439,14 +2439,13 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         currentY += summaryLines.length * 18 + 8;
 
         // ============================================================
-       // Recalculer le net à partir des valeurs affichées
-
-const remiseValue = (sale.remise_pct || 0) / 100 * subtotal;
-const acompteValue = sale.acompte || 0;
-const netAPayer = subtotal - remiseValue + taxAmount - acompteValue;
-
-// Utiliser netAPayer pour l'affichage
-doc.text(`${formatPDFNumber(netAPayer)} ${company.currency}`, 440, currentY + 8, { width: 110, align: 'right' });
+        // NET À PAYER (cadre bleu)
+        // ============================================================
+        doc.rect(350, currentY, 200, 28).fill('#2c6e9e');
+        doc.fillColor('#ffffff').fontSize(11).font('Helvetica-Bold');
+        doc.text('NET À PAYER', 360, currentY + 8);
+        doc.text(`${formatPDFNumber(netAPayer)} ${company.currency}`, 440, currentY + 8, { width: 110, align: 'right' });
+        currentY += 35;
 
         // ============================================================
         // PIED DE PAGE : CACHET, SIGNATURE, QR CODE
