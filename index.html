@@ -742,10 +742,10 @@ window.editProduct = async function(id) {
 // ===== MODIFIER UNE VENTE =====
 window.editSale = async function(saleId) {
     try {
-        // 1. S'assurer que window.allProducts est chargé
+        // 1. S'assurer que window.allProducts est chargé avec TOUS les produits
         if (!window.allProducts || window.allProducts.length === 0) {
             showToast('⏳ Chargement des produits...', 'info');
-            const data = await apiCall('/products');
+            const data = await apiCall('/products/search?limit=9999&offset=0');
             window.allProducts = data;
         }
 
@@ -4172,8 +4172,6 @@ function fallbackDownload(blob, filename) {
 
 // Variable pour stocker le produit sélectionné dans la recherche
 let selectedEditProductId = null;
-
-// Filtrer les produits dans la recherche (suggestions)
 window.filterEditProducts = function() {
     const search = document.getElementById('editProductSearch')?.value?.toLowerCase().trim() || '';
     const container = document.getElementById('editProductSuggestions');
