@@ -739,7 +739,135 @@ window.editProduct = async function(id) {
         modal.hide();
     }
 };
+// ===== MODIFIER UNE VENTE =====
+window.editSale = async function(saleId) {
+    try {
+        // Récupérer les données de la vente
+        const data = await apiCall(`/sales/${saleId}`);
+        const sale = data.sale;
+        const items = data.items;
 
+        // Remplir la modal
+        document.getElementById('editSaleId').textContent = saleId;
+        document.getElementById('editRemisePct').value = sale.remise_pct || 0;
+        document.getElementById('editAcompte').value = sale.acompte || 0;
+
+        // Générer le tableau des articles modifiables
+        const tbody = document.getElementById('editItemsBody');
+        if (!tbody) {
+            alert('❌ L\'élément #editItemsBody est introuvable dans la modal.');
+            return;
+        }
+        tbody.innerHTML = items.map(item => `
+            <tr>
+                <td>${item.product_name}</td>
+                <td>
+                    <input type="number" class="form-control form-control-sm edit-qty" 
+                           value="${item.quantity}" min="1" step="1" data-id="${item.product_id}">
+                </td>
+                <td>
+                    <input type="number" class="form-control form-control-sm edit-price" 
+                           value="${item.unit_price}" min="0" step="10" data-id="${item.product_id}">
+                </td>
+                <td class="edit-total">${formatNumber(item.total_price)} FCFA</td>
+                <td>
+                    <button class="btn btn-sm btn-danger remove-item" data-id="${item.product_id}">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+
+        // Attacher les événements pour recalculer les totaux
+        document.querySelectorAll('#editItemsBody .edit-qty, #editItemsBody .edit-price').forEach(input => {
+            input.addEventListener('input', recalcEditTotals);
+        });
+        document.querySelectorAll('#editItemsBody .remove-item').forEach(btn => {
+            btn.addEventListener('click', function() {
+                this.closest('tr').remove();
+                recalcEditTotals();
+            });
+        });
+
+        // Calcul initial des totaux
+        recalcEditTotals();
+
+        // Afficher la modal
+        const modal = new bootstrap.Modal(document.getElementById('editSaleModal'));
+        modal.show();
+
+        // Stocker l'ID de la vente pour la sauvegarde
+        document.getElementById('editSaleId').dataset.saleId = saleId;
+
+    } catch (err) {
+        console.error('❌ Erreur lors du chargement de la vente:', err);
+        alert('❌ Impossible de charger les détails de la vente : ' + err.message);
+    }
+};
+
+// ===== RECALCUL DES TOTAUX DANS LA MODAL =====
+window.recalcEditTotals = function() {
+    let subtotal = 0;
+    document.querySelectorAll('#editItemsBody tr').forEach(row => {
+        const qty = parseInt(row.querySelector('.edit-qty')?.value) || 0;
+        const price = parseFloat(row.querySelector('.edit-price')?.value) || 0;
+        const total = qty * price;
+        const totalCell = row.querySelector('.edit-total');
+        if (totalCell) totalCell.innerText = formatNumber(total) + ' FCFA';
+        subtotal += total;
+    });
+    const display = document.getElementById('editSubtotalDisplay');
+    if (display) display.innerText = formatNumber(subtotal) + ' FCFA';
+};
+
+// ===== SAUVEGARDER LES MODIFICATIONS =====
+window.saveSaleModification = async function() {
+    const saleId = document.getElementById('editSaleId').dataset.saleId;
+    if (!saleId) {
+        alert('❌ ID de vente manquant.');
+        return;
+    }
+
+    // Récupérer les articles modifiés
+    const items = [];
+    document.querySelectorAll('#editItemsBody tr').forEach(row => {
+        const product_id = row.querySelector('.edit-qty')?.dataset.id;
+        const quantity = parseInt(row.querySelector('.edit-qty')?.value) || 0;
+        const unit_price = parseFloat(row.querySelector('.edit-price')?.value) || 0;
+        if (product_id && quantity > 0 && unit_price > 0) {
+            items.push({ product_id, quantity, unit_price });
+        }
+    });
+
+    if (items.length === 0) {
+        alert('❌ La vente doit contenir au moins un article.');
+        return;
+    }
+
+    const remise_pct = parseFloat(document.getElementById('editRemisePct').value) || 0;
+    const acompte = parseFloat(document.getElementById('editAcompte').value) || 0;
+
+    try {
+        // Mettre à jour les articles de la vente
+        await apiCall(`/sales/${saleId}/items`, 'PUT', { items });
+
+        // Mettre à jour les informations générales (remise, acompte, client, etc.)
+        // On peut aussi appeler une autre route pour mettre à jour le client, mais ici on se contente des montants
+        await apiCall(`/sales/${saleId}`, 'PUT', { remise_pct, acompte });
+
+        alert('✅ Vente modifiée avec succès !');
+        bootstrap.Modal.getInstance(document.getElementById('editSaleModal')).hide();
+
+        // Rafraîchir les listes
+        if (typeof loadSalesList === 'function') loadSalesList();
+        if (typeof loadAllInvoices === 'function') loadAllInvoices();
+        renderDashboard();
+
+    } catch (err) {
+        alert('❌ Erreur : ' + err.message);
+        console.error(err);
+    }
+};
 function notifyOtherDevices(action = 'refresh', data = {}) {
     if (syncChannel) {
         syncChannel.postMessage({ 
