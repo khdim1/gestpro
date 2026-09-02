@@ -2440,7 +2440,7 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
 
         // ============================================================
        // Recalculer le net à partir des valeurs affichées
-const taxAmount = sale.tax || 0; // déjà récupéré plus haut
+
 const remiseValue = (sale.remise_pct || 0) / 100 * subtotal;
 const acompteValue = sale.acompte || 0;
 const netAPayer = subtotal - remiseValue + taxAmount - acompteValue;
