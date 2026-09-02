@@ -1083,57 +1083,58 @@
     }
 
     // ================================================================
-    //  INIT - Gestion de l'identifiant boutique
-    // ================================================================
-    document.addEventListener('DOMContentLoaded', function() {
-        const urlParams = new URLSearchParams(window.location.search);
-        const shopIdParam = urlParams.get('shop') || '';
-        shopId = shopIdParam;
+//  INIT - Gestion de l'identifiant boutique (AUTOMATIQUE)
+// ================================================================
+document.addEventListener('DOMContentLoaded', function() {
+    // 1. Récupérer l'ID depuis l'URL
+    const urlParams = new URLSearchParams(window.location.search);
+    let shopId = urlParams.get('shop') || '';
 
-        // Vérifier la présence de shopId
-        if (!shopId) {
-            const grid = document.getElementById('productGrid');
-            grid.innerHTML = `
-                <div class="empty-state" style="grid-column: 1 / -1;">
-                    <i class="bi bi-shop"></i>
-                    <h3>Identifiant boutique requis</h3>
-                    <p>Veuillez fournir l'identifiant de la boutique dans l'URL : <code>?shop=VOTRE_ID</code></p>
-                    <div class="mt-3">
-                        <div class="input-group mx-auto" style="max-width:400px;">
-                            <input type="number" id="shopIdInput" class="form-control" placeholder="Entrez l'identifiant boutique">
-                            <button class="btn btn-primary" onclick="goToShop()">Accéder</button>
-                        </div>
-                    </div>
-                    <p class="mt-3 text-muted small">Exemple : <code>/store?shop=1</code></p>
-                </div>
-            `;
-            window.goToShop = function() {
-                const id = document.getElementById('shopIdInput').value.trim();
-                if (id) {
-                    window.location.href = `/store?shop=${id}`;
-                } else {
-                    alert('Veuillez entrer un identifiant de boutique valide.');
-                }
-            };
-            document.querySelector('.search-wrapper').style.display = 'none';
-            document.querySelector('.filters-bar').style.display = 'none';
-            document.querySelector('.contact-info').style.display = 'none';
-            document.querySelector('.results-count').style.display = 'none';
-            document.getElementById('scroll-sentinel').style.display = 'none';
-            return;
-        }
+    // 2. Si l'ID est absent dans l'URL, essayer de le récupérer depuis le localStorage
+    if (!shopId) {
+        shopId = localStorage.getItem('shopId') || '';
+    }
 
-        // Charger normalement
-        showSkeletons();
-        Promise.all([loadShopSettings(shopId), loadAllProducts(shopId), loadCategories(shopId)]).then(() => {
-            applyFilterAndReset();
-            setupInfiniteScroll();
-        });
+    // 3. Si toujours absent → rediriger vers la page d'accueil (pas de boutique)
+    if (!shopId) {
+        window.location.href = '/';
+        return;
+    }
 
-        cart = [];
-        updateCartUI();
-        closeCart();
+    // 4. Sauvegarder l'ID pour les prochaines visites
+    localStorage.setItem('shopId', shopId);
+
+    // 5. Charger la boutique normalement
+    showSkeletons();
+    Promise.all([
+        loadShopSettings(shopId),
+        loadAllProducts(shopId),
+        loadCategories(shopId)
+    ]).then(() => {
+        applyFilterAndReset();
+        setupInfiniteScroll();
+    }).catch(err => {
+        console.error('Erreur chargement boutique:', err);
+        document.getElementById('productGrid').innerHTML = `
+            <div class="empty-state" style="grid-column: 1 / -1;">
+                <i class="bi bi-exclamation-triangle"></i>
+                <p>Erreur de chargement de la boutique. Veuillez réessayer.</p>
+            </div>
+        `;
     });
+
+    // 6. Initialiser le panier
+    cart = [];
+    updateCartUI();
+    closeCart();
+
+    // 7. Réafficher les éléments (au cas où ils auraient été masqués)
+    document.querySelector('.search-wrapper').style.display = 'flex';
+    document.querySelector('.filters-bar').style.display = 'flex';
+    document.querySelector('.contact-info').style.display = 'block';
+    document.querySelector('.results-count').style.display = 'block';
+    document.getElementById('scroll-sentinel').style.display = 'block';
+});
 </script>
 </body>
 </html>
