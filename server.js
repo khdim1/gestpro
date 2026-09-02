@@ -2409,20 +2409,24 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         doc.moveTo(50, currentY).lineTo(550, currentY).stroke('#e0e4e8');
         currentY += 10;
 
-        // ============================================================
-        // RÉSUMÉ ET NET À PAYER (recalcul explicite)
+               // ============================================================
+        // RÉSUMÉ ET NET À PAYER (recalcul explicite, TVA incluse)
         // ============================================================
         const summaryX = 360;
-        const taxAmount = sale.tax || 0;
+        // Recalculer la TVA à partir du taux (pour information, mais pas ajoutée)
+        const taxAmount = (taxRate / 100) * subtotal;
         const remiseValue = (sale.remise_pct || 0) / 100 * subtotal;
         const acompteValue = sale.acompte || 0;
-        const netAPayer = subtotal - remiseValue + taxAmount - acompteValue;
+        // Le net = sous-total - remise - acompte (TVA déjà incluse dans les prix)
+        const netAPayer = subtotal - remiseValue - acompteValue;
 
         const summaryLines = [];
         summaryLines.push({ label: 'Sous-total', value: formatPDFNumber(subtotal) });
-        if (taxRate > 0) {
-            summaryLines.push({ label: `TVA (${taxRate}%)`, value: formatPDFNumber(taxAmount) });
-        }
+        // N'afficher la TVA que si elle est > 0 et qu'on veut la montrer
+        // (ici on ne l'affiche pas car elle est incluse)
+        // if (taxRate > 0) {
+        //     summaryLines.push({ label: `TVA (${taxRate}%)`, value: formatPDFNumber(taxAmount) });
+        // }
         if (sale.remise_pct && sale.remise_pct > 0) {
             summaryLines.push({ label: `Remise (${sale.remise_pct}%)`, value: `- ${formatPDFNumber(remiseValue)}` });
         }
@@ -2446,7 +2450,6 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         doc.text('NET À PAYER', 360, currentY + 8);
         doc.text(`${formatPDFNumber(netAPayer)} ${company.currency}`, 440, currentY + 8, { width: 110, align: 'right' });
         currentY += 35;
-
         // ============================================================
         // PIED DE PAGE : CACHET, SIGNATURE, QR CODE
         // ============================================================
