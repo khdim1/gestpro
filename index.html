@@ -4546,20 +4546,91 @@ async function renderInventory() {
         document.getElementById('inventoryModal').addEventListener('hidden.bs.modal', () => document.getElementById('inventoryModal').remove());
     };
 }
-
 async function renderReports() {
-    const salesData = await apiCall('/reports/sales-by-period?period=month');
-    const html = `<div class="card-modern"><h5><i class="bi bi-graph-up me-2"></i>Évolution des ventes</h5><canvas id="salesChart" height="200"></canvas></div>`;
-    document.getElementById('pageContainer').innerHTML = html;
-    const ctx = document.getElementById('salesChart').getContext('2d');
-    new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: salesData.map(d => d.date),
-            datasets: [{ label: 'Ventes (FCFA)', data: salesData.map(d => d.total), borderColor: '#2c6e9e', tension: 0.3, fill: true, backgroundColor: 'rgba(44,110,158,0.05)' }]
-        },
-        options: { responsive: true, plugins: { legend: { display: false } } }
-    });
+    try {
+        // 1. Récupérer les données du graphique (ventes par période)
+        const salesData = await apiCall('/reports/sales-by-period?period=month');
+
+        // 2. Récupérer les totaux du jour par mode de paiement
+        const paymentData = await apiCall('/reports/daily-payments');
+
+        // 3. Récupérer les paramètres (devise)
+        const settings = await apiCall('/settings');
+        const currency = settings.currency || 'FCFA';
+
+        // 4. Construire le HTML
+        const html = `
+            <!-- Bloc Fin de journée -->
+            <div class="card-modern mb-4">
+                <h5><i class="bi bi-cash-stack me-2"></i>Fin de journée</h5>
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <div class="stat-card green">
+                            <h6>💰 Espèces</h6>
+                            <h2>${formatNumber(paymentData.totals.cash)} ${currency}</h2>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="stat-card orange">
+                            <h6>📱 Wave</h6>
+                            <h2>${formatNumber(paymentData.totals.wave)} ${currency}</h2>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="stat-card" style="border-top-color: #e67e22;">
+                            <h6>📱 Orange Money</h6>
+                            <h2>${formatNumber(paymentData.totals.orange)} ${currency}</h2>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="stat-card" style="border-top-color: #2c6e9e;">
+                            <h6>💳 Autres</h6>
+                            <h2>${formatNumber(paymentData.totals.card + paymentData.totals.transfer + paymentData.totals.other)} ${currency}</h2>
+                        </div>
+                    </div>
+                </div>
+                <div class="mt-2 text-muted">
+                    Total général : <strong>${formatNumber(paymentData.grandTotal)} ${currency}</strong>
+                    (pour la journée du ${new Date(paymentData.date).toLocaleDateString('fr-FR')})
+                </div>
+            </div>
+
+            <!-- Graphique Évolution des ventes -->
+            <div class="card-modern">
+                <h5><i class="bi bi-graph-up me-2"></i>Évolution des ventes</h5>
+                <canvas id="salesChart" height="200"></canvas>
+            </div>
+        `;
+
+        document.getElementById('pageContainer').innerHTML = html;
+
+        // 5. Initialiser le graphique Chart.js
+        const ctx = document.getElementById('salesChart').getContext('2d');
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: salesData.map(d => d.date),
+                datasets: [{
+                    label: 'Ventes (FCFA)',
+                    data: salesData.map(d => d.total),
+                    borderColor: '#2c6e9e',
+                    tension: 0.3,
+                    fill: true,
+                    backgroundColor: 'rgba(44,110,158,0.05)'
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { display: false }
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error('❌ Erreur renderReports:', err);
+        document.getElementById('pageContainer').innerHTML = `<div class="alert alert-danger">Erreur : ${err.message}</div>`;
+    }
 }
 async function renderSettings() {
     try {

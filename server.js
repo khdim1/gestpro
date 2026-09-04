@@ -2349,7 +2349,12 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         doc.fillColor('#ffffff').fontSize(8).font('Helvetica-Bold')
            .text(statusInfo.label, 418, y + 48);
         y += 85;
+doc.fillColor('#3a4a5a').fontSize(10).font('Helvetica')
+   .text(`Date : ${new Date(sale.sale_date).toLocaleDateString('fr-FR')}`, rightX, y + 25);
 
+// Ajout du mode de paiement
+const paymentLabels = { cash: '💰 Espèces', wave: '📱 Wave', orange: '📱 Orange Money', card: '💳 Carte', transfer: '🏦 Virement' };
+doc.text(`Paiement : ${paymentLabels[sale.payment_method] || sale.payment_method}`, rightX, y + 42);
         // ============================================================
         // TABLEAU DES PRODUITS
         // ============================================================
@@ -3900,7 +3905,54 @@ app.post('/api/clients/:id/pay-invoice', authenticate, async (req, res) => {
         connection.release();
     }
 });
+// ========== RAPPORT : TOTAUX PAR MODE DE PAIEMENT ==========
+app.get('/api/reports/daily-payments', authenticate, async (req, res) => {
+    const userId = req.user.id;
+    const { date } = req.query;
+    const targetDate = date || new Date().toISOString().split('T')[0]; // Aujourd'hui par défaut
 
+    try {
+        // Récupérer les ventes du jour avec leur mode de paiement et montant final
+        const [rows] = await pool.query(
+            `SELECT payment_method, 
+                    COALESCE(SUM(final_amount), 0) as total
+             FROM sales
+             WHERE user_id = ?
+               AND DATE(sale_date) = ?
+               AND status = 'completed'
+             GROUP BY payment_method`,
+            [userId, targetDate]
+        );
+
+        // Structurer la réponse
+        const result = {
+            cash: 0,
+            wave: 0,
+            orange: 0,
+            card: 0,
+            transfer: 0,
+            other: 0
+        };
+
+        rows.forEach(row => {
+            const method = row.payment_method || 'other';
+            if (result.hasOwnProperty(method)) {
+                result[method] = parseFloat(row.total);
+            } else {
+                result.other += parseFloat(row.total);
+            }
+        });
+
+        res.json({
+            date: targetDate,
+            totals: result,
+            grandTotal: Object.values(result).reduce((a, b) => a + b, 0)
+        });
+    } catch (err) {
+        console.error('Erreur daily-payments:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
 // ========== ROUTE HISTORIQUE ==========
 app.get('/api/history', authenticate, async (req, res) => {
     const [sales] = await pool.query(`SELECT 'sale' as type, s.id, s.final_amount as amount, s.sale_date as date, c.name as client_name, s.status FROM sales s LEFT JOIN clients c ON s.client_id = c.id WHERE s.user_id = ? ORDER BY s.sale_date DESC LIMIT 50`, [req.user.id]);
