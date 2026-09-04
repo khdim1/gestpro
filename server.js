@@ -3153,7 +3153,74 @@ app.get('/api/sales/:id/delivery', authenticate, async (req, res) => {
         }
     }
 });
+// ========== ANNULER UNE VENTE ==========
+app.put('/api/sales/:id/cancel', authenticate, async (req, res) => {
+    const saleId = req.params.id;
+    const userId = req.user.id;
 
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        // ✅ Guillemets simples pour 'cancelled'
+        const [saleRows] = await connection.query(
+            'SELECT * FROM sales WHERE id = ? AND user_id = ? AND status != \'cancelled\' FOR UPDATE',
+            [saleId, userId]
+        );
+        if (saleRows.length === 0) {
+            return res.status(404).json({ error: 'Vente non trouvée ou déjà annulée' });
+        }
+        const sale = saleRows[0];
+
+        // 1. Remettre le stock
+        const [items] = await connection.query(
+            'SELECT product_id, quantity FROM sale_items WHERE sale_id = ?',
+            [saleId]
+        );
+        for (const item of items) {
+            await connection.query(
+                'UPDATE products SET quantity = quantity + ? WHERE id = ? AND user_id = ?',
+                [item.quantity, item.product_id, userId]
+            );
+            const [prodBefore] = await connection.query(
+                'SELECT quantity FROM products WHERE id = ? AND user_id = ? FOR UPDATE',
+                [item.product_id, userId]
+            );
+            const newQty = prodBefore[0].quantity + item.quantity;
+            await connection.query(
+                `INSERT INTO stock_movements (product_id, user_id, type, quantity_change, quantity_before, quantity_after, reference, notes)
+                 VALUES (?, ?, 'return', ?, ?, ?, ?, ?)`,
+                [item.product_id, userId, item.quantity, prodBefore[0].quantity, newQty, `ANNULATION VENTE #${saleId}`, 'Annulation vente']
+            );
+        }
+
+        // 2. Supprimer les paiements
+        await connection.query('DELETE FROM payments WHERE sale_id = ?', [saleId]);
+
+        // 3. Supprimer les entrées en caisse liées à cette vente
+        // ✅ Guillemets simples pour 'sale'
+        await connection.query(
+            'DELETE FROM cash_register WHERE reference_id = ? AND transaction_type = \'sale\'',
+            [saleId]
+        );
+
+        // 4. Mettre à jour le statut
+        await connection.query(
+            'UPDATE sales SET status = \'cancelled\', final_amount = 0 WHERE id = ?',
+            [saleId]
+        );
+
+        await connection.commit();
+        res.json({ message: 'Vente annulée avec succès', saleId });
+
+    } catch (err) {
+        await connection.rollback();
+        console.error('❌ Erreur annulation vente:', err);
+        res.status(500).json({ error: err.message });
+    } finally {
+        connection.release();
+    }
+});
 // ========== ROUTES ADMIN ORDERS ==========
 app.get('/api/admin/orders', authenticate, async (req, res) => {
     const userId = req.user.id;
