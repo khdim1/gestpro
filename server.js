@@ -2321,24 +2321,45 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         // ============================================================
         // BLOC CLIENT / DÉTAILS
         // ============================================================
-        doc.rect(50, y, 500, 70).fill('#f5f7fa').stroke('#e0e4e8', 0.5);
+        doc.rect(50, y, 500, 80).fill('#f5f7fa').stroke('#e0e4e8', 0.5);
+
+        // --- CLIENT (gauche) ---
         doc.fillColor('#1a2a3a').fontSize(10).font('Helvetica-Bold')
            .text('CLIENT', 60, y + 8);
         doc.fillColor('#3a4a5a').fontSize(11).font('Helvetica')
            .text(sale.client_name || 'Client particulier', 60, y + 25);
+
+        let clientY = y + 42;
         if (sale.client_address) {
-            doc.fontSize(9).font('Helvetica').text(sale.client_address, 60, y + 42);
+            doc.fontSize(9).font('Helvetica').text(sale.client_address, 60, clientY);
+            clientY += 16;
         }
         if (sale.client_email) {
-            doc.fontSize(9).font('Helvetica').text(sale.client_email, 60, y + 58);
+            doc.fontSize(9).font('Helvetica').text(`Email : ${sale.client_email}`, 60, clientY);
+            clientY += 16;
         }
 
+        // --- Mode de paiement (en bas de la colonne client) ---
+        const paymentLabels = {
+            cash: 'Espèces',
+            wave: 'Wave',
+            orange: 'Orange Money',
+            card: 'Carte bancaire',
+            transfer: 'Virement'
+        };
+        const method = sale.payment_method || 'cash';
+        const paymentText = paymentLabels[method] || method;
+        doc.fontSize(9).font('Helvetica')
+           .text(`Mode de paiement : ${paymentText}`, 60, clientY);
+
+        // --- DÉTAILS FACTURE (droite) ---
         const rightX = 350;
         doc.fillColor('#1a2a3a').fontSize(10).font('Helvetica-Bold')
            .text('DÉTAILS FACTURE', rightX, y + 8);
         doc.fillColor('#3a4a5a').fontSize(10).font('Helvetica')
            .text(`Date : ${new Date(sale.sale_date).toLocaleDateString('fr-FR')}`, rightX, y + 25);
 
+        // --- Statut (à droite) ---
         const statusMap = {
             'completed': { label: 'PAYÉE', color: '#27ae60' },
             'pending': { label: 'EN ATTENTE', color: '#f39c12' },
@@ -2348,13 +2369,9 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         doc.rect(400, y + 42, 90, 20).fill(statusInfo.color);
         doc.fillColor('#ffffff').fontSize(8).font('Helvetica-Bold')
            .text(statusInfo.label, 418, y + 48);
-        y += 85;
-doc.fillColor('#3a4a5a').fontSize(10).font('Helvetica')
-   .text(`Date : ${new Date(sale.sale_date).toLocaleDateString('fr-FR')}`, rightX, y + 25);
 
-// Ajout du mode de paiement
-const paymentLabels = { cash: '💰 Espèces', wave: '📱 Wave', orange: '📱 Orange Money', card: '💳 Carte', transfer: '🏦 Virement' };
-doc.text(`Paiement : ${paymentLabels[sale.payment_method] || sale.payment_method}`, rightX, y + 42);
+        y += 95;
+
         // ============================================================
         // TABLEAU DES PRODUITS
         // ============================================================
@@ -2383,7 +2400,7 @@ doc.text(`Paiement : ${paymentLabels[sale.payment_method] || sale.payment_method
         let currentY = drawTableHeader(y);
         let subtotal = 0;
         let rowIndex = 0;
-        const maxY = 750 - 100; // Reserve space for footer
+        const maxY = 750 - 100;
 
         for (const item of items) {
             const productName = item.product_name || 'Produit';
@@ -2414,24 +2431,17 @@ doc.text(`Paiement : ${paymentLabels[sale.payment_method] || sale.payment_method
         doc.moveTo(50, currentY).lineTo(550, currentY).stroke('#e0e4e8');
         currentY += 10;
 
-               // ============================================================
-        // RÉSUMÉ ET NET À PAYER (recalcul explicite, TVA incluse)
+        // ============================================================
+        // RÉSUMÉ ET NET À PAYER
         // ============================================================
         const summaryX = 360;
-        // Recalculer la TVA à partir du taux (pour information, mais pas ajoutée)
         const taxAmount = (taxRate / 100) * subtotal;
         const remiseValue = (sale.remise_pct || 0) / 100 * subtotal;
         const acompteValue = sale.acompte || 0;
-        // Le net = sous-total - remise - acompte (TVA déjà incluse dans les prix)
         const netAPayer = subtotal - remiseValue - acompteValue;
 
         const summaryLines = [];
         summaryLines.push({ label: 'Sous-total', value: formatPDFNumber(subtotal) });
-        // N'afficher la TVA que si elle est > 0 et qu'on veut la montrer
-        // (ici on ne l'affiche pas car elle est incluse)
-        // if (taxRate > 0) {
-        //     summaryLines.push({ label: `TVA (${taxRate}%)`, value: formatPDFNumber(taxAmount) });
-        // }
         if (sale.remise_pct && sale.remise_pct > 0) {
             summaryLines.push({ label: `Remise (${sale.remise_pct}%)`, value: `- ${formatPDFNumber(remiseValue)}` });
         }
@@ -2447,22 +2457,19 @@ doc.text(`Paiement : ${paymentLabels[sale.payment_method] || sale.payment_method
         });
         currentY += summaryLines.length * 18 + 8;
 
-        // ============================================================
         // NET À PAYER (cadre bleu)
-        // ============================================================
         doc.rect(350, currentY, 200, 28).fill('#2c6e9e');
         doc.fillColor('#ffffff').fontSize(11).font('Helvetica-Bold');
         doc.text('NET À PAYER', 360, currentY + 8);
         doc.text(`${formatPDFNumber(netAPayer)} ${company.currency}`, 440, currentY + 8, { width: 110, align: 'right' });
         currentY += 35;
+
         // ============================================================
         // PIED DE PAGE : CACHET, SIGNATURE, QR CODE
         // ============================================================
         console.log('📄 Génération du bas de page...');
 
-        const footerY = 750; // Position verticale de base
-
-        // Dimensions et positions
+        const footerY = 750;
         const cachetWidth = 120;
         const cachetHeight = 50;
         const signatureWidth = 120;
@@ -2475,12 +2482,10 @@ doc.text(`Paiement : ${paymentLabels[sale.payment_method] || sale.payment_method
         const signatureX = marginLeft + cachetWidth + 30;
         const qrX = pageWidth + marginLeft - qrSize - 10;
 
-        // --- Pied de page (fond gris) ---
         doc.rect(50, footerY, 500, 25).fill('#f0f4f8');
         doc.fillColor('#7a8a9a').fontSize(8).font('Helvetica');
         doc.text('Merci de votre confiance • Facture générée par GestPro', 50, footerY + 8, { align: 'center' });
 
-        // --- Récupérer le cachet et la signature ---
         const [userSettings] = await pool.query(
             'SELECT cachet_url, signature_url FROM settings WHERE user_id = ?',
             [req.user.id]
@@ -2490,7 +2495,6 @@ doc.text(`Paiement : ${paymentLabels[sale.payment_method] || sale.payment_method
         const hasCachet = userCachet && userCachet.trim() !== '';
         const hasSignature = userSignature && userSignature.trim() !== '';
 
-        // --- Cachet (à gauche) ---
         if (hasCachet) {
             try {
                 let imageBuffer;
@@ -2509,7 +2513,6 @@ doc.text(`Paiement : ${paymentLabels[sale.payment_method] || sale.payment_method
             }
         }
 
-        // --- Signature (au centre) ---
         if (hasSignature) {
             try {
                 let imageBuffer;
@@ -2528,7 +2531,6 @@ doc.text(`Paiement : ${paymentLabels[sale.payment_method] || sale.payment_method
             }
         }
 
-        // --- QR code (à droite) ---
         if (qrBuffer) {
             const qrY = footerY - qrSize - 8;
             doc.image(qrBuffer, qrX, qrY, { width: qrSize, height: qrSize });
