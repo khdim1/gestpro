@@ -3390,6 +3390,7 @@ async function renderSales() {
             });
         }
         renderCart();
+        loadSalesList(); 
         const cartContainer = document.getElementById('cartList');
         if (cartContainer) cartContainer.classList.add('cart-pulse');
         setTimeout(() => { if (cartContainer) cartContainer.classList.remove('cart-pulse'); }, 300);
@@ -3569,56 +3570,55 @@ async function renderSales() {
             console.error('Erreur chargement ventes:', err);
         }
     };
-
-    // ===== RENDU TABLEAU DES VENTES =====
-    function renderSalesTable(sales) {
-        const tbody = document.getElementById('salesList');
-        if (!tbody) return;
-        
-        if (!sales || sales.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted">Aucune vente trouvée</td></tr>';
-            return;
-        }
-        
-        tbody.innerHTML = sales.slice(0, 50).map(s => {
-            const clientName = s.client_name || '-';
-            const statusClass = s.status === 'completed' ? 'badge-success' : 'badge-warning';
-            const statusLabel = s.status === 'completed' ? '✅ Payée' : '⏳ Impayée';
-            const saleDate = new Date(s.sale_date).toLocaleString().slice(0, 10);
-            
-            return `
-                <tr>
-                    <td><strong>#${s.id}</strong></td>
-                    <td>${clientName}</td>
-                    <td><strong>${formatNumber(s.final_amount)} FCFA</strong></td>
-                    <td><span class="badge-status ${statusClass}">${statusLabel}</span></td>
-                    <td>${saleDate}</td>
-                    <td>
-                        <div class="btn-group btn-group-sm" role="group">
-                            <button class="btn btn-info" onclick="downloadInvoice(${s.id})" title="Télécharger la facture">
-                                <i class="bi bi-file-pdf"></i>
-                            </button>
-                            <button class="btn btn-primary" onclick="downloadOrder(${s.id})" title="Télécharger le bon de commande">
-                                <i class="bi bi-clipboard-check"></i>
-                            </button>
-                            <button class="btn btn-secondary" onclick="downloadDelivery(${s.id})" title="Télécharger le bordereau de livraison">
-                                <i class="bi bi-truck"></i>
-                            </button>
-                            <button class="btn btn-warning" onclick="editSale(${s.id})" title="Modifier">
-                                <i class="bi bi-pencil"></i>
-                            </button>
-                            ${s.status === 'pending' ? `
-                                <button class="btn btn-success" onclick="recordPayment(${s.id})" title="Enregistrer un paiement">
-                                    <i class="bi bi-cash"></i>
-                                </button>
-                            ` : ''}
-                        </div>
-                    </td>
-                </tr>
-            `;
-        }).join('');
+function renderSalesTable(sales) {
+    const tbody = document.getElementById('salesList');
+    if (!tbody) return;
+    if (!sales || sales.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted">Aucune vente trouvée</td></tr>';
+        return;
     }
-
+    tbody.innerHTML = sales.slice(0, 50).map(s => {
+        const clientName = s.client_name || '-';
+        const statusClass = s.status === 'completed' ? 'badge-success' : (s.status === 'pending' ? 'badge-warning' : 'badge-danger');
+        const statusLabel = s.status === 'completed' ? '✅ Payée' : (s.status === 'pending' ? '⏳ Impayée' : '❌ Annulée');
+        const saleDate = new Date(s.sale_date).toLocaleDateString('fr-FR'); // ✅ AJOUTE CETTE LIGNE
+        return `
+            <tr>
+                <td><strong>#${s.id}</strong></td>
+                <td>${clientName}</td>
+                <td><strong>${formatNumber(s.final_amount)} FCFA</strong></td>
+                <td><span class="badge-status ${statusClass}">${statusLabel}</span></td>
+                <td>${saleDate}</td>
+                <td>
+                    <div class="btn-group btn-group-sm" role="group">
+                        <button class="btn btn-info" onclick="downloadInvoice(${s.id})" title="Télécharger la facture">
+                            <i class="bi bi-file-pdf"></i>
+                        </button>
+                        <button class="btn btn-primary" onclick="downloadOrder(${s.id})" title="Télécharger le bon de commande">
+                            <i class="bi bi-clipboard-check"></i>
+                        </button>
+                        <button class="btn btn-secondary" onclick="downloadDelivery(${s.id})" title="Télécharger le bordereau de livraison">
+                            <i class="bi bi-truck"></i>
+                        </button>
+                        <button class="btn btn-warning" onclick="editSale(${s.id})" title="Modifier">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                        ${s.status !== 'cancelled' ? `
+                            <button class="btn btn-sm btn-danger" onclick="cancelSale(${s.id})" title="Annuler la vente">
+                                <i class="bi bi-x-circle"></i>
+                            </button>
+                        ` : ''}
+                        ${s.status === 'pending' ? `
+                            <button class="btn btn-success" onclick="recordPayment(${s.id})" title="Enregistrer un paiement">
+                                <i class="bi bi-cash"></i>
+                            </button>
+                        ` : ''}
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
     // ===== FILTRER LES VENTES =====
     window.filterSales = async () => {
         const client = document.getElementById('filterClient')?.value || '';
@@ -3633,7 +3633,24 @@ async function renderSales() {
             showToast('❌ Erreur: ' + err.message, 'danger');
         }
     };
+// ===== ANNULER UNE VENTE =====
+window.cancelSale = async function(saleId) {
+    if (!confirm(`⚠️ Êtes-vous sûr de vouloir annuler définitivement la vente #${saleId} ?\n\nLe stock sera remis et les paiements supprimés.`)) {
+        return;
+    }
 
+    try {
+        const result = await apiCall(`/sales/${saleId}/cancel`, 'PUT');
+        showToast(`✅ Vente #${saleId} annulée avec succès`, 'success');
+        // Rafraîchir la liste des ventes
+        if (typeof loadSalesList === 'function') loadSalesList();
+        if (typeof loadAllInvoices === 'function') loadAllInvoices();
+        renderDashboard();
+    } catch (err) {
+        showToast('❌ Erreur : ' + err.message, 'danger');
+        console.error(err);
+    }
+};
     // ===== HISTORIQUE DES VENTES =====
     const historyHtml = `
         <div class="card-modern mt-3">
