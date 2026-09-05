@@ -4042,7 +4042,6 @@ app.get('/api/reports/daily-payments', authenticate, async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
-
 // ========== RAPPORT TVA MENSUEL ==========
 app.get('/api/reports/tva-mensuelle', authenticate, async (req, res) => {
     const userId = req.user.id;
