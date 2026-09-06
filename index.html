@@ -983,18 +983,19 @@ async function renderProducts() {
             <div class="table-wrapper">
                 <table class="table align-middle">
                     <thead>
-                        <tr>
-                            <th>Code barre</th>
-                            <th>Nom</th>
-                            <th>Catégorie</th>
-                            <th>Stock</th>
-                            <th>Prix HT</th>
-                            <th>Prix TTC</th>
-                            <th>TVA</th>
-                            <th>Marge</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
+    <tr>
+        <th>Code barre</th>
+        <th>Nom</th>
+        <th>Catégorie</th>
+        <th>Stock</th>
+        <th>Achat HT</th>
+        <th>TVA</th>
+        <th>Achat TTC</th>
+        <th>Prix vente</th>
+        <th>Marge</th>
+        <th>Actions</th>
+    </tr>
+</thead>
                     <tbody id="productsTable">
                         <tr><td colspan="9" class="text-center py-4">
                             <div class="spinner-border text-primary" role="status"></div>
@@ -1008,66 +1009,100 @@ async function renderProducts() {
                     <ul class="pagination pagination-sm" id="productsPagination"></ul>
                 </nav>
             </div>
-
-            <!-- MODAL PRODUIT -->
-            <div class="modal fade" id="productModal" tabindex="-1">
-                <div class="modal-dialog modal-lg">
-                    <div class="modal-content">
-                        <div class="modal-header">
-                            <h5><i class="bi bi-box me-2"></i>Ajouter / Modifier produit</h5>
-                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+<!-- MODAL PRODUIT -->
+<div class="modal fade" id="productModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5><i class="bi bi-box me-2"></i>Ajouter / Modifier produit</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="prodId">
+                <div class="row">
+                    <!-- Colonne ACHAT -->
+                    <div class="col-md-6">
+                        <h6 class="text-muted border-bottom pb-1">🏷️ Achat (avec TVA)</h6>
+                        <div class="mb-3">
+                            <label class="form-label">Prix d'achat HT (FCFA)</label>
+                            <input type="number" step="0.01" id="prodPriceHt" class="form-control" value="0" oninput="recalcBuyTTC()">
                         </div>
-                        <div class="modal-body">
-                            <input type="hidden" id="prodId">
-                            <div class="row">
-                                <div class="col-md-6">
-                                []    <div class="mb-3"><label class="form-label">Nom *</label><input type="text" id="prodName" class="form-control"></div>
-                                    <div class="mb-3"><label class="form-label">Quantité</label><input type="number" id="prodQuantity" class="form-control" value="0"></div>
-                                    <div class="mb-3"><label class="form-label">Code barre</label><input type="text" id="prodBarcode" class="form-control"></div>
-                                    <div class="mb-3"><label class="form-label">Prix d'achat (FCFA)</label><input type="number" step="0.01" id="prodBuyPrice" class="form-control" value="0"></div>
-                                    <div class="mb-3"><label class="form-label">Prix HT (FCFA)</label><input type="number" step="0.01" id="prodPriceHt" class="form-control" value="0" oninput="recalcTTC()"></div>
-                                    <div class="mb-3"><label class="form-label">Taux TVA (%) <small class="text-muted">(laisser vide pour utiliser le taux global)</small></label><input type="number" step="0.01" id="prodTaxRate" class="form-control" placeholder="Ex: 20" oninput="recalcTTC()"></div>
+                        <div class="mb-3">
+                            <label class="form-label">Taux TVA (%) <small class="text-muted">(laisser vide pour utiliser le taux global)</small></label>
+                            <input type="number" step="0.01" id="prodTaxRate" class="form-control" placeholder="Ex: 20" oninput="recalcBuyTTC()">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Prix d'achat TTC (FCFA) *</label>
+                            <input type="number" step="0.01" id="prodBuyPrice" class="form-control" readonly>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Quantité</label>
+                            <input type="number" id="prodQuantity" class="form-control" value="0">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Code barre</label>
+                            <input type="text" id="prodBarcode" class="form-control">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Nom *</label>
+                            <input type="text" id="prodName" class="form-control">
+                        </div>
+                    </div>
+                    <!-- Colonne VENTE -->
+                    <div class="col-md-6">
+                        <h6 class="text-muted border-bottom pb-1">💰 Vente (sans TVA)</h6>
+                        <div class="mb-3">
+                            <label class="form-label">Prix de vente (FCFA) *</label>
+                            <input type="number" step="0.01" id="prodSellPrice" class="form-control">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Prix en gros (FCFA) <small class="text-muted">(vente par quantité)</small></label>
+                            <input type="number" step="0.01" id="prodWholesalePrice" class="form-control" value="0">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Quantité minimale pour prix gros</label>
+                            <input type="number" id="prodWholesaleQty" class="form-control" value="5">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Unité</label>
+                            <input type="text" id="prodUnit" class="form-control" value="pièce">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Image du produit</label>
+                            <div class="row g-2">
+                                <div class="col-8">
+                                    <input type="file" id="prodImage" class="form-control" accept="image/*" onchange="previewImage(event)">
                                 </div>
-                                <div class="col-md-6">
-                                    <div class="mb-3"><label class="form-label">Prix TTC (FCFA) *</label><input type="number" step="0.01" id="prodSellPrice" class="form-control"></div>
-                                    <div class="mb-3"><label class="form-label">Prix en gros (FCFA) <small class="text-muted">(vente par quantité)</small></label><input type="number" step="0.01" id="prodWholesalePrice" class="form-control" value="0"></div>
-                                    <div class="mb-3"><label class="form-label">Quantité minimale pour prix gros</label><input type="number" id="prodWholesaleQty" class="form-control" value="5"></div>
-                                    <div class="mb-3"><label class="form-label">Unité</label><input type="text" id="prodUnit" class="form-control" value="pièce"></div>
-                                    <div class="mb-3">
-                                        <label class="form-label">Image du produit</label>
-                                        <div class="row g-2">
-                                            <div class="col-8">
-                                                <input type="file" id="prodImage" class="form-control" accept="image/*" onchange="previewImage(event)">
-                                            </div>
-                                            <div class="col-4">
-                                                <button class="btn btn-outline-secondary w-100" onclick="document.getElementById('prodImage').click()">
-                                                    <i class="bi bi-upload"></i> Choisir
-                                                </button>
-                                            </div>
-                                        </div>
-                                        <div id="imagePreviewContainer" class="mt-2 text-center" style="display:none;">
-                                            <img id="imagePreview" src="" alt="Aperçu" style="max-width:150px; max-height:150px; border-radius:10px; border:2px solid #dee2e6; padding:4px;">
-                                            <button class="btn btn-sm btn-danger ms-2" onclick="removeImage()"><i class="bi bi-x"></i></button>
-                                        </div>
-                                    </div>
+                                <div class="col-4">
+                                    <button class="btn btn-outline-secondary w-100" onclick="document.getElementById('prodImage').click()">
+                                        <i class="bi bi-upload"></i> Choisir
+                                    </button>
                                 </div>
                             </div>
-                            <div class="mb-3">
-                                <label class="form-label">Catégorie</label>
-                                <input type="text" id="prodCategoryName" class="form-control mb-2" placeholder="Nouvelle catégorie">
-                                <select id="prodCategorySelect" class="form-select">
-                                    <option value="">Ou sélectionner existante</option>
-                                    ${categories.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
-                                </select>
+                            <div id="imagePreviewContainer" class="mt-2 text-center" style="display:none;">
+                                <img id="imagePreview" src="" alt="Aperçu" style="max-width:150px; max-height:150px; border-radius:10px; border:2px solid #dee2e6; padding:4px;">
+                                <button class="btn btn-sm btn-danger ms-2" onclick="removeImage()"><i class="bi bi-x"></i></button>
                             </div>
-                        </div>
-                        <div class="modal-footer">
-                            <button class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
-                            <button class="btn btn-primary" id="saveProductBtn">Enregistrer</button>
                         </div>
                     </div>
                 </div>
+                <!-- Catégorie (pleine largeur) -->
+                <div class="mb-3">
+                    <label class="form-label">Catégorie</label>
+                    <input type="text" id="prodCategoryName" class="form-control mb-2" placeholder="Nouvelle catégorie">
+                    <select id="prodCategorySelect" class="form-select">
+                        <option value="">Ou sélectionner existante</option>
+                        ${categories.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
+                    </select>
+                </div>
             </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                <button class="btn btn-primary" id="saveProductBtn">Enregistrer</button>
+            </div>
+        </div>
+    </div>
+</div>
         `;
         document.getElementById('pageContainer').innerHTML = html;
 
@@ -1109,31 +1144,34 @@ async function renderProducts() {
                     if (loading) loading.style.display = 'none';
                     return;
                 }
-                // Utilisation de globalTaxRate pour la TVA
-                tbody.innerHTML = prods.map(p => {
-                    const taxDisplay = p.tax_rate !== null ? p.tax_rate + '%' : globalTaxRate + '%';
-                    const margin = p.sell_price - p.buy_price;
-                    return `
-                        <tr class="${p.quantity <= p.reorder_level ? 'table-warning' : ''}">
-                            <td>${p.barcode || '-'}</td>
-                            <td><strong>${p.name}</strong></td>
-                            <td>${p.category_name || '-'}</td>
-                            <td>${p.quantity} ${p.unit}</td>
-                            <td>${formatNumber(p.price_ht)} ${currency}</td>
-                            <td>${formatNumber(p.sell_price)} ${currency}</td>
-                            <td>${taxDisplay}</td>
-                            <td>${formatNumber(margin)} ${currency}</td>
-                            <td>
-                                <button class="btn btn-sm btn-warning me-1" onclick="editProduct(${p.id})">
-                                    <i class="bi bi-pencil"></i>
-                                </button>
-                                <button class="btn btn-sm btn-danger" onclick="deleteProduct(${p.id})">
-                                    <i class="bi bi-trash"></i>
-                                </button>
-                            </td>
-                        </tr>
-                    `;
-                }).join('');
+                const currency = (await apiCall('/settings')).currency || 'FCFA';
+tbody.innerHTML = prods.map(p => {
+    const taxDisplay = p.tax_rate !== null ? p.tax_rate + '%' : globalTaxRate + '%';
+    const achatHT = p.price_ht || 0;
+    const achatTTC = p.buy_price || 0;
+    const marge = (p.sell_price || 0) - achatTTC;
+    return `
+        <tr class="${p.quantity <= p.reorder_level ? 'table-warning' : ''}">
+            <td>${p.barcode || '-'}</td>
+            <td><strong>${p.name}</strong></td>
+            <td>${p.category_name || '-'}</td>
+            <td>${p.quantity} ${p.unit}</td>
+            <td>${formatNumber(achatHT)} ${currency}</td>
+            <td>${taxDisplay}</td>
+            <td>${formatNumber(achatTTC)} ${currency}</td>
+            <td>${formatNumber(p.sell_price || 0)} ${currency}</td>
+            <td>${formatNumber(marge)} ${currency}</td>
+            <td>
+                <button class="btn btn-sm btn-warning me-1" onclick="editProduct(${p.id})">
+                    <i class="bi bi-pencil"></i>
+                </button>
+                <button class="btn btn-sm btn-danger" onclick="deleteProduct(${p.id})">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </td>
+        </tr>
+    `;
+}).join('');
 
                 const totalPages = Math.ceil(totalProducts / itemsPerPage);
                 renderPagination(page, totalPages);
@@ -1196,30 +1234,30 @@ async function renderProducts() {
                 searchProducts(false, 1);
             }, 400);
         };
-
-        window.showProductModal = function() {
-            document.getElementById('prodId').value = '';
-            document.getElementById('prodName').value = '';
-            document.getElementById('prodQuantity').value = 0;
-            document.getElementById('prodBarcode').value = '';
-            document.getElementById('prodBuyPrice').value = 0;
-            document.getElementById('prodSellPrice').value = 0;
-            document.getElementById('prodWholesalePrice').value = 0;
-            document.getElementById('prodWholesaleQty').value = 5;
-            document.getElementById('prodUnit').value = 'pièce';
-            document.getElementById('prodCategoryName').value = '';
-            document.getElementById('prodCategorySelect').value = '';
-            document.getElementById('prodPriceHt').value = 0;
-            document.getElementById('prodTaxRate').value = '';
-            recalcTTC();
-            document.getElementById('prodImage').value = '';
-            document.getElementById('imagePreview').src = '';
-            document.getElementById('imagePreviewContainer').style.display = 'none';
-            selectedImageData = null;
-            new bootstrap.Modal(document.getElementById('productModal')).show();
-        };
-
-       window.editProduct = async function(id) {
+window.showProductModal = function() {
+    document.getElementById('prodId').value = '';
+    document.getElementById('prodName').value = '';
+    document.getElementById('prodQuantity').value = 0;
+    document.getElementById('prodBarcode').value = '';
+    // ACHAT
+    document.getElementById('prodPriceHt').value = 0;
+    document.getElementById('prodTaxRate').value = '';
+    document.getElementById('prodBuyPrice').value = 0;
+    // VENTE
+    document.getElementById('prodSellPrice').value = 0;
+    document.getElementById('prodWholesalePrice').value = 0;
+    document.getElementById('prodWholesaleQty').value = 5;
+    document.getElementById('prodUnit').value = 'pièce';
+    document.getElementById('prodCategoryName').value = '';
+    document.getElementById('prodCategorySelect').value = '';
+    document.getElementById('prodImage').value = '';
+    document.getElementById('imagePreview').src = '';
+    document.getElementById('imagePreviewContainer').style.display = 'none';
+    selectedImageData = null;
+    recalcBuyTTC(); // initialiser le TTC à 0
+    new bootstrap.Modal(document.getElementById('productModal')).show();
+};
+window.editProduct = async function(id) {
     const numericId = parseInt(id);
     if (isNaN(numericId)) {
         alert('❌ ID de produit invalide');
@@ -1232,25 +1270,22 @@ async function renderProducts() {
     modal.show();
     try {
         const p = await apiCall(`/products/${numericId}`);
-        console.log('📦 Produit chargé:', p); // Pour déboguer
-
-        // Remplir tous les champs
         document.getElementById('prodName').value = p.name || '';
         document.getElementById('prodName').disabled = false;
         document.getElementById('prodQuantity').value = p.quantity || 0;
         document.getElementById('prodBarcode').value = p.barcode || '';
+        // ACHAT
+        document.getElementById('prodPriceHt').value = p.price_ht || 0;
+        document.getElementById('prodTaxRate').value = (p.tax_rate !== null && p.tax_rate !== undefined) ? p.tax_rate : '';
         document.getElementById('prodBuyPrice').value = p.buy_price || 0;
+        // VENTE
         document.getElementById('prodSellPrice').value = p.sell_price || 0;
         document.getElementById('prodWholesalePrice').value = p.wholesale_price || 0;
         document.getElementById('prodWholesaleQty').value = p.wholesale_quantity || 5;
         document.getElementById('prodUnit').value = p.unit || 'pièce';
         document.getElementById('prodCategoryName').value = '';
         document.getElementById('prodCategorySelect').value = p.category_id || '';
-        document.getElementById('prodPriceHt').value = p.price_ht || 0;
-        document.getElementById('prodTaxRate').value = (p.tax_rate !== null && p.tax_rate !== undefined) ? p.tax_rate : '';
-
-        // NE PAS APPELER recalcTTC() pour conserver les valeurs d'origine
-
+        // Image
         if (p.image_url) {
             selectedImageData = p.image_url;
             document.getElementById('imagePreview').src = p.image_url;
@@ -1290,7 +1325,7 @@ async function renderProducts() {
                 console.error(err);
             }
         };
-const saveBtn = document.getElementById('saveProductBtn');
+        const saveBtn = document.getElementById('saveProductBtn');
 if (saveBtn) {
     const newBtn = saveBtn.cloneNode(true);
     saveBtn.parentNode.replaceChild(newBtn, saveBtn);
@@ -1302,18 +1337,25 @@ if (saveBtn) {
             return;
         }
 
-      const sell_price = parseFloat(document.getElementById('prodSellPrice').value);
-if (isNaN(sell_price) || sell_price < 0) {
-    showToast('❌ Prix de vente invalide (doit être ≥ 0)', 'danger');
-    return;
-}
+        // Prix de vente (sans TVA)
+        const sell_price = parseFloat(document.getElementById('prodSellPrice').value);
+        if (isNaN(sell_price) || sell_price < 0) {
+            showToast('❌ Prix de vente invalide (doit être ≥ 0)', 'danger');
+            return;
+        }
 
-        // Le reste du code (catégorie, SKU, construction de productData, etc.)
+        // Prix d'achat HT et TVA
+        const price_ht = parseFloat(document.getElementById('prodPriceHt').value) || 0;
+        const tax_rate = document.getElementById('prodTaxRate').value ? parseFloat(document.getElementById('prodTaxRate').value) : null;
+        const buy_price = parseFloat(document.getElementById('prodBuyPrice').value) || 0;
+
+        // Gestion catégorie
         let category_id = document.getElementById('prodCategorySelect').value;
         let category_name = document.getElementById('prodCategoryName').value.trim();
         if (category_name === '') category_name = null;
         if (category_id === '') category_id = null;
 
+        // SKU
         let sku;
         if (id) {
             const existing = await apiCall(`/products/${id}`);
@@ -1336,11 +1378,11 @@ if (isNaN(sell_price) || sell_price < 0) {
             quantity: parseInt(document.getElementById('prodQuantity').value) || 0,
             unit: document.getElementById('prodUnit').value.trim() || 'pièce',
             reorder_level: 5,
-            buy_price: parseFloat(document.getElementById('prodBuyPrice').value) || 0,
+            buy_price: buy_price,  // prix d'achat TTC
             location: '',
             image_url: selectedImageData || null,
-            price_ht: parseFloat(document.getElementById('prodPriceHt').value) || 0,
-            tax_rate: document.getElementById('prodTaxRate').value ? parseFloat(document.getElementById('prodTaxRate').value) : null
+            price_ht: price_ht,
+            tax_rate: tax_rate
         };
 
         try {
@@ -3758,7 +3800,13 @@ function stopPendingOrdersCheck() {
     console.log('🔐 Affichage de la page de connexion');
     showAuthPage();
 })();
-
+function recalcBuyTTC() {
+    const ht = parseFloat(document.getElementById('prodPriceHt')?.value) || 0;
+    const tax = parseFloat(document.getElementById('prodTaxRate')?.value) || 0;
+    const ttc = ht * (1 + tax / 100);
+    const buyField = document.getElementById('prodBuyPrice');
+    if (buyField) buyField.value = ttc.toFixed(2);
+}
 // Activation de l'audio au premier clic
 document.addEventListener('click', function initAudio() {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();

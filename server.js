@@ -1093,14 +1093,12 @@ app.get('/api/products/barcode/:code', authenticate, async (req, res) => {
     if (rows.length === 0) return res.status(404).json({ error: 'Produit non trouvé' });
     res.json(rows[0]);
 });
-
-// 6. POST /api/products (création)
 app.post('/api/products', authenticate, async (req, res) => {
     const {
         sku, barcode, name, description, category_id, category_name, supplier_id,
         quantity, unit, reorder_level, buy_price, sell_price, wholesale_price,
         wholesale_quantity, location, image_url,
-        price_ht, tax_rate   // ⬅️ nouveaux champs
+        price_ht, tax_rate
     } = req.body;
 
     if (!sku || !name) {
@@ -1129,37 +1127,33 @@ app.post('/api/products', authenticate, async (req, res) => {
             }
         }
 
-        // 2. Récupérer le taux de TVA global de l'utilisateur (si besoin)
+        // 2. Récupérer le taux global pour l'achat (si non fourni)
         const [settingsRows] = await connection.query(
             'SELECT tax_rate FROM settings WHERE user_id = ?',
             [req.user.id]
         );
         const globalTaxRate = settingsRows[0]?.tax_rate !== undefined ? parseFloat(settingsRows[0].tax_rate) : 0;
 
-        // 3. Déterminer le taux de TVA à utiliser
+        // 3. Déterminer le taux de TVA pour l'achat
         let finalTaxRate = (tax_rate !== undefined && tax_rate !== null) ? parseFloat(tax_rate) : null;
-        // Si le taux n'est pas défini sur le produit, on utilise le taux global
-        if (finalTaxRate === null) {
-            finalTaxRate = globalTaxRate;
-        }
+        if (finalTaxRate === null) finalTaxRate = globalTaxRate;
 
-        // 4. Déterminer le prix HT et TTC
+        // 4. Déterminer le prix d'achat HT et TTC
         let finalPriceHt = parseFloat(price_ht) || 0;
-        let finalSellPrice = parseFloat(sell_price) || 0;
+        let finalBuyPrice = parseFloat(buy_price) || 0;
 
-        // Si le prix HT est fourni et > 0, on calcule le TTC à partir du HT + TVA
         if (finalPriceHt > 0 && finalTaxRate !== null) {
-            finalSellPrice = finalPriceHt * (1 + finalTaxRate / 100);
-        } else if (finalPriceHt === 0 && finalSellPrice > 0) {
-            // Si seul le TTC est fourni, on calcule le HT à partir du TTC / (1 + taux)
-            finalPriceHt = finalSellPrice / (1 + finalTaxRate / 100);
+            finalBuyPrice = finalPriceHt * (1 + finalTaxRate / 100);
+        } else if (finalBuyPrice > 0 && finalTaxRate !== null && finalPriceHt === 0) {
+            finalPriceHt = finalBuyPrice / (1 + finalTaxRate / 100);
         }
 
-        // 5. Arrondir à 2 décimales
+        // Arrondir
         finalPriceHt = Math.round(finalPriceHt * 100) / 100;
-        finalSellPrice = Math.round(finalSellPrice * 100) / 100;
+        finalBuyPrice = Math.round(finalBuyPrice * 100) / 100;
 
-        const supId = supplier_id ? parseInt(supplier_id) : null;
+        // 5. Prix de vente (sans TVA)
+        let finalSellPrice = parseFloat(sell_price) || 0;
 
         // 6. Insertion du produit
         const [result] = await connection.query(
@@ -1171,11 +1165,15 @@ app.post('/api/products', authenticate, async (req, res) => {
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 req.user.id, sku, barcode || null, name, description || '',
-                finalCatId || null, supId,
+                finalCatId || null, supplier_id ? parseInt(supplier_id) : null,
                 quantity || 0, unit || 'pièce', reorder_level || 5,
-                buy_price || 0, finalSellPrice, wholesale_price || 0,
-                wholesale_quantity || 0, location || null, image_url || null,
-                finalPriceHt, finalTaxRate
+                finalBuyPrice,
+                finalSellPrice,
+                wholesale_price || 0,
+                wholesale_quantity || 0,
+                location || null, image_url || null,
+                finalPriceHt,
+                finalTaxRate
             ]
         );
 
@@ -1183,8 +1181,9 @@ app.post('/api/products', authenticate, async (req, res) => {
         res.status(201).json({
             id: result.insertId,
             message: 'Produit créé avec succès',
-            price_ht: finalPriceHt,
+            buy_price: finalBuyPrice,
             sell_price: finalSellPrice,
+            price_ht: finalPriceHt,
             tax_rate: finalTaxRate
         });
     } catch (err) {
@@ -1198,8 +1197,6 @@ app.post('/api/products', authenticate, async (req, res) => {
         connection.release();
     }
 });
-
-// 7. PUT /api/products/:id (modification)
 app.put('/api/products/:id', authenticate, async (req, res) => {
     const productId = parseInt(req.params.id);
     const userId = req.user.id;
@@ -1227,24 +1224,26 @@ app.put('/api/products/:id', authenticate, async (req, res) => {
     }
     const supId = supplier_id ? parseInt(supplier_id) : null;
 
-    // Récupérer le taux global pour le recalcul
+    // Récupérer le taux global pour l'achat
     const [settingsRows] = await pool.query('SELECT tax_rate FROM settings WHERE user_id = ?', [userId]);
     const globalTaxRate = settingsRows[0]?.tax_rate !== undefined ? parseFloat(settingsRows[0].tax_rate) : 0;
 
     let finalTaxRate = (tax_rate !== undefined && tax_rate !== null) ? parseFloat(tax_rate) : null;
     if (finalTaxRate === null) finalTaxRate = globalTaxRate;
 
+    // Calcul du prix d'achat HT et TTC
     let finalPriceHt = parseFloat(price_ht) || 0;
-    let finalSellPrice = parseFloat(sell_price) || 0;
+    let finalBuyPrice = parseFloat(buy_price) || 0;
 
     if (finalPriceHt > 0 && finalTaxRate !== null) {
-        finalSellPrice = finalPriceHt * (1 + finalTaxRate / 100);
-    } else if (finalPriceHt === 0 && finalSellPrice > 0) {
-        finalPriceHt = finalSellPrice / (1 + finalTaxRate / 100);
+        finalBuyPrice = finalPriceHt * (1 + finalTaxRate / 100);
+    } else if (finalBuyPrice > 0 && finalTaxRate !== null && finalPriceHt === 0) {
+        finalPriceHt = finalBuyPrice / (1 + finalTaxRate / 100);
     }
-
     finalPriceHt = Math.round(finalPriceHt * 100) / 100;
-    finalSellPrice = Math.round(finalSellPrice * 100) / 100;
+    finalBuyPrice = Math.round(finalBuyPrice * 100) / 100;
+
+    let finalSellPrice = parseFloat(sell_price) || 0;
 
     try {
         await pool.query(`
@@ -1257,13 +1256,19 @@ app.put('/api/products/:id', authenticate, async (req, res) => {
             WHERE id=? AND user_id=?`,
             [sku, barcode || null, name, description || '', finalCatId || null,
              supId, quantity || 0, unit || 'pièce', reorder_level || 5,
-             buy_price || 0, finalSellPrice, wholesale_price || 0, wholesale_quantity || 0,
+             finalBuyPrice, finalSellPrice, wholesale_price || 0, wholesale_quantity || 0,
              location || null, image_url || null,
              finalPriceHt, finalTaxRate,
              productId, userId]
         );
         console.log(`✅ Produit ${productId} mis à jour avec succès`);
-        res.json({ message: 'Mis à jour', price_ht: finalPriceHt, sell_price: finalSellPrice, tax_rate: finalTaxRate });
+        res.json({ 
+            message: 'Mis à jour', 
+            buy_price: finalBuyPrice, 
+            sell_price: finalSellPrice, 
+            price_ht: finalPriceHt, 
+            tax_rate: finalTaxRate 
+        });
     } catch (err) {
         console.error('❌ Erreur mise à jour:', err);
         res.status(500).json({ error: 'Erreur serveur: ' + err.message });
