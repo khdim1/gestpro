@@ -440,7 +440,19 @@ let intervalId = null;
 function formatNumber(number) {
     if (number === undefined || number === null || isNaN(number)) return '0';
     const num = parseFloat(number);
-    return num.toLocaleString('fr-FR').replace(/\s/g, ' ').replace(/,/g, ' ');
+    // Arrondir à 2 décimales
+    const rounded = Math.round(num * 100) / 100;
+    // Séparer la partie entière et décimale
+    const parts = rounded.toFixed(2).split('.');
+    const integerPart = parts[0];
+    const decimalPart = parts[1];
+    // Ajouter les séparateurs de milliers
+    const formattedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    // Si la partie décimale est '00', on ne l'affiche pas
+    if (decimalPart === '00') {
+        return formattedInteger;
+    }
+    return formattedInteger + ',' + decimalPart;
 }
 async function apiCall(endpoint, method = 'GET', body = null, isDownload = false) {
     try {
