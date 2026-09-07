@@ -356,6 +356,7 @@
         <a class="nav-link" data-page="settings"><i class="bi bi-gear" style="color: #7f8c8d;"></i> Paramètres</a>
         <a class="nav-link" data-page="history"><i class="bi bi-clock-history" style="color: #1abc9c;"></i> Historique</a>
         <a class="nav-link" data-page="sub-users"><i class="bi bi-people-fill" style="color: #2ecc71;"></i> Équipe</a>
+        <a class="nav-link" data-page="expenses"><i class="bi bi-wallet2" style="color: #e67e22;"></i> Dépenses</a>
         <a class="nav-link" data-page="drivers"><i class="bi bi-people-fill" style="color: #3498db;"></i> Livreurs</a>
         <a class="nav-link" data-page="deliveries"><i class="bi bi-truck" style="color: #f39c12;"></i> Livraisons</a>
         <a class="nav-link" data-page="orders"><i class="bi bi-bag" style="color: #e67e22;"></i> Commandes en ligne</a>
@@ -619,6 +620,7 @@ function showApp() {
         firstVisible.classList.add('active');
         loadPage(firstVisible.dataset.page);
     } else if (pageContainer) {
+        
         pageContainer.innerHTML = `
             <div class="alert alert-warning">
                 <i class="bi bi-exclamation-triangle me-2"></i>
@@ -626,7 +628,9 @@ function showApp() {
                 <br><small>Contactez votre administrateur pour obtenir les droits d'accès.</small>
             </div>
         `;
+        
     }
+    
     const hasOrderPermission = isAdmin || window.currentUser?.permissions?.includes('orders_view') || window.currentUser?.permissions?.includes('*');
     if (hasOrderPermission) {
         startPendingOrdersCheck();
@@ -825,6 +829,7 @@ async function loadPage(page) {
                     </div>
                 `;
             }
+            
             return;
         }
     }
@@ -861,6 +866,7 @@ async function loadPage(page) {
         else if (page === 'drivers') await renderDrivers();
         else if (page === 'deliveries') await renderDeliveries();
         else if (page === 'orders') await renderOrders();
+        else if (page === 'expenses') await renderExpenses();
         else {
             pageContainer.innerHTML = `<div class="alert alert-warning">Page non trouvée: ${page}</div>`;
         }
@@ -3218,7 +3224,376 @@ async function renderDeliveries() {
         alert('Détails de la livraison à venir');
     };
 }
+// ========================================================================
+// DÉPENSES
+// ========================================================================
+let expenseFilterPeriod = 'month';
+let expenseFilterDate = new Date().toISOString().split('T')[0];
 
+async function renderExpenses() {
+    try {
+        // Récupérer les paramètres
+        const settings = await apiCall('/settings');
+        const currency = settings.currency || 'FCFA';
+
+        // Construction de la page
+        const html = `
+            <div class="row mb-3">
+                <div class="col-md-12">
+                    <h5><i class="bi bi-wallet2 text-primary-custom me-2"></i>Gestion des dépenses</h5>
+                    <p class="text-muted">Enregistrez toutes vos dépenses avec justificatifs (factures, reçus)</p>
+                </div>
+            </div>
+            
+            <!-- Formulaire -->
+            <div class="card-modern mb-4">
+                <h6 class="card-title"><i class="bi bi-plus-circle me-2"></i>Nouvelle dépense</h6>
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label">Montant (${currency}) *</label>
+                        <input type="number" step="0.01" id="expenseAmount" class="form-control" placeholder="0.00">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Catégorie *</label>
+                        <select id="expenseCategory" class="form-select">
+                            <option value="Achat fournitures">Achat fournitures</option>
+                            <option value="Transport">Transport</option>
+                            <option value="Location">Location</option>
+                            <option value="Salaires">Salaires</option>
+                            <option value="Services">Services</option>
+                            <option value="Électricité">Électricité</option>
+                            <option value="Eau">Eau</option>
+                            <option value="Téléphone/Internet">Téléphone/Internet</option>
+                            <option value="Marketing">Marketing</option>
+                            <option value="Réparation">Réparation</option>
+                            <option value="Autre">Autre</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Date *</label>
+                        <input type="date" id="expenseDate" class="form-control" value="${new Date().toISOString().split('T')[0]}">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Justificatif (facultatif)</label>
+                        <input type="file" id="expenseAttachment" class="form-control" accept="image/*,application/pdf" onchange="previewExpenseAttachment(event)">
+                        <div id="expenseAttachmentPreview" class="mt-1" style="display:none;">
+                            <img id="expenseAttachmentImg" src="" alt="Justificatif" style="max-width:100px; max-height:80px; border:1px solid #ddd; padding:4px; border-radius:4px;">
+                            <button class="btn btn-sm btn-danger ms-1" onclick="clearExpenseAttachment()"><i class="bi bi-x"></i></button>
+                        </div>
+                    </div>
+                </div>
+                <div class="row g-3 mt-1">
+                    <div class="col-md-6">
+                        <label class="form-label">Description</label>
+                        <input type="text" id="expenseDescription" class="form-control" placeholder="Description détaillée">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Justification (texte)</label>
+                        <input type="text" id="expenseJustification" class="form-control" placeholder="Raison de la dépense">
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <button class="btn btn-primary" onclick="saveExpense()"><i class="bi bi-save me-1"></i>Enregistrer</button>
+                    <button class="btn btn-secondary" onclick="clearExpenseForm()"><i class="bi bi-arrow-counterclockwise me-1"></i>Réinitialiser</button>
+                </div>
+            </div>
+
+            <!-- Filtres et résumé -->
+            <div class="row g-2 mb-3 align-items-center">
+                <div class="col-md-3">
+                    <label class="form-label" style="font-size:0.8rem;">Période</label>
+                    <select id="expensePeriod" class="form-select form-select-sm" onchange="applyExpenseFilters()">
+                        <option value="day">Aujourd'hui</option>
+                        <option value="week">Cette semaine</option>
+                        <option value="month" selected>Ce mois</option>
+                        <option value="year">Cette année</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label" style="font-size:0.8rem;">Date de référence</label>
+                    <input type="date" id="expenseFilterDate" class="form-control form-control-sm" value="${expenseFilterDate}" onchange="applyExpenseFilters()">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label" style="font-size:0.8rem;">Catégorie</label>
+                    <select id="expenseFilterCategory" class="form-select form-select-sm" onchange="applyExpenseFilters()">
+                        <option value="">Toutes</option>
+                        <option value="Achat fournitures">Achat fournitures</option>
+                        <option value="Transport">Transport</option>
+                        <option value="Location">Location</option>
+                        <option value="Salaires">Salaires</option>
+                        <option value="Services">Services</option>
+                        <option value="Électricité">Électricité</option>
+                        <option value="Eau">Eau</option>
+                        <option value="Téléphone/Internet">Téléphone/Internet</option>
+                        <option value="Marketing">Marketing</option>
+                        <option value="Réparation">Réparation</option>
+                        <option value="Autre">Autre</option>
+                    </select>
+                </div>
+                <div class="col-md-3 text-end">
+                    <span class="badge bg-primary p-2" id="expenseTotalDisplay">Total : 0 ${currency}</span>
+                </div>
+            </div>
+
+            <!-- Tableau des dépenses -->
+            <div class="card-modern">
+                <div class="table-wrapper">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Catégorie</th>
+                                <th>Montant</th>
+                                <th>Description</th>
+                                <th>Justificatif</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="expensesTableBody">
+                            <tr><td colspan="6" class="text-center py-4 text-muted">Chargement...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+        document.getElementById('pageContainer').innerHTML = html;
+
+        // Charger les données
+        await loadExpenses();
+
+    } catch (err) {
+        console.error('Erreur renderExpenses:', err);
+        document.getElementById('pageContainer').innerHTML = `<div class="alert alert-danger">Erreur : ${err.message}</div>`;
+    }
+}
+
+// ===== VARIABLES GLOBALES POUR LES DÉPENSES =====
+let currentExpenseAttachmentData = null;
+let editingExpenseId = null;
+
+// ===== PRÉVISUALISATION DU JUSTIFICATIF =====
+window.previewExpenseAttachment = function(event) {
+    const file = event.target.files[0];
+    if (file) {
+        if (file.size > 2 * 1024 * 1024) {
+            alert('❌ Le fichier est trop volumineux (max 2MB)');
+            event.target.value = '';
+            return;
+        }
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            currentExpenseAttachmentData = e.target.result;
+            document.getElementById('expenseAttachmentImg').src = currentExpenseAttachmentData;
+            document.getElementById('expenseAttachmentPreview').style.display = 'block';
+        };
+        reader.readAsDataURL(file);
+    }
+};
+
+window.clearExpenseAttachment = function() {
+    currentExpenseAttachmentData = null;
+    document.getElementById('expenseAttachment').value = '';
+    document.getElementById('expenseAttachmentPreview').style.display = 'none';
+    document.getElementById('expenseAttachmentImg').src = '';
+};
+
+window.clearExpenseForm = function() {
+    document.getElementById('expenseAmount').value = '';
+    document.getElementById('expenseCategory').value = 'Achat fournitures';
+    document.getElementById('expenseDate').value = new Date().toISOString().split('T')[0];
+    document.getElementById('expenseDescription').value = '';
+    document.getElementById('expenseJustification').value = '';
+    clearExpenseAttachment();
+    editingExpenseId = null;
+    document.querySelector('#expenseFormTitle')?.remove();
+};
+
+// ===== SAUVEGARDER UNE DÉPENSE =====
+window.saveExpense = async function() {
+    const amount = parseFloat(document.getElementById('expenseAmount').value);
+    const category = document.getElementById('expenseCategory').value;
+    const description = document.getElementById('expenseDescription').value.trim();
+    const justification = document.getElementById('expenseJustification').value.trim();
+    const expense_date = document.getElementById('expenseDate').value;
+    const attachment = currentExpenseAttachmentData || null;
+
+    if (!amount || amount <= 0) {
+        showToast('❌ Montant invalide', 'danger');
+        return;
+    }
+    if (!category) {
+        showToast('❌ Catégorie requise', 'danger');
+        return;
+    }
+    if (!expense_date) {
+        showToast('❌ Date requise', 'danger');
+        return;
+    }
+
+    const data = { amount, category, description, justification, attachment, expense_date };
+
+    try {
+        if (editingExpenseId) {
+            await apiCall(`/expenses/${editingExpenseId}`, 'PUT', data);
+            showToast('✅ Dépense modifiée', 'success');
+        } else {
+            await apiCall('/expenses', 'POST', data);
+            showToast('✅ Dépense enregistrée', 'success');
+        }
+        clearExpenseForm();
+        await loadExpenses();
+    } catch (err) {
+        showToast('❌ Erreur : ' + err.message, 'danger');
+        console.error(err);
+    }
+};
+
+// ===== CHARGER LES DÉPENSES =====
+async function loadExpenses() {
+    const period = document.getElementById('expensePeriod').value;
+    const date = document.getElementById('expenseFilterDate').value;
+    const category = document.getElementById('expenseFilterCategory').value;
+
+    try {
+        // Récupérer le résumé
+        const summary = await apiCall(`/expenses/summary?period=${period}&date=${date}`);
+        const currency = (await apiCall('/settings')).currency || 'FCFA';
+        document.getElementById('expenseTotalDisplay').innerHTML = `Total : ${formatNumber(summary.total)} ${currency}`;
+
+        // Récupérer la liste
+        let url = `/expenses?`;
+        if (category) url += `category=${encodeURIComponent(category)}&`;
+        // On prend la période via la date
+        let startDate, endDate;
+        const refDate = new Date(date);
+        switch (period) {
+            case 'day':
+                startDate = date;
+                endDate = date;
+                break;
+            case 'week':
+                const dayOfWeek = refDate.getDay() || 7;
+                const start = new Date(refDate);
+                start.setDate(refDate.getDate() - dayOfWeek + 1);
+                const end = new Date(start);
+                end.setDate(start.getDate() + 6);
+                startDate = start.toISOString().split('T')[0];
+                endDate = end.toISOString().split('T')[0];
+                break;
+            case 'month':
+                const year = refDate.getFullYear();
+                const month = String(refDate.getMonth() + 1).padStart(2, '0');
+                startDate = `${year}-${month}-01`;
+                const lastDay = new Date(year, refDate.getMonth() + 1, 0).getDate();
+                endDate = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
+                break;
+            case 'year':
+                startDate = `${refDate.getFullYear()}-01-01`;
+                endDate = `${refDate.getFullYear()}-12-31`;
+                break;
+            default:
+                startDate = date;
+                endDate = date;
+        }
+        url += `start_date=${startDate}&end_date=${endDate}`;
+        const expenses = await apiCall(url);
+        renderExpensesTable(expenses, currency);
+    } catch (err) {
+        console.error('Erreur chargement dépenses:', err);
+        document.getElementById('expensesTableBody').innerHTML = `<tr><td colspan="6" class="text-danger">Erreur : ${err.message}</td></tr>`;
+    }
+}
+
+// ===== AFFICHER LE TABLEAU =====
+function renderExpensesTable(expenses, currency) {
+    const tbody = document.getElementById('expensesTableBody');
+    if (!tbody) return;
+    if (!expenses || expenses.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted">Aucune dépense trouvée</td></tr>';
+        return;
+    }
+    tbody.innerHTML = expenses.map(e => {
+        const hasAttachment = e.attachment && e.attachment.length > 100;
+        return `
+            <tr>
+                <td>${new Date(e.expense_date).toLocaleDateString('fr-FR')}</td>
+                <td><span class="badge bg-secondary">${e.category}</span></td>
+                <td><strong>${formatNumber(e.amount)} ${currency}</strong></td>
+                <td>${e.description || '-'}</td>
+                <td>
+                    ${e.justification ? `<span class="text-muted">${e.justification}</span>` : ''}
+                    ${hasAttachment ? ` <i class="bi bi-paperclip text-primary" title="Justificatif présent" onclick="viewAttachment('${e.attachment}')" style="cursor:pointer;"></i>` : ''}
+                </td>
+                <td>
+                    <button class="btn btn-sm btn-warning me-1" onclick="editExpense(${e.id})"><i class="bi bi-pencil"></i></button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteExpense(${e.id})"><i class="bi bi-trash"></i></button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+// ===== AFFICHER LE JUSTIFICATIF =====
+window.viewAttachment = function(base64Data) {
+    if (!base64Data) return;
+    const win = window.open('', '_blank');
+    win.document.write(`<img src="${base64Data}" style="max-width:100%;max-height:100%;" />`);
+    win.document.close();
+};
+
+// ===== MODIFIER UNE DÉPENSE =====
+window.editExpense = async function(id) {
+    try {
+        const expenses = await apiCall(`/expenses?limit=1000`);
+        const expense = expenses.find(e => e.id === id);
+        if (!expense) {
+            showToast('❌ Dépense non trouvée', 'danger');
+            return;
+        }
+        editingExpenseId = id;
+        document.getElementById('expenseAmount').value = expense.amount;
+        document.getElementById('expenseCategory').value = expense.category;
+        document.getElementById('expenseDate').value = expense.expense_date;
+        document.getElementById('expenseDescription').value = expense.description || '';
+        document.getElementById('expenseJustification').value = expense.justification || '';
+        if (expense.attachment) {
+            currentExpenseAttachmentData = expense.attachment;
+            document.getElementById('expenseAttachmentImg').src = expense.attachment;
+            document.getElementById('expenseAttachmentPreview').style.display = 'block';
+        } else {
+            clearExpenseAttachment();
+        }
+        // Ajouter un titre modifié
+        const formTitle = document.querySelector('#expenseFormTitle');
+        if (!formTitle) {
+            const h6 = document.createElement('h6');
+            h6.id = 'expenseFormTitle';
+            h6.className = 'card-title mb-2';
+            h6.innerHTML = '<i class="bi bi-pencil-square me-2"></i>Modifier la dépense';
+            document.querySelector('.card-modern .card-title').after(h6);
+        }
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (err) {
+        showToast('❌ Erreur : ' + err.message, 'danger');
+    }
+};
+
+// ===== SUPPRIMER UNE DÉPENSE =====
+window.deleteExpense = async function(id) {
+    if (!confirm('Supprimer définitivement cette dépense ?')) return;
+    try {
+        await apiCall(`/expenses/${id}`, 'DELETE');
+        showToast('✅ Dépense supprimée', 'success');
+        await loadExpenses();
+    } catch (err) {
+        showToast('❌ Erreur : ' + err.message, 'danger');
+    }
+};
+
+// ===== APPLIQUER LES FILTRES =====
+window.applyExpenseFilters = function() {
+    loadExpenses();
+};
 // ========================================================================
 // ORDERS (Commandes en ligne)
 // ========================================================================

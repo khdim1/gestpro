@@ -317,7 +317,20 @@ async function initAndStart() {
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
             FOREIGN KEY (delivery_id) REFERENCES deliveries(id) ON DELETE SET NULL
         )`);
-
+// ===== TABLE DES DÉPENSES =====
+await pool.query(`CREATE TABLE IF NOT EXISTS expenses (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    amount DECIMAL(15,2) NOT NULL,
+    category VARCHAR(50) NOT NULL,
+    description TEXT,
+    justification TEXT,
+    attachment LONGTEXT,
+    expense_date DATE NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_user_date (user_id, expense_date)
+)`);
         await pool.query(`CREATE TABLE IF NOT EXISTS order_items (
             id INT PRIMARY KEY AUTO_INCREMENT,
             order_id INT NOT NULL,
@@ -3755,7 +3768,176 @@ const checkPermission = (permissionName) => {
         }
     };
 };
+// ========== ROUTES DÉPENSES ==========
 
+// GET /api/expenses - Liste des dépenses avec filtres
+app.get('/api/expenses', authenticate, async (req, res) => {
+    const { start_date, end_date, category, limit = 100, offset = 0 } = req.query;
+    let sql = 'SELECT * FROM expenses WHERE user_id = ?';
+    const params = [req.user.id];
+    
+    if (start_date) {
+        sql += ' AND expense_date >= ?';
+        params.push(start_date);
+    }
+    if (end_date) {
+        sql += ' AND expense_date <= ?';
+        params.push(end_date);
+    }
+    if (category) {
+        sql += ' AND category = ?';
+        params.push(category);
+    }
+    sql += ' ORDER BY expense_date DESC, created_at DESC LIMIT ? OFFSET ?';
+    params.push(parseInt(limit), parseInt(offset));
+    
+    try {
+        const [rows] = await pool.query(sql, params);
+        res.json(rows);
+    } catch (err) {
+        console.error('Erreur GET /expenses:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/expenses - Créer une dépense
+app.post('/api/expenses', authenticate, async (req, res) => {
+    const { amount, category, description, justification, attachment, expense_date } = req.body;
+    
+    if (!amount || amount <= 0) {
+        return res.status(400).json({ error: 'Montant invalide' });
+    }
+    if (!category) {
+        return res.status(400).json({ error: 'Catégorie requise' });
+    }
+    if (!expense_date) {
+        return res.status(400).json({ error: 'Date requise' });
+    }
+    
+    try {
+        const [result] = await pool.query(
+            `INSERT INTO expenses (user_id, amount, category, description, justification, attachment, expense_date)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [req.user.id, amount, category, description || '', justification || '', attachment || null, expense_date]
+        );
+        res.status(201).json({ id: result.insertId, message: 'Dépense créée' });
+    } catch (err) {
+        console.error('Erreur POST /expenses:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// PUT /api/expenses/:id - Modifier une dépense
+app.put('/api/expenses/:id', authenticate, async (req, res) => {
+    const expenseId = req.params.id;
+    const { amount, category, description, justification, attachment, expense_date } = req.body;
+    
+    try {
+        const [check] = await pool.query('SELECT id FROM expenses WHERE id = ? AND user_id = ?', [expenseId, req.user.id]);
+        if (check.length === 0) {
+            return res.status(404).json({ error: 'Dépense non trouvée' });
+        }
+        
+        await pool.query(
+            `UPDATE expenses SET 
+                amount = ?, category = ?, description = ?, justification = ?, attachment = ?, expense_date = ?
+             WHERE id = ? AND user_id = ?`,
+            [amount, category, description || '', justification || '', attachment || null, expense_date, expenseId, req.user.id]
+        );
+        res.json({ message: 'Dépense mise à jour' });
+    } catch (err) {
+        console.error('Erreur PUT /expenses:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// DELETE /api/expenses/:id - Supprimer une dépense
+app.delete('/api/expenses/:id', authenticate, async (req, res) => {
+    const expenseId = req.params.id;
+    try {
+        const [result] = await pool.query('DELETE FROM expenses WHERE id = ? AND user_id = ?', [expenseId, req.user.id]);
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ error: 'Dépense non trouvée' });
+        }
+        res.json({ message: 'Dépense supprimée' });
+    } catch (err) {
+        console.error('Erreur DELETE /expenses:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+// GET /api/expenses/summary - Résumé par période
+app.get('/api/expenses/summary', authenticate, async (req, res) => {
+    const { period = 'month', date } = req.query;
+    const targetDate = date || new Date().toISOString().split('T')[0];
+    
+    let whereClause = '';
+    const params = [req.user.id];
+    
+    switch (period) {
+        case 'day':
+            whereClause = 'expense_date = ?';
+            params.push(targetDate);
+            break;
+        case 'week':
+            whereClause = 'YEARWEEK(expense_date, 1) = YEARWEEK(?, 1)';
+            params.push(targetDate);
+            break;
+        case 'month':
+            whereClause = 'YEAR(expense_date) = YEAR(?) AND MONTH(expense_date) = MONTH(?)';
+            params.push(targetDate, targetDate);
+            break;
+        case 'year':
+            whereClause = 'YEAR(expense_date) = YEAR(?)';
+            params.push(targetDate);
+            break;
+        default:
+            whereClause = 'expense_date = ?';
+            params.push(targetDate);
+    }
+    
+    try {
+        // Total général
+        const [totalRows] = await pool.query(
+            `SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE user_id = ? AND ${whereClause}`,
+            params
+        );
+        
+        // Détail par catégorie
+        const [categoryRows] = await pool.query(
+            `SELECT category, COALESCE(SUM(amount), 0) as total 
+             FROM expenses 
+             WHERE user_id = ? AND ${whereClause}
+             GROUP BY category 
+             ORDER BY total DESC`,
+            params
+        );
+        
+        // Détail par jour (pour semaine/mois/année)
+        let dailyRows = [];
+        if (period === 'week' || period === 'month') {
+            const [rows] = await pool.query(
+                `SELECT expense_date, COALESCE(SUM(amount), 0) as total 
+                 FROM expenses 
+                 WHERE user_id = ? AND ${whereClause}
+                 GROUP BY expense_date 
+                 ORDER BY expense_date`,
+                params
+            );
+            dailyRows = rows;
+        }
+        
+        res.json({
+            period,
+            total: totalRows[0].total || 0,
+            by_category: categoryRows,
+            by_day: dailyRows,
+            date: targetDate
+        });
+    } catch (err) {
+        console.error('Erreur GET /expenses/summary:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
 // ========== ROUTES CLIENTS DÉTAILS ET OPÉRATIONS ==========
 app.get('/api/clients/:id/details', authenticate, async (req, res) => {
     const clientId = req.params.id;
