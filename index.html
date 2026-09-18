@@ -361,6 +361,9 @@
         <a class="nav-link" data-page="deliveries"><i class="bi bi-truck" style="color: #f39c12;"></i> Livraisons</a>
         <a class="nav-link" data-page="orders"><i class="bi bi-bag" style="color: #e67e22;"></i> Commandes en ligne</a>
         <hr class="nav-divider">
+        <a class="nav-link" data-page="suppliers"><i class="bi bi-truck-flatbed" style="color: #8e44ad;"></i> Fournisseurs</a>
+<a class="nav-link" data-page="supplier-purchases"><i class="bi bi-receipt-cutoff" style="color: #e67e22;"></i> Achats fournisseurs</a>
+<a class="nav-link" data-page="supplier-payments"><i class="bi bi-cash-coin" style="color: #27ae60;"></i> Paiements fournisseurs</a>
         <a class="nav-link logout" id="logoutBtn"><i class="bi bi-box-arrow-right" style="color: #e74c3c;"></i> Déconnexion</a>
     </nav>
 </div>
@@ -879,6 +882,9 @@ async function loadPage(page) {
         else if (page === 'deliveries') await renderDeliveries();
         else if (page === 'orders') await renderOrders();
         else if (page === 'expenses') await renderExpenses();
+        else if (page === 'suppliers') await renderSuppliers();
+else if (page === 'supplier-purchases') await renderSupplierPurchases();
+else if (page === 'supplier-payments') await renderSupplierPayments();
         else {
             pageContainer.innerHTML = `<div class="alert alert-warning">Page non trouvée: ${page}</div>`;
         }
@@ -959,7 +965,11 @@ async function renderProducts() {
             categories = await apiCall('/categories');
             if (!Array.isArray(categories)) categories = [];
         } catch(e) {}
-
+let suppliers = [];
+try {
+    suppliers = await apiCall('/suppliers');
+    if (!Array.isArray(suppliers)) suppliers = [];
+} catch(e) {}
         // Récupération des paramètres pour la TVA
         const settings = await apiCall('/settings');
         const globalTaxRate = settings.tax_rate || 0;
@@ -1113,7 +1123,13 @@ async function renderProducts() {
                         ${categories.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
                     </select>
                 </div>
-            </div>
+            </div><div class="mb-3">
+    <label class="form-label">Fournisseur</label>
+    <select id="prodSupplier" class="form-select">
+        <option value="">-- Aucun fournisseur --</option>
+    </select>
+</div>
+
             <div class="modal-footer">
                 <button class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
                 <button class="btn btn-primary" id="saveProductBtn">Enregistrer</button>
@@ -1273,6 +1289,12 @@ window.showProductModal = function() {
     document.getElementById('imagePreviewContainer').style.display = 'none';
     selectedImageData = null;
     recalcBuyTTC(); // initialiser le TTC à 0
+    const supplierSelect = document.getElementById('prodSupplier');
+if (supplierSelect) {
+    supplierSelect.innerHTML = '<option value="">-- Aucun fournisseur --</option>' +
+        suppliers.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+    supplierSelect.value = '';
+}
     new bootstrap.Modal(document.getElementById('productModal')).show();
 };
 window.editProduct = async function(id) {
@@ -1313,6 +1335,8 @@ window.editProduct = async function(id) {
             document.getElementById('imagePreviewContainer').style.display = 'none';
             selectedImageData = null;
         }
+        const supplierSelect = document.getElementById('prodSupplier');
+if (supplierSelect) supplierSelect.value = p.supplier_id || '';
         modal.show();
     } catch(e) {
         alert('❌ Erreur chargement: ' + e.message);
@@ -1386,6 +1410,7 @@ if (saveBtn) {
             sku: sku,
             name: name,
             sell_price: sell_price,
+            supplier_id: document.getElementById('prodSupplier')?.value || null,
             wholesale_price: parseFloat(document.getElementById('prodWholesalePrice').value) || 0,
             wholesale_quantity: parseInt(document.getElementById('prodWholesaleQty').value) || 5,
             barcode: document.getElementById('prodBarcode').value.trim() || null,
@@ -4201,6 +4226,693 @@ document.addEventListener('click', function initAudio() {
     ctx.close();
     document.removeEventListener('click', initAudio);
 }, { once: true });
+// ========================================================================
+// FOURNISSEURS
+// ========================================================================
+async function renderSuppliers() {
+    try {
+        const suppliers = await apiCall('/suppliers');
+        const html = `
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5><i class="bi bi-truck-flatbed text-primary-custom me-2"></i>Gestion des fournisseurs</h5>
+                <button class="btn btn-primary" onclick="showSupplierModal()">
+                    <i class="bi bi-plus-circle me-1"></i>Nouveau fournisseur
+                </button>
+            </div>
+            <div class="card-modern">
+                <div class="table-wrapper">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Nom</th><th>Contact</th><th>Téléphone</th>
+                                <th>Email</th><th>Statut</th><th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${suppliers.length === 0 ? `
+                                <tr><td colspan="6" class="text-center py-4 text-muted">Aucun fournisseur</td></tr>
+                            ` : suppliers.map(s => `
+                                <tr>
+                                    <td><strong>${s.name}</strong></td>
+                                    <td>${s.contact_name || '-'}</td>
+                                    <td>${s.phone || '-'}</td>
+                                    <td>${s.email || '-'}</td>
+                                    <td><span class="badge ${s.is_active ? 'badge-success' : 'badge-danger'}">${s.is_active ? 'Actif' : 'Inactif'}</span></td>
+                                    <td>
+                                        <button class="btn btn-sm btn-info me-1" onclick="viewSupplierReport(${s.id})" title="Rapport">
+                                            <i class="bi bi-graph-up"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-secondary me-1" onclick="viewSupplierStatement(${s.id})" title="Relevé">
+                                            <i class="bi bi-file-text"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-warning me-1" onclick="editSupplier(${s.id})">
+                                            <i class="bi bi-pencil"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-danger" onclick="deleteSupplier(${s.id})">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- MODAL FOURNISSEUR -->
+            <div class="modal fade" id="supplierModal" tabindex="-1">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5><i class="bi bi-truck-flatbed me-2"></i><span id="supplierModalTitle">Nouveau fournisseur</span></h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <input type="hidden" id="supplierId">
+                            <div class="mb-3"><label class="form-label">Nom *</label><input type="text" id="supName" class="form-control"></div>
+                            <div class="mb-3"><label class="form-label">Personne de contact</label><input type="text" id="supContact" class="form-control"></div>
+                            <div class="mb-3"><label class="form-label">Téléphone</label><input type="text" id="supPhone" class="form-control"></div>
+                            <div class="mb-3"><label class="form-label">Email</label><input type="email" id="supEmail" class="form-control"></div>
+                            <div class="mb-3"><label class="form-label">Adresse</label><textarea id="supAddress" class="form-control" rows="2"></textarea></div>
+                            <div class="mb-3"><label class="form-label">Notes</label><textarea id="supNotes" class="form-control" rows="2"></textarea></div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                            <button class="btn btn-primary" onclick="saveSupplier()">
+                                <i class="bi bi-save me-1"></i>Enregistrer
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.getElementById('pageContainer').innerHTML = html;
+
+        window.showSupplierModal = () => {
+            document.getElementById('supplierId').value = '';
+            document.getElementById('supName').value = '';
+            document.getElementById('supContact').value = '';
+            document.getElementById('supPhone').value = '';
+            document.getElementById('supEmail').value = '';
+            document.getElementById('supAddress').value = '';
+            document.getElementById('supNotes').value = '';
+            document.getElementById('supplierModalTitle').innerText = 'Nouveau fournisseur';
+            new bootstrap.Modal(document.getElementById('supplierModal')).show();
+        };
+
+        window.editSupplier = (id) => {
+            const s = suppliers.find(x => x.id === id);
+            if (!s) return;
+            document.getElementById('supplierId').value = s.id;
+            document.getElementById('supName').value = s.name || '';
+            document.getElementById('supContact').value = s.contact_name || '';
+            document.getElementById('supPhone').value = s.phone || '';
+            document.getElementById('supEmail').value = s.email || '';
+            document.getElementById('supAddress').value = s.address || '';
+            document.getElementById('supNotes').value = s.notes || '';
+            document.getElementById('supplierModalTitle').innerText = 'Modifier fournisseur';
+            new bootstrap.Modal(document.getElementById('supplierModal')).show();
+        };
+
+        window.saveSupplier = async () => {
+            const id = document.getElementById('supplierId').value;
+            const data = {
+                name: document.getElementById('supName').value.trim(),
+                contact_name: document.getElementById('supContact').value.trim(),
+                phone: document.getElementById('supPhone').value.trim(),
+                email: document.getElementById('supEmail').value.trim(),
+                address: document.getElementById('supAddress').value.trim(),
+                notes: document.getElementById('supNotes').value.trim()
+            };
+            if (!data.name) return showToast('Nom obligatoire', 'danger');
+            try {
+                if (id) await apiCall(`/suppliers/${id}`, 'PUT', data);
+                else await apiCall('/suppliers', 'POST', data);
+                showToast('✅ Fournisseur enregistré', 'success');
+                bootstrap.Modal.getInstance(document.getElementById('supplierModal')).hide();
+                renderSuppliers();
+            } catch(err) { showToast('❌ ' + err.message, 'danger'); }
+        };
+
+        window.deleteSupplier = async (id) => {
+            if (!confirm('Supprimer ce fournisseur ?')) return;
+            try {
+                await apiCall(`/suppliers/${id}`, 'DELETE');
+                showToast('✅ Supprimé', 'success');
+                renderSuppliers();
+            } catch(err) { showToast('❌ ' + err.message, 'danger'); }
+        };
+
+        window.viewSupplierReport = async (id) => {
+            const period = prompt('Période : day, week, month, year', 'month');
+            if (!period) return;
+            try {
+                const data = await apiCall(`/supplier-reports/${id}?period=${period}`);
+                let html = `
+                    <div class="modal fade" id="supplierReportModal" tabindex="-1">
+                        <div class="modal-dialog modal-lg">
+                            <div class="modal-content">
+                                <div class="modal-header">
+                                    <h5><i class="bi bi-graph-up me-2"></i>Rapport fournisseur (${period})</h5>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                </div>
+                                <div class="modal-body">
+                                    <div class="row g-3 mb-3">
+                                        <div class="col-md-3"><div class="stat-card"><h6>Total achats</h6><h2>${formatNumber(data.total_purchases)}</h2></div></div>
+                                        <div class="col-md-3"><div class="stat-card green"><h6>Total payé</h6><h2>${formatNumber(data.total_paid)}</h2></div></div>
+                                        <div class="col-md-3"><div class="stat-card red"><h6>Solde global</h6><h2>${formatNumber(data.solde_global)}</h2></div></div>
+                                        <div class="col-md-3"><div class="stat-card orange"><h6>Factures</h6><h2>${data.purchases_count}</h2></div></div>
+                                    </div>
+                                    <h6>Détail par jour</h6>
+                                    <table class="table table-sm">
+                                        <thead><tr><th>Date</th><th>Achats</th><th>Nb factures</th></tr></thead>
+                                        <tbody>
+                                            ${data.by_day.length === 0 ? '<tr><td colspan="3" class="text-muted">Aucune donnée</td></tr>' :
+                                                data.by_day.map(d => `<tr><td>${new Date(d.date).toLocaleDateString('fr-FR')}</td><td>${formatNumber(d.total)}</td><td>${d.count}</td></tr>`).join('')}
+                                        </tbody>
+                                    </table>
+                                    <h6 class="mt-3">Top produits achetés</h6>
+                                    <table class="table table-sm">
+                                        <thead><tr><th>Produit</th><th>Quantité</th><th>Montant</th></tr></thead>
+                                        <tbody>
+                                            ${data.top_products.length === 0 ? '<tr><td colspan="3" class="text-muted">Aucune donnée</td></tr>' :
+                                                data.top_products.map(p => `<tr><td>${p.product_name}</td><td>${p.total_qty}</td><td>${formatNumber(p.total_amount)}</td></tr>`).join('')}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                const old = document.getElementById('supplierReportModal');
+                if (old) old.remove();
+                document.body.insertAdjacentHTML('beforeend', html);
+                new bootstrap.Modal(document.getElementById('supplierReportModal')).show();
+            } catch(err) { alert('Erreur : ' + err.message); }
+        };
+
+        window.viewSupplierStatement = async (id) => {
+            try {
+                const data = await apiCall(`/supplier-statement/${id}`);
+                let html = `
+                    <div class="modal fade" id="supplierStmtModal" tabindex="-1">
+                        <div class="modal-dialog modal-lg">
+                            <div class="modal-content">
+                                <div class="modal-header">
+                                    <h5><i class="bi bi-file-text me-2"></i>Relevé fournisseur</h5>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                </div>
+                                <div class="modal-body">
+                                    <div class="row g-3 mb-3">
+                                        <div class="col-md-4"><div class="stat-card"><h6>Total achats</h6><h2>${formatNumber(data.total_achats)}</h2></div></div>
+                                        <div class="col-md-4"><div class="stat-card green"><h6>Total payé</h6><h2>${formatNumber(data.total_paye)}</h2></div></div>
+                                        <div class="col-md-4"><div class="stat-card ${data.solde > 0 ? 'red' : 'green'}"><h6>Solde (dû)</h6><h2>${formatNumber(data.solde)}</h2></div></div>
+                                    </div>
+                                    <table class="table table-sm">
+                                        <thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Montant</th></tr></thead>
+                                        <tbody>
+                                            ${data.operations.length === 0 ? '<tr><td colspan="4" class="text-muted">Aucune opération</td></tr>' :
+                                                data.operations.map(op => `
+                                                    <tr>
+                                                        <td>${new Date(op.date).toLocaleDateString('fr-FR')}</td>
+                                                        <td>${op.source === 'purchase' ? '📦 Achat' : '💰 Paiement'}</td>
+                                                        <td>${op.description}</td>
+                                                        <td class="${op.source === 'purchase' ? 'text-danger' : 'text-success'}">
+                                                            ${op.source === 'purchase' ? '+' : '-'} ${formatNumber(op.amount)}
+                                                        </td>
+                                                    </tr>
+                                                `).join('')}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                const old = document.getElementById('supplierStmtModal');
+                if (old) old.remove();
+                document.body.insertAdjacentHTML('beforeend', html);
+                new bootstrap.Modal(document.getElementById('supplierStmtModal')).show();
+            } catch(err) { alert('Erreur : ' + err.message); }
+        };
+    } catch(err) {
+        document.getElementById('pageContainer').innerHTML = `<div class="alert alert-danger">Erreur: ${err.message}</div>`;
+    }
+}
+
+// ========================================================================
+// ACHATS FOURNISSEURS (factures d'achat)
+// ========================================================================
+let purchaseItems = [];
+
+async function renderSupplierPurchases() {
+    try {
+        const [suppliers, purchases] = await Promise.all([
+            apiCall('/suppliers'),
+            apiCall('/supplier-purchases')
+        ]);
+
+        const html = `
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5><i class="bi bi-receipt-cutoff text-primary-custom me-2"></i>Achats fournisseurs</h5>
+                <button class="btn btn-primary" onclick="showPurchaseModal()">
+                    <i class="bi bi-plus-circle me-1"></i>Nouvelle facture d'achat
+                </button>
+            </div>
+            <div class="card-modern">
+                <div class="table-wrapper">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>N° Facture</th><th>Fournisseur</th><th>Date</th>
+                                <th>Total TTC</th><th>Payé</th><th>Statut</th><th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${purchases.length === 0 ? '<tr><td colspan="7" class="text-center py-4 text-muted">Aucune facture d\'achat</td></tr>' :
+                                purchases.map(p => `
+                                    <tr>
+                                        <td>${p.invoice_number || '#' + p.id}</td>
+                                        <td><strong>${p.supplier_name}</strong></td>
+                                        <td>${new Date(p.purchase_date).toLocaleDateString('fr-FR')}</td>
+                                        <td><strong>${formatNumber(p.total_amount)}</strong></td>
+                                        <td>${formatNumber(p.paid_amount)}</td>
+                                        <td>
+                                            <span class="badge ${p.status === 'paid' ? 'badge-success' : (p.status === 'partial' ? 'badge-warning' : 'badge-danger')}">
+                                                ${p.status === 'paid' ? '✅ Payé' : (p.status === 'partial' ? '⏳ Partiel' : '❌ Impayé')}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <button class="btn btn-sm btn-info me-1" onclick="viewPurchaseDetail(${p.id})"><i class="bi bi-eye"></i></button>
+                                            <button class="btn btn-sm btn-success me-1" onclick="payPurchase(${p.id}, ${p.supplier_id}, ${p.total_amount - p.paid_amount})"><i class="bi bi-cash"></i></button>
+                                            <button class="btn btn-sm btn-warning me-1" onclick="editPurchase(${p.id})"><i class="bi bi-pencil"></i></button>
+                                            <button class="btn btn-sm btn-danger" onclick="deletePurchase(${p.id})"><i class="bi bi-trash"></i></button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- MODAL ACHAT -->
+            <div class="modal fade" id="purchaseModal" tabindex="-1">
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5><i class="bi bi-receipt me-2"></i>Facture d'achat fournisseur</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <input type="hidden" id="purchaseId">
+                            <div class="row g-3 mb-3">
+                                <div class="col-md-6">
+                                    <label class="form-label">Fournisseur *</label>
+                                    <select id="purSupplier" class="form-select">
+                                        <option value="">-- Sélectionner --</option>
+                                        ${suppliers.map(s => `<option value="${s.id}">${s.name}</option>`).join('')}
+                                    </select>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">N° Facture fournisseur</label>
+                                    <input type="text" id="purInvoiceNum" class="form-control" placeholder="Ex: FA-2025-001">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label">Date achat *</label>
+                                    <input type="date" id="purDate" class="form-control" value="${new Date().toISOString().split('T')[0]}">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label">Échéance</label>
+                                    <input type="date" id="purDueDate" class="form-control">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label">TVA (%)</label>
+                                    <input type="number" id="purTaxRate" class="form-control" value="0" step="0.01">
+                                </div>
+                            </div>
+
+                            <h6 class="border-bottom pb-1">Articles</h6>
+                            <div id="purchaseItemsList"></div>
+                            <button class="btn btn-sm btn-secondary mt-2" onclick="addPurchaseItem()">
+                                <i class="bi bi-plus"></i> Ajouter un article
+                            </button>
+
+                            <div class="row g-3 mt-3">
+                                <div class="col-md-4">
+                                    <label class="form-label">Remise (FCFA)</label>
+                                    <input type="number" id="purDiscount" class="form-control" value="0" step="0.01">
+                                </div>
+                                <div class="col-md-8 text-end">
+                                    <div><strong>Sous-total :</strong> <span id="purSubtotal">0</span></div>
+                                    <div><strong>TVA :</strong> <span id="purTax">0</span></div>
+                                    <div class="fs-5"><strong>TOTAL TTC :</strong> <span id="purTotal" class="text-primary">0</span></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                            <button class="btn btn-primary" onclick="savePurchase()">
+                                <i class="bi bi-save me-1"></i>Enregistrer
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.getElementById('pageContainer').innerHTML = html;
+
+        window.showPurchaseModal = () => {
+            document.getElementById('purchaseId').value = '';
+            document.getElementById('purSupplier').value = '';
+            document.getElementById('purInvoiceNum').value = '';
+            document.getElementById('purDate').value = new Date().toISOString().split('T')[0];
+            document.getElementById('purDueDate').value = '';
+            document.getElementById('purTaxRate').value = 0;
+            document.getElementById('purDiscount').value = 0;
+            purchaseItems = [];
+            document.getElementById('purchaseItemsList').innerHTML = '';
+            addPurchaseItem();
+            recalcPurchaseTotals();
+            new bootstrap.Modal(document.getElementById('purchaseModal')).show();
+        };
+
+        window.addPurchaseItem = () => {
+            const idx = Date.now() + Math.random();
+            purchaseItems.push(idx);
+            const el = document.createElement('div');
+            el.className = 'row g-2 mb-2 align-items-center';
+            el.id = 'pitem-' + idx;
+            el.innerHTML = `
+                <div class="col-md-5"><input type="text" class="form-control form-control-sm" placeholder="Désignation" data-role="name"></div>
+                <div class="col-md-2"><input type="number" class="form-control form-control-sm" placeholder="Qté" value="1" min="1" data-role="qty"></div>
+                <div class="col-md-3"><input type="number" class="form-control form-control-sm" placeholder="Prix unit." value="0" step="10" data-role="price"></div>
+                <div class="col-md-2"><button class="btn btn-sm btn-danger" onclick="removePurchaseItem(${idx})"><i class="bi bi-trash"></i></button></div>
+            `;
+            document.getElementById('purchaseItemsList').appendChild(el);
+            el.querySelectorAll('input').forEach(inp => inp.addEventListener('input', recalcPurchaseTotals));
+        };
+
+        window.removePurchaseItem = (idx) => {
+            const el = document.getElementById('pitem-' + idx);
+            if (el) el.remove();
+            purchaseItems = purchaseItems.filter(i => i !== idx);
+            recalcPurchaseTotals();
+        };
+
+        window.recalcPurchaseTotals = () => {
+            let subtotal = 0;
+            document.querySelectorAll('#purchaseItemsList .row').forEach(row => {
+                const qty = parseFloat(row.querySelector('[data-role="qty"]').value) || 0;
+                const price = parseFloat(row.querySelector('[data-role="price"]').value) || 0;
+                subtotal += qty * price;
+            });
+            const taxRate = parseFloat(document.getElementById('purTaxRate').value) || 0;
+            const discount = parseFloat(document.getElementById('purDiscount').value) || 0;
+            const tax = subtotal * (taxRate / 100);
+            const total = subtotal + tax - discount;
+            document.getElementById('purSubtotal').innerText = formatNumber(subtotal);
+            document.getElementById('purTax').innerText = formatNumber(tax);
+            document.getElementById('purTotal').innerText = formatNumber(total);
+        };
+
+        document.getElementById('purTaxRate').addEventListener('input', recalcPurchaseTotals);
+        document.getElementById('purDiscount').addEventListener('input', recalcPurchaseTotals);
+
+        window.savePurchase = async () => {
+            const supplier_id = document.getElementById('purSupplier').value;
+            const purchase_date = document.getElementById('purDate').value;
+            const invoice_number = document.getElementById('purInvoiceNum').value.trim();
+            const due_date = document.getElementById('purDueDate').value || null;
+            const tax_rate = parseFloat(document.getElementById('purTaxRate').value) || 0;
+            const discount = parseFloat(document.getElementById('purDiscount').value) || 0;
+
+            if (!supplier_id || !purchase_date) return showToast('Fournisseur et date requis', 'danger');
+
+            const items = [];
+            document.querySelectorAll('#purchaseItemsList .row').forEach(row => {
+                const name = row.querySelector('[data-role="name"]').value.trim();
+                const qty = parseInt(row.querySelector('[data-role="qty"]').value) || 0;
+                const price = parseFloat(row.querySelector('[data-role="price"]').value) || 0;
+                if (name && qty > 0) {
+                    items.push({ product_name: name, quantity: qty, unit_price: price });
+                }
+            });
+
+            if (!items.length) return showToast('Ajoutez au moins un article', 'danger');
+
+            try {
+                await apiCall('/supplier-purchases', 'POST', {
+                    supplier_id: parseInt(supplier_id), invoice_number, purchase_date,
+                    items, tax_rate, discount, due_date
+                });
+                showToast('✅ Facture enregistrée', 'success');
+                bootstrap.Modal.getInstance(document.getElementById('purchaseModal')).hide();
+                renderSupplierPurchases();
+            } catch(err) { showToast('❌ ' + err.message, 'danger'); }
+        };
+
+        window.viewPurchaseDetail = async (id) => {
+            const data = await apiCall(`/supplier-purchases/${id}`);
+            const { purchase, items, payments } = data;
+            let html = `
+                <div class="modal fade" id="purchaseDetailModal" tabindex="-1">
+                    <div class="modal-dialog modal-lg">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5>Facture ${purchase.invoice_number || '#' + purchase.id}</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body">
+                                <p><strong>Fournisseur :</strong> ${purchase.supplier_name}</p>
+                                <p><strong>Date :</strong> ${new Date(purchase.purchase_date).toLocaleDateString('fr-FR')}</p>
+                                <p><strong>Total TTC :</strong> ${formatNumber(purchase.total_amount)}</p>
+                                <p><strong>Statut :</strong> ${purchase.status}</p>
+                                <h6>Articles</h6>
+                                <table class="table table-sm">
+                                    <thead><tr><th>Désignation</th><th>Qté</th><th>Prix unit.</th><th>Total</th></tr></thead>
+                                    <tbody>
+                                        ${items.map(i => `<tr><td>${i.product_name}</td><td>${i.quantity}</td><td>${formatNumber(i.unit_price)}</td><td>${formatNumber(i.total_price)}</td></tr>`).join('')}
+                                    </tbody>
+                                </table>
+                                <h6>Paiements</h6>
+                                ${payments.length === 0 ? '<p class="text-muted">Aucun paiement</p>' : `
+                                    <table class="table table-sm">
+                                        <thead><tr><th>Date</th><th>Montant</th><th>Mode</th></tr></thead>
+                                        <tbody>
+                                            ${payments.map(p => `<tr><td>${new Date(p.payment_date).toLocaleDateString('fr-FR')}</td><td>${formatNumber(p.amount)}</td><td>${p.payment_method}</td></tr>`).join('')}
+                                        </tbody>
+                                    </table>
+                                `}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            const old = document.getElementById('purchaseDetailModal');
+            if (old) old.remove();
+            document.body.insertAdjacentHTML('beforeend', html);
+            new bootstrap.Modal(document.getElementById('purchaseDetailModal')).show();
+        };
+
+        window.payPurchase = async (purchaseId, supplierId, remaining) => {
+            const amount = parseFloat(prompt(`Montant à payer (reste : ${formatNumber(remaining)}) :`, remaining));
+            if (isNaN(amount) || amount <= 0) return;
+            const method = prompt('Mode (cash, wave, orange, card, transfer, check, other) :', 'cash') || 'cash';
+            const date = new Date().toISOString().split('T')[0];
+            try {
+                await apiCall('/supplier-payments', 'POST', {
+                    supplier_id: supplierId,
+                    purchase_id: purchaseId,
+                    amount,
+                    payment_method: method,
+                    payment_date: date
+                });
+                showToast('✅ Paiement enregistré', 'success');
+                renderSupplierPurchases();
+            } catch(err) { showToast('❌ ' + err.message, 'danger'); }
+        };
+
+        window.editPurchase = async (id) => {
+            const data = await apiCall(`/supplier-purchases/${id}`);
+            const { purchase, items } = data;
+            document.getElementById('purchaseId').value = purchase.id;
+            document.getElementById('purSupplier').value = purchase.supplier_id;
+            document.getElementById('purInvoiceNum').value = purchase.invoice_number || '';
+            document.getElementById('purDate').value = purchase.purchase_date;
+            document.getElementById('purDueDate').value = purchase.due_date || '';
+            document.getElementById('purTaxRate').value = purchase.tax_rate || 0;
+            document.getElementById('purDiscount').value = purchase.discount || 0;
+            purchaseItems = [];
+            document.getElementById('purchaseItemsList').innerHTML = '';
+            items.forEach(it => {
+                const idx = Date.now() + Math.random();
+                purchaseItems.push(idx);
+                const el = document.createElement('div');
+                el.className = 'row g-2 mb-2 align-items-center';
+                el.id = 'pitem-' + idx;
+                el.innerHTML = `
+                    <div class="col-md-5"><input type="text" class="form-control form-control-sm" value="${it.product_name}" data-role="name"></div>
+                    <div class="col-md-2"><input type="number" class="form-control form-control-sm" value="${it.quantity}" min="1" data-role="qty"></div>
+                    <div class="col-md-3"><input type="number" class="form-control form-control-sm" value="${it.unit_price}" step="10" data-role="price"></div>
+                    <div class="col-md-2"><button class="btn btn-sm btn-danger" onclick="removePurchaseItem(${idx})"><i class="bi bi-trash"></i></button></div>
+                `;
+                document.getElementById('purchaseItemsList').appendChild(el);
+                el.querySelectorAll('input').forEach(inp => inp.addEventListener('input', recalcPurchaseTotals));
+            });
+            recalcPurchaseTotals();
+            new bootstrap.Modal(document.getElementById('purchaseModal')).show();
+        };
+
+        window.deletePurchase = async (id) => {
+            if (!confirm('Supprimer cette facture d\'achat ? Le stock sera recalculé.')) return;
+            try {
+                await apiCall(`/supplier-purchases/${id}`, 'DELETE');
+                showToast('✅ Supprimée', 'success');
+                renderSupplierPurchases();
+            } catch(err) { showToast('❌ ' + err.message, 'danger'); }
+        };
+    } catch(err) {
+        document.getElementById('pageContainer').innerHTML = `<div class="alert alert-danger">Erreur: ${err.message}</div>`;
+    }
+}
+
+// ========================================================================
+// PAIEMENTS FOURNISSEURS
+// ========================================================================
+async function renderSupplierPayments() {
+    try {
+        const [suppliers, payments] = await Promise.all([
+            apiCall('/suppliers'),
+            apiCall('/supplier-payments')
+        ]);
+        const html = `
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5><i class="bi bi-cash-coin text-primary-custom me-2"></i>Paiements fournisseurs</h5>
+                <button class="btn btn-primary" onclick="showPaymentModal()">
+                    <i class="bi bi-plus-circle me-1"></i>Nouveau paiement
+                </button>
+            </div>
+            <div class="card-modern">
+                <div class="table-wrapper">
+                    <table class="table">
+                        <thead>
+                            <tr><th>Date</th><th>Fournisseur</th><th>Montant</th><th>Mode</th><th>Référence</th><th>Actions</th></tr>
+                        </thead>
+                        <tbody>
+                            ${payments.length === 0 ? '<tr><td colspan="6" class="text-center py-4 text-muted">Aucun paiement</td></tr>' :
+                                payments.map(p => `
+                                    <tr>
+                                        <td>${new Date(p.payment_date).toLocaleDateString('fr-FR')}</td>
+                                        <td><strong>${p.supplier_name}</strong></td>
+                                        <td><strong>${formatNumber(p.amount)}</strong></td>
+                                        <td>${p.payment_method}</td>
+                                        <td>${p.reference || '-'}</td>
+                                        <td>
+                                            <button class="btn btn-sm btn-danger" onclick="deleteSupplierPayment(${p.id})"><i class="bi bi-trash"></i></button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="modal fade" id="paymentModal" tabindex="-1">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5><i class="bi bi-cash me-2"></i>Nouveau paiement fournisseur</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="mb-3">
+                                <label class="form-label">Fournisseur *</label>
+                                <select id="paySupplier" class="form-select">
+                                    <option value="">-- Sélectionner --</option>
+                                    ${suppliers.map(s => `<option value="${s.id}">${s.name}</option>`).join('')}
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Montant *</label>
+                                <input type="number" id="payAmount" class="form-control" step="0.01">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Mode de paiement</label>
+                                <select id="payMethod" class="form-select">
+                                    <option value="cash">Espèces</option>
+                                    <option value="wave">Wave</option>
+                                    <option value="orange">Orange Money</option>
+                                    <option value="card">Carte</option>
+                                    <option value="transfer">Virement</option>
+                                    <option value="check">Chèque</option>
+                                    <option value="other">Autre</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Date *</label>
+                                <input type="date" id="payDate" class="form-control" value="${new Date().toISOString().split('T')[0]}">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Référence</label>
+                                <input type="text" id="payReference" class="form-control" placeholder="N° chèque, transaction...">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Notes</label>
+                                <textarea id="payNotes" class="form-control" rows="2"></textarea>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                            <button class="btn btn-primary" onclick="saveSupplierPayment()"><i class="bi bi-save me-1"></i>Enregistrer</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.getElementById('pageContainer').innerHTML = html;
+
+        window.showPaymentModal = () => {
+            document.getElementById('paySupplier').value = '';
+            document.getElementById('payAmount').value = '';
+            document.getElementById('payMethod').value = 'cash';
+            document.getElementById('payDate').value = new Date().toISOString().split('T')[0];
+            document.getElementById('payReference').value = '';
+            document.getElementById('payNotes').value = '';
+            new bootstrap.Modal(document.getElementById('paymentModal')).show();
+        };
+
+        window.saveSupplierPayment = async () => {
+            const data = {
+                supplier_id: parseInt(document.getElementById('paySupplier').value),
+                amount: parseFloat(document.getElementById('payAmount').value),
+                payment_method: document.getElementById('payMethod').value,
+                payment_date: document.getElementById('payDate').value,
+                reference: document.getElementById('payReference').value.trim(),
+                notes: document.getElementById('payNotes').value.trim()
+            };
+            if (!data.supplier_id || !data.amount || !data.payment_date) {
+                return showToast('Fournisseur, montant et date requis', 'danger');
+            }
+            try {
+                await apiCall('/supplier-payments', 'POST', data);
+                showToast('✅ Paiement enregistré', 'success');
+                bootstrap.Modal.getInstance(document.getElementById('paymentModal')).hide();
+                renderSupplierPayments();
+            } catch(err) { showToast('❌ ' + err.message, 'danger'); }
+        };
+
+        window.deleteSupplierPayment = async (id) => {
+            if (!confirm('Supprimer ce paiement ?')) return;
+            try {
+                await apiCall(`/supplier-payments/${id}`, 'DELETE');
+                showToast('✅ Supprimé', 'success');
+                renderSupplierPayments();
+            } catch(err) { showToast('❌ ' + err.message, 'danger'); }
+        };
+    } catch(err) {
+        document.getElementById('pageContainer').innerHTML = `<div class="alert alert-danger">Erreur: ${err.message}</div>`;
+    }
+}
 </script>
 </body>
 </html>

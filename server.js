@@ -120,7 +120,81 @@ async function initAndStart() {
             address TEXT,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )`);
+// ===== TABLES FOURNISSEURS =====
+await pool.query(`CREATE TABLE IF NOT EXISTS suppliers (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    name VARCHAR(150) NOT NULL,
+    contact_name VARCHAR(100),
+    email VARCHAR(150),
+    phone VARCHAR(50),
+    address TEXT,
+    notes TEXT,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_sup_user (user_id, name)
+)`);
 
+// Factures d'achat (ce que le fournisseur me livre)
+await pool.query(`CREATE TABLE IF NOT EXISTS supplier_purchases (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    supplier_id INT NOT NULL,
+    invoice_number VARCHAR(50),
+    purchase_date DATE NOT NULL,
+    subtotal DECIMAL(15,2) DEFAULT 0,
+    tax_rate DECIMAL(5,2) DEFAULT 0,
+    tax_amount DECIMAL(15,2) DEFAULT 0,
+    discount DECIMAL(15,2) DEFAULT 0,
+    total_amount DECIMAL(15,2) NOT NULL,
+    paid_amount DECIMAL(15,2) DEFAULT 0,
+    status ENUM('pending','partial','paid','cancelled') DEFAULT 'pending',
+    due_date DATE NULL,
+    notes TEXT,
+    attachment LONGTEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE CASCADE,
+    INDEX idx_purchase_sup (supplier_id, purchase_date)
+)`);
+
+// Détail des articles d'une facture d'achat
+await pool.query(`CREATE TABLE IF NOT EXISTS supplier_purchase_items (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    purchase_id INT NOT NULL,
+    product_id INT NULL,
+    product_name VARCHAR(200) NOT NULL,
+    quantity INT NOT NULL DEFAULT 0,
+    unit_price DECIMAL(15,2) NOT NULL DEFAULT 0,
+    total_price DECIMAL(15,2) NOT NULL DEFAULT 0,
+    FOREIGN KEY (purchase_id) REFERENCES supplier_purchases(id) ON DELETE CASCADE,
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL
+)`);
+
+// Paiements au fournisseur
+await pool.query(`CREATE TABLE IF NOT EXISTS supplier_payments (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    supplier_id INT NOT NULL,
+    purchase_id INT NULL,
+    amount DECIMAL(15,2) NOT NULL,
+    payment_method ENUM('cash','wave','orange','card','transfer','check','other') DEFAULT 'cash',
+    payment_date DATE NOT NULL,
+    reference VARCHAR(100),
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE CASCADE,
+    FOREIGN KEY (purchase_id) REFERENCES supplier_purchases(id) ON DELETE SET NULL,
+    INDEX idx_sp_sup (supplier_id, payment_date)
+)`);
+
+// Vérifier que la colonne supplier_id existe dans products
+try { await pool.query(`ALTER TABLE products ADD COLUMN supplier_id INT NULL`); } catch(e) {}
+try { await pool.query(`ALTER TABLE products ADD CONSTRAINT fk_product_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE SET NULL`); } catch(e) {}
+
+console.log('✅ Tables fournisseurs prêtes');
         await pool.query(`CREATE TABLE IF NOT EXISTS products (
             id INT PRIMARY KEY AUTO_INCREMENT,
             user_id INT NOT NULL,
@@ -4271,7 +4345,563 @@ app.use((err, req, res, next) => {
         res.status(500).json({ error: err.message || 'Erreur interne du serveur' });
     }
 });
+// ========================================================================
+// ROUTES FOURNISSEURS
+// ========================================================================
 
+// --- CRUD Fournisseurs ---
+app.get('/api/suppliers', authenticate, async (req, res) => {
+    try {
+        const [rows] = await pool.query(
+            'SELECT * FROM suppliers WHERE user_id = ? ORDER BY name',
+            [req.user.id]
+        );
+        res.json(rows);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/suppliers/:id', authenticate, async (req, res) => {
+    try {
+        const [rows] = await pool.query(
+            'SELECT * FROM suppliers WHERE id = ? AND user_id = ?',
+            [req.params.id, req.user.id]
+        );
+        if (!rows.length) return res.status(404).json({ error: 'Fournisseur non trouvé' });
+        res.json(rows[0]);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/suppliers', authenticate, async (req, res) => {
+    const { name, contact_name, email, phone, address, notes } = req.body;
+    if (!name) return res.status(400).json({ error: 'Nom requis' });
+    try {
+        const [result] = await pool.query(
+            `INSERT INTO suppliers (user_id, name, contact_name, email, phone, address, notes)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [req.user.id, name, contact_name || null, email || null, phone || null, address || null, notes || null]
+        );
+        res.status(201).json({ id: result.insertId, message: 'Fournisseur créé' });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/suppliers/:id', authenticate, async (req, res) => {
+    const { name, contact_name, email, phone, address, notes, is_active } = req.body;
+    try {
+        const [check] = await pool.query(
+            'SELECT id FROM suppliers WHERE id = ? AND user_id = ?',
+            [req.params.id, req.user.id]
+        );
+        if (!check.length) return res.status(404).json({ error: 'Fournisseur non trouvé' });
+        await pool.query(
+            `UPDATE suppliers SET name = ?, contact_name = ?, email = ?, phone = ?, 
+                address = ?, notes = ?, is_active = ?
+             WHERE id = ? AND user_id = ?`,
+            [name, contact_name || null, email || null, phone || null,
+             address || null, notes || null,
+             is_active !== undefined ? is_active : 1,
+             req.params.id, req.user.id]
+        );
+        res.json({ message: 'Fournisseur mis à jour' });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/suppliers/:id', authenticate, async (req, res) => {
+    try {
+        await pool.query(
+            'DELETE FROM suppliers WHERE id = ? AND user_id = ?',
+            [req.params.id, req.user.id]
+        );
+        res.json({ message: 'Fournisseur supprimé' });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// --- Factures d'achat fournisseur ---
+app.get('/api/supplier-purchases', authenticate, async (req, res) => {
+    const { supplier_id, start_date, end_date, limit = 200 } = req.query;
+    let sql = `SELECT sp.*, s.name as supplier_name 
+               FROM supplier_purchases sp 
+               JOIN suppliers s ON sp.supplier_id = s.id 
+               WHERE sp.user_id = ?`;
+    const params = [req.user.id];
+    if (supplier_id) { sql += ' AND sp.supplier_id = ?'; params.push(supplier_id); }
+    if (start_date) { sql += ' AND sp.purchase_date >= ?'; params.push(start_date); }
+    if (end_date) { sql += ' AND sp.purchase_date <= ?'; params.push(end_date); }
+    sql += ' ORDER BY sp.purchase_date DESC, sp.id DESC LIMIT ?';
+    params.push(parseInt(limit));
+    try {
+        const [rows] = await pool.query(sql, params);
+        res.json(rows);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get('/api/supplier-purchases/:id', authenticate, async (req, res) => {
+    try {
+        const [rows] = await pool.query(
+            `SELECT sp.*, s.name as supplier_name, s.phone as supplier_phone, s.email as supplier_email
+             FROM supplier_purchases sp
+             JOIN suppliers s ON sp.supplier_id = s.id
+             WHERE sp.id = ? AND sp.user_id = ?`,
+            [req.params.id, req.user.id]
+        );
+        if (!rows.length) return res.status(404).json({ error: 'Facture non trouvée' });
+        const [items] = await pool.query(
+            'SELECT * FROM supplier_purchase_items WHERE purchase_id = ?',
+            [req.params.id]
+        );
+        const [payments] = await pool.query(
+            'SELECT * FROM supplier_payments WHERE purchase_id = ? ORDER BY payment_date',
+            [req.params.id]
+        );
+        res.json({ purchase: rows[0], items, payments });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/supplier-purchases', authenticate, async (req, res) => {
+    const {
+        supplier_id, invoice_number, purchase_date, items = [],
+        tax_rate = 0, discount = 0, due_date = null, notes = '', attachment = null
+    } = req.body;
+    if (!supplier_id || !purchase_date || !items.length) {
+        return res.status(400).json({ error: 'Fournisseur, date et articles requis' });
+    }
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        let subtotal = 0;
+        for (const it of items) {
+            it.total_price = parseFloat(it.quantity) * parseFloat(it.unit_price);
+            subtotal += it.total_price;
+        }
+        const taxAmount = subtotal * (parseFloat(tax_rate) / 100);
+        const totalAmount = subtotal + taxAmount - parseFloat(discount || 0);
+
+        const [result] = await connection.query(
+            `INSERT INTO supplier_purchases
+             (user_id, supplier_id, invoice_number, purchase_date, subtotal,
+              tax_rate, tax_amount, discount, total_amount, status, due_date, notes, attachment)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
+            [req.user.id, supplier_id, invoice_number || null, purchase_date,
+             subtotal, tax_rate, taxAmount, discount || 0, totalAmount,
+             due_date || null, notes || null, attachment || null]
+        );
+        const purchaseId = result.insertId;
+
+        for (const it of items) {
+            await connection.query(
+                `INSERT INTO supplier_purchase_items
+                 (purchase_id, product_id, product_name, quantity, unit_price, total_price)
+                 VALUES (?, ?, ?, ?, ?, ?)`,
+                [purchaseId, it.product_id || null, it.product_name, it.quantity, it.unit_price, it.total_price]
+            );
+            // Mise à jour du stock produit
+            if (it.product_id) {
+                const [prod] = await connection.query(
+                    'SELECT quantity FROM products WHERE id = ? AND user_id = ? FOR UPDATE',
+                    [it.product_id, req.user.id]
+                );
+                if (prod.length) {
+                    const oldQty = prod[0].quantity;
+                    const newQty = oldQty + parseInt(it.quantity);
+                    await connection.query(
+                        'UPDATE products SET quantity = ? WHERE id = ?',
+                        [newQty, it.product_id]
+                    );
+                    await connection.query(
+                        `INSERT INTO stock_movements
+                         (product_id, user_id, type, quantity_change, quantity_before, quantity_after, reference, notes)
+                         VALUES (?, ?, 'purchase', ?, ?, ?, ?, ?)`,
+                        [it.product_id, req.user.id, it.quantity, oldQty, newQty,
+                         `ACHAT #${purchaseId}`, `Fournisseur #${supplier_id}`]
+                    );
+                }
+            }
+        }
+
+        await connection.commit();
+        res.status(201).json({ id: purchaseId, total_amount: totalAmount, message: 'Facture d\'achat créée' });
+    } catch (err) {
+        await connection.rollback();
+        console.error('Erreur création facture achat:', err);
+        res.status(500).json({ error: err.message });
+    } finally {
+        connection.release();
+    }
+});
+
+app.put('/api/supplier-purchases/:id', authenticate, async (req, res) => {
+    const {
+        invoice_number, purchase_date, items = [],
+        tax_rate = 0, discount = 0, due_date = null, notes = '', attachment = null
+    } = req.body;
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        const [check] = await connection.query(
+            'SELECT id FROM supplier_purchases WHERE id = ? AND user_id = ?',
+            [req.params.id, req.user.id]
+        );
+        if (!check.length) {
+            await connection.rollback();
+            return res.status(404).json({ error: 'Facture non trouvée' });
+        }
+
+        // Récupérer l'ancienne version pour annuler l'ancien stock
+        const [oldItems] = await connection.query(
+            'SELECT product_id, quantity FROM supplier_purchase_items WHERE purchase_id = ?',
+            [req.params.id]
+        );
+        for (const it of oldItems) {
+            if (it.product_id) {
+                await connection.query(
+                    'UPDATE products SET quantity = quantity - ? WHERE id = ?',
+                    [it.quantity, it.product_id]
+                );
+            }
+        }
+        await connection.query('DELETE FROM supplier_purchase_items WHERE purchase_id = ?', [req.params.id]);
+
+        let subtotal = 0;
+        for (const it of items) {
+            it.total_price = parseFloat(it.quantity) * parseFloat(it.unit_price);
+            subtotal += it.total_price;
+        }
+        const taxAmount = subtotal * (parseFloat(tax_rate) / 100);
+        const totalAmount = subtotal + taxAmount - parseFloat(discount || 0);
+
+        await connection.query(
+            `UPDATE supplier_purchases SET
+                invoice_number = ?, purchase_date = ?, subtotal = ?,
+                tax_rate = ?, tax_amount = ?, discount = ?, total_amount = ?,
+                due_date = ?, notes = ?, attachment = ?
+             WHERE id = ? AND user_id = ?`,
+            [invoice_number || null, purchase_date, subtotal, tax_rate, taxAmount,
+             discount || 0, totalAmount, due_date || null, notes || null,
+             attachment || null, req.params.id, req.user.id]
+        );
+
+        for (const it of items) {
+            await connection.query(
+                `INSERT INTO supplier_purchase_items
+                 (purchase_id, product_id, product_name, quantity, unit_price, total_price)
+                 VALUES (?, ?, ?, ?, ?, ?)`,
+                [req.params.id, it.product_id || null, it.product_name, it.quantity, it.unit_price, it.total_price]
+            );
+            if (it.product_id) {
+                await connection.query(
+                    'UPDATE products SET quantity = quantity + ? WHERE id = ?',
+                    [it.quantity, it.product_id]
+                );
+            }
+        }
+
+        await connection.commit();
+        res.json({ message: 'Facture mise à jour', total_amount: totalAmount });
+    } catch (err) {
+        await connection.rollback();
+        console.error('Erreur update facture achat:', err);
+        res.status(500).json({ error: err.message });
+    } finally {
+        connection.release();
+    }
+});
+
+app.delete('/api/supplier-purchases/:id', authenticate, async (req, res) => {
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+        const [check] = await connection.query(
+            'SELECT id FROM supplier_purchases WHERE id = ? AND user_id = ?',
+            [req.params.id, req.user.id]
+        );
+        if (!check.length) {
+            await connection.rollback();
+            return res.status(404).json({ error: 'Facture non trouvée' });
+        }
+        // Annuler le stock
+        const [items] = await connection.query(
+            'SELECT product_id, quantity FROM supplier_purchase_items WHERE purchase_id = ?',
+            [req.params.id]
+        );
+        for (const it of items) {
+            if (it.product_id) {
+                await connection.query(
+                    'UPDATE products SET quantity = quantity - ? WHERE id = ?',
+                    [it.quantity, it.product_id]
+                );
+            }
+        }
+        await connection.query('DELETE FROM supplier_purchases WHERE id = ?', [req.params.id]);
+        await connection.commit();
+        res.json({ message: 'Facture supprimée' });
+    } catch (err) {
+        await connection.rollback();
+        res.status(500).json({ error: err.message });
+    } finally {
+        connection.release();
+    }
+});
+
+// --- Paiements fournisseur ---
+app.get('/api/supplier-payments', authenticate, async (req, res) => {
+    const { supplier_id, start_date, end_date, limit = 200 } = req.query;
+    let sql = `SELECT sp.*, s.name as supplier_name
+               FROM supplier_payments sp
+               JOIN suppliers s ON sp.supplier_id = s.id
+               WHERE sp.user_id = ?`;
+    const params = [req.user.id];
+    if (supplier_id) { sql += ' AND sp.supplier_id = ?'; params.push(supplier_id); }
+    if (start_date) { sql += ' AND sp.payment_date >= ?'; params.push(start_date); }
+    if (end_date) { sql += ' AND sp.payment_date <= ?'; params.push(end_date); }
+    sql += ' ORDER BY sp.payment_date DESC, sp.id DESC LIMIT ?';
+    params.push(parseInt(limit));
+    try {
+        const [rows] = await pool.query(sql, params);
+        res.json(rows);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/supplier-payments', authenticate, async (req, res) => {
+    const { supplier_id, purchase_id, amount, payment_method = 'cash', payment_date, reference, notes } = req.body;
+    if (!supplier_id || !amount || !payment_date) {
+        return res.status(400).json({ error: 'Fournisseur, montant et date requis' });
+    }
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        const [result] = await connection.query(
+            `INSERT INTO supplier_payments
+             (user_id, supplier_id, purchase_id, amount, payment_method, payment_date, reference, notes)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [req.user.id, supplier_id, purchase_id || null, amount,
+             payment_method, payment_date, reference || null, notes || null]
+        );
+
+        // Mettre à jour le statut de la facture d'achat si liée
+        if (purchase_id) {
+            const [totPaid] = await connection.query(
+                'SELECT COALESCE(SUM(amount), 0) as total FROM supplier_payments WHERE purchase_id = ?',
+                [purchase_id]
+            );
+            const [pur] = await connection.query(
+                'SELECT total_amount FROM supplier_purchases WHERE id = ?',
+                [purchase_id]
+            );
+            const totalPaye = parseFloat(totPaid[0].total);
+            const totalDu = parseFloat(pur[0].total_amount);
+            let newStatus = 'pending';
+            if (totalPaye >= totalDu - 0.01) newStatus = 'paid';
+            else if (totalPaye > 0) newStatus = 'partial';
+
+            await connection.query(
+                'UPDATE supplier_purchases SET paid_amount = ?, status = ? WHERE id = ?',
+                [totalPaye, newStatus, purchase_id]
+            );
+        }
+
+        // Enregistrer en caisse (sortie)
+        await connection.query(
+            `INSERT INTO cash_register (user_id, transaction_type, amount, description, reference_id)
+             VALUES (?, 'expense', ?, ?, ?)`,
+            [req.user.id, amount, `Paiement fournisseur #${supplier_id}`, result.insertId]
+        );
+
+        await connection.commit();
+        res.status(201).json({ id: result.insertId, message: 'Paiement enregistré' });
+    } catch (err) {
+        await connection.rollback();
+        console.error('Erreur paiement fournisseur:', err);
+        res.status(500).json({ error: err.message });
+    } finally {
+        connection.release();
+    }
+});
+
+app.delete('/api/supplier-payments/:id', authenticate, async (req, res) => {
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+        const [check] = await connection.query(
+            'SELECT id, purchase_id, amount FROM supplier_payments WHERE id = ? AND user_id = ?',
+            [req.params.id, req.user.id]
+        );
+        if (!check.length) {
+            await connection.rollback();
+            return res.status(404).json({ error: 'Paiement non trouvé' });
+        }
+        const purchaseId = check[0].purchase_id;
+        await connection.query('DELETE FROM supplier_payments WHERE id = ?', [req.params.id]);
+        await connection.query('DELETE FROM cash_register WHERE reference_id = ? AND transaction_type = \'expense\'', [req.params.id]);
+
+        if (purchaseId) {
+            const [totPaid] = await connection.query(
+                'SELECT COALESCE(SUM(amount), 0) as total FROM supplier_payments WHERE purchase_id = ?',
+                [purchaseId]
+            );
+            const [pur] = await connection.query(
+                'SELECT total_amount FROM supplier_purchases WHERE id = ?',
+                [purchaseId]
+            );
+            const totalPaye = parseFloat(totPaid[0].total);
+            const totalDu = parseFloat(pur[0].total_amount);
+            let newStatus = 'pending';
+            if (totalPaye >= totalDu - 0.01) newStatus = 'paid';
+            else if (totalPaye > 0) newStatus = 'partial';
+            await connection.query(
+                'UPDATE supplier_purchases SET paid_amount = ?, status = ? WHERE id = ?',
+                [totalPaye, newStatus, purchaseId]
+            );
+        }
+
+        await connection.commit();
+        res.json({ message: 'Paiement supprimé' });
+    } catch (err) {
+        await connection.rollback();
+        res.status(500).json({ error: err.message });
+    } finally {
+        connection.release();
+    }
+});
+
+// --- Rapports par fournisseur ---
+app.get('/api/supplier-reports/:supplierId', authenticate, async (req, res) => {
+    const supplierId = req.params.supplierId;
+    const { period = 'month', date } = req.query;
+    const userId = req.user.id;
+    const targetDate = date || new Date().toISOString().split('T')[0];
+
+    let dateCond = '';
+    const params = [supplierId, userId];
+    if (period === 'day') {
+        dateCond = ' AND purchase_date = ?';
+        params.push(targetDate);
+    } else if (period === 'week') {
+        dateCond = ' AND YEARWEEK(purchase_date, 1) = YEARWEEK(?, 1)';
+        params.push(targetDate);
+    } else if (period === 'month') {
+        dateCond = ' AND YEAR(purchase_date) = YEAR(?) AND MONTH(purchase_date) = MONTH(?)';
+        params.push(targetDate, targetDate);
+    } else if (period === 'year') {
+        dateCond = ' AND YEAR(purchase_date) = YEAR(?)';
+        params.push(targetDate);
+    }
+
+    try {
+        // Total achats (TTC) sur la période
+        const [purchasesTotal] = await pool.query(
+            `SELECT COALESCE(SUM(total_amount), 0) as total, COUNT(*) as count
+             FROM supplier_purchases 
+             WHERE supplier_id = ? AND user_id = ? AND status != 'cancelled' ${dateCond}`,
+            params
+        );
+        // Total payé sur la période
+        const payParams = [supplierId, userId];
+        let payDateCond = '';
+        if (period === 'day') { payDateCond = ' AND payment_date = ?'; payParams.push(targetDate); }
+        else if (period === 'week') { payDateCond = ' AND YEARWEEK(payment_date, 1) = YEARWEEK(?, 1)'; payParams.push(targetDate); }
+        else if (period === 'month') { payDateCond = ' AND YEAR(payment_date) = YEAR(?) AND MONTH(payment_date) = MONTH(?)'; payParams.push(targetDate, targetDate); }
+        else if (period === 'year') { payDateCond = ' AND YEAR(payment_date) = YEAR(?)'; payParams.push(targetDate); }
+
+        const [paymentsTotal] = await pool.query(
+            `SELECT COALESCE(SUM(amount), 0) as total 
+             FROM supplier_payments 
+             WHERE supplier_id = ? AND user_id = ? ${payDateCond}`,
+            payParams
+        );
+
+        // Solde global (dettes totales)
+        const [globalPurchases] = await pool.query(
+            `SELECT COALESCE(SUM(total_amount), 0) as total 
+             FROM supplier_purchases 
+             WHERE supplier_id = ? AND user_id = ? AND status != 'cancelled'`,
+            [supplierId, userId]
+        );
+        const [globalPayments] = await pool.query(
+            `SELECT COALESCE(SUM(amount), 0) as total 
+             FROM supplier_payments 
+             WHERE supplier_id = ? AND user_id = ?`,
+            [supplierId, userId]
+        );
+        const solde = parseFloat(globalPurchases[0].total) - parseFloat(globalPayments[0].total);
+
+        // Détail par jour
+        const [byDay] = await pool.query(
+            `SELECT purchase_date as date, 
+                    COALESCE(SUM(total_amount), 0) as total,
+                    COUNT(*) as count
+             FROM supplier_purchases 
+             WHERE supplier_id = ? AND user_id = ? AND status != 'cancelled' ${dateCond}
+             GROUP BY purchase_date 
+             ORDER BY purchase_date`,
+            params
+        );
+
+        // Top produits achetés chez ce fournisseur
+        const [topProducts] = await pool.query(
+            `SELECT spi.product_name, 
+                    SUM(spi.quantity) as total_qty,
+                    SUM(spi.total_price) as total_amount
+             FROM supplier_purchase_items spi
+             JOIN supplier_purchases sp ON spi.purchase_id = sp.id
+             WHERE sp.supplier_id = ? AND sp.user_id = ? AND sp.status != 'cancelled' ${dateCond.replace('purchase_date', 'sp.purchase_date')}
+             GROUP BY spi.product_name
+             ORDER BY total_amount DESC
+             LIMIT 10`,
+            params
+        );
+
+        res.json({
+            period,
+            date: targetDate,
+            total_purchases: purchasesTotal[0].total,
+            purchases_count: purchasesTotal[0].count,
+            total_paid: paymentsTotal[0].total,
+            solde_global: solde,
+            by_day: byDay,
+            top_products: topProducts
+        });
+    } catch (err) {
+        console.error('Erreur rapport fournisseur:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Relevé complet d'un fournisseur
+app.get('/api/supplier-statement/:supplierId', authenticate, async (req, res) => {
+    const supplierId = req.params.supplierId;
+    const userId = req.user.id;
+    try {
+        const [purchases] = await pool.query(
+            `SELECT id, invoice_number, purchase_date as date, total_amount as amount,
+                    'purchase' as source, CONCAT('Achat ', COALESCE(invoice_number, CONCAT('#', id))) as description
+             FROM supplier_purchases 
+             WHERE supplier_id = ? AND user_id = ? AND status != 'cancelled'`,
+            [supplierId, userId]
+        );
+        const [payments] = await pool.query(
+            `SELECT id, payment_date as date, amount, 'payment' as source, 
+                    CONCAT('Paiement ', COALESCE(reference, '')) as description
+             FROM supplier_payments 
+             WHERE supplier_id = ? AND user_id = ?`,
+            [supplierId, userId]
+        );
+        const all = [...purchases, ...payments].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+        const totalAchats = purchases.reduce((s, p) => s + parseFloat(p.amount), 0);
+        const totalPaye = payments.reduce((s, p) => s + parseFloat(p.amount), 0);
+
+        res.json({
+            operations: all,
+            total_achats: totalAchats,
+            total_paye: totalPaye,
+            solde: totalAchats - totalPaye
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
 // ===== ROUTE 404 =====
 app.use((req, res) => {
     if (req.path.startsWith('/api')) {
