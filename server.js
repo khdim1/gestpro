@@ -4908,6 +4908,282 @@ app.get('/api/supplier-statement/:supplierId', authenticate, async (req, res) =>
         res.status(500).json({ error: err.message });
     }
 });
+// ========== COMPTE CLIENT COMPLET ==========
+app.get('/api/clients/:id/account', authenticate, async (req, res) => {
+    const clientId = req.params.id;
+    const userId = req.user.id;
+    try {
+        // 1. Infos client
+        const [clientRows] = await pool.query(
+            'SELECT * FROM clients WHERE id = ? AND user_id = ?',
+            [clientId, userId]
+        );
+        if (clientRows.length === 0) {
+            return res.status(404).json({ error: 'Client non trouvé' });
+        }
+        const client = clientRows[0];
+
+        // 2. Statistiques globales
+        const [statsRows] = await pool.query(
+            `SELECT 
+                COUNT(*) AS total_orders,
+                COALESCE(SUM(final_amount), 0) AS total_ca,
+                COALESCE(AVG(final_amount), 0) AS panier_moyen,
+                COALESCE(SUM(CASE WHEN status = 'pending' THEN final_amount ELSE 0 END), 0) AS total_impaye,
+                COALESCE(SUM(CASE WHEN status = 'completed' THEN final_amount ELSE 0 END), 0) AS total_paye
+             FROM sales 
+             WHERE client_id = ? AND user_id = ? AND status != 'cancelled'`,
+            [clientId, userId]
+        );
+        const stats = statsRows[0];
+
+        // 3. Solde du compte client (dépôts - retraits)
+        const [balanceRows] = await pool.query(
+            `SELECT COALESCE(SUM(CASE 
+                WHEN transaction_type = 'deposit' THEN amount 
+                WHEN transaction_type = 'withdrawal' THEN -amount 
+                WHEN transaction_type = 'payment' THEN -amount
+                ELSE 0 END), 0) AS solde
+             FROM cash_register 
+             WHERE user_id = ? AND reference_id = ? 
+               AND transaction_type IN ('deposit','withdrawal','payment')`,
+            [userId, clientId]
+        );
+        const solde = parseFloat(balanceRows[0].solde) || 0;
+
+        // 4. Toutes les ventes (factures)
+        const [sales] = await pool.query(
+            `SELECT s.id, s.sale_date, s.total_amount, s.tax, s.final_amount, 
+                    s.status, s.payment_method, s.due_date, s.remise_pct, s.acompte,
+                    (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE sale_id = s.id) AS paid
+             FROM sales s 
+             WHERE s.client_id = ? AND s.user_id = ?
+             ORDER BY s.sale_date DESC LIMIT 100`,
+            [clientId, userId]
+        );
+
+        // 5. Toutes les opérations (dépôts, retraits, paiements)
+        const [operations] = await pool.query(
+            `SELECT id, transaction_type, amount, description, created_at 
+             FROM cash_register 
+             WHERE user_id = ? AND reference_id = ? 
+               AND transaction_type IN ('deposit','withdrawal','payment')
+             ORDER BY created_at DESC`,
+            [userId, clientId]
+        );
+
+        // 6. Derniers achats (produits)
+        const [topProducts] = await pool.query(
+            `SELECT p.name, SUM(si.quantity) AS qty, SUM(si.total_price) AS total
+             FROM sale_items si
+             JOIN sales s ON si.sale_id = s.id
+             JOIN products p ON si.product_id = p.id
+             WHERE s.client_id = ? AND s.user_id = ? AND s.status != 'cancelled'
+             GROUP BY p.id ORDER BY total DESC LIMIT 5`,
+            [clientId, userId]
+        );
+
+        res.json({
+            client,
+            stats: {
+                total_orders: stats.total_orders,
+                total_ca: parseFloat(stats.total_ca),
+                panier_moyen: parseFloat(stats.panier_moyen),
+                total_impaye: parseFloat(stats.total_impaye),
+                total_paye: parseFloat(stats.total_paye),
+                solde_compte: solde,
+                dette_totale: parseFloat(stats.total_impaye) - solde
+            },
+            sales,
+            operations,
+            top_products: topProducts
+        });
+    } catch (err) {
+        console.error('❌ Erreur compte client:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ========== RELEVÉ DE COMPTE (avec solde progressif) ==========
+app.get('/api/clients/:id/statement', authenticate, async (req, res) => {
+    const clientId = req.params.id;
+    const userId = req.user.id;
+    const { start_date, end_date } = req.query;
+
+    try {
+        const [clientRows] = await pool.query(
+            'SELECT * FROM clients WHERE id = ? AND user_id = ?',
+            [clientId, userId]
+        );
+        if (clientRows.length === 0) {
+            return res.status(404).json({ error: 'Client non trouvé' });
+        }
+
+        // Toutes les opérations (ventes + règlements)
+        let dateCond = '';
+        const params = [clientId, userId];
+        if (start_date) { dateCond += ' AND date >= ?'; params.push(start_date); }
+        if (end_date)   { dateCond += ' AND date <= ?'; params.push(end_date); }
+
+        const [rows] = await pool.query(
+            `SELECT date, type, description, debit, credit FROM (
+                SELECT s.sale_date AS date, 'facture' AS type, 
+                       CONCAT('Facture #', s.id) AS description,
+                       s.final_amount AS debit, 0 AS credit
+                FROM sales s 
+                WHERE s.client_id = ? AND s.user_id = ? AND s.status != 'cancelled'
+                
+                UNION ALL
+                
+                SELECT p.payment_date AS date, 'reglement' AS type,
+                       CONCAT('Règlement facture #', p.sale_id) AS description,
+                       0 AS debit, p.amount AS credit
+                FROM payments p
+                JOIN sales s ON p.sale_id = s.id
+                WHERE s.client_id = ? AND s.user_id = ?
+                
+                UNION ALL
+                
+                SELECT cr.created_at AS date, cr.transaction_type AS type,
+                       COALESCE(cr.description, '') AS description,
+                       CASE WHEN cr.transaction_type = 'withdrawal' THEN cr.amount ELSE 0 END AS debit,
+                       CASE WHEN cr.transaction_type = 'deposit'    THEN cr.amount ELSE 0 END AS credit
+                FROM cash_register cr
+                WHERE cr.user_id = ? AND cr.reference_id = ? 
+                  AND cr.transaction_type IN ('deposit','withdrawal')
+            ) AS t
+            WHERE 1=1 ${dateCond.replace('date', 'date')}
+            ORDER BY date ASC`,
+            [clientId, userId, clientId, userId, userId, clientId]
+        );
+
+        // Calcul du solde progressif
+        let balance = 0;
+        const statement = rows.map(r => {
+            const debit = parseFloat(r.debit) || 0;
+            const credit = parseFloat(r.credit) || 0;
+            balance += debit - credit;
+            return { ...r, debit, credit, solde: balance };
+        });
+
+        res.json({
+            client: clientRows[0],
+            statement,
+            final_balance: balance
+        });
+    } catch (err) {
+        console.error('❌ Erreur relevé client:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ========== EXPORTER LE RELEVÉ PDF ==========
+app.get('/api/clients/:id/statement-pdf', authenticate, async (req, res) => {
+    try {
+        const clientId = req.params.id;
+        const userId = req.user.id;
+
+        const [clientRows] = await pool.query(
+            'SELECT * FROM clients WHERE id = ? AND user_id = ?',
+            [clientId, userId]
+        );
+        if (clientRows.length === 0) return res.status(404).json({ error: 'Client non trouvé' });
+        const client = clientRows[0];
+
+        const [settingsRows] = await pool.query('SELECT * FROM settings WHERE user_id = ?', [userId]);
+        const company = settingsRows[0] || { company_name: 'Mon Entreprise', currency: 'FCFA' };
+
+        const [sales] = await pool.query(
+            `SELECT s.id, s.sale_date AS date, s.final_amount AS amount, s.status,
+                    (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE sale_id = s.id) AS paid
+             FROM sales s WHERE s.client_id = ? AND s.user_id = ? AND s.status != 'cancelled'
+             ORDER BY s.sale_date ASC`,
+            [clientId, userId]
+        );
+
+        const [ops] = await pool.query(
+            `SELECT created_at AS date, transaction_type AS type, amount, description
+             FROM cash_register WHERE user_id = ? AND reference_id = ? 
+               AND transaction_type IN ('deposit','withdrawal')
+             ORDER BY created_at ASC`,
+            [userId, clientId]
+        );
+
+        const doc = new PDFDocument({ margin: 40, size: 'A4' });
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename=releve_client_${clientId}.pdf`);
+        doc.pipe(res);
+
+        // En-tête
+        doc.fillColor('#2c6e9e').fontSize(20).font('Helvetica-Bold')
+           .text(company.company_name || 'Mon Entreprise', 40, 40);
+        doc.fillColor('#7a8a9a').fontSize(9).font('Helvetica')
+           .text(company.company_address || '', 40, 65);
+        doc.text(`Tél : ${company.company_phone || ''}`, 40, 78);
+
+        doc.fillColor('#2c6e9e').fontSize(16).font('Helvetica-Bold')
+           .text('RELEVÉ DE COMPTE CLIENT', 40, 110, { align: 'center' });
+
+        doc.fillColor('#1a2a3a').fontSize(11).font('Helvetica-Bold')
+           .text(`Client : ${client.name}`, 40, 140);
+        doc.fontSize(9).font('Helvetica');
+        if (client.phone) doc.text(`Tél : ${client.phone}`, 40, 156);
+        if (client.email) doc.text(`Email : ${client.email}`, 40, 170);
+        if (client.address) doc.text(`Adresse : ${client.address}`, 40, 184);
+        doc.text(`Date du relevé : ${new Date().toLocaleDateString('fr-FR')}`, 400, 140);
+
+        // Tableau
+        let y = 215;
+        doc.rect(40, y, 520, 22).fill('#2c6e9e');
+        doc.fillColor('#ffffff').fontSize(9).font('Helvetica-Bold');
+        doc.text('DATE', 45, y + 6);
+        doc.text('DESCRIPTION', 130, y + 6);
+        doc.text('DÉBIT', 380, y + 6, { width: 80, align: 'right' });
+        doc.text('CRÉDIT', 465, y + 6, { width: 90, align: 'right' });
+        y += 22;
+
+        // Fusionner sales + ops et trier
+        const allOps = [
+            ...sales.map(s => ({ date: s.date, label: `Facture #${s.id}`, debit: parseFloat(s.amount) || 0, credit: 0 })),
+            ...sales.filter(s => s.paid > 0).map(s => ({ date: s.date, label: `Règlement facture #${s.id}`, debit: 0, credit: parseFloat(s.paid) })),
+            ...ops.map(o => ({
+                date: o.date,
+                label: o.type === 'deposit' ? 'Dépôt' : 'Retrait',
+                debit: o.type === 'withdrawal' ? parseFloat(o.amount) : 0,
+                credit: o.type === 'deposit' ? parseFloat(o.amount) : 0
+            }))
+        ].sort((a, b) => new Date(a.date) - new Date(b.date));
+
+        let balance = 0;
+        let rowIdx = 0;
+        for (const op of allOps) {
+            balance += op.debit - op.credit;
+            if (y > 750) { doc.addPage(); y = 40; }
+            const bg = rowIdx % 2 === 0 ? '#ffffff' : '#f8fafc';
+            doc.rect(40, y, 520, 18).fill(bg);
+            doc.fillColor('#1a2a3a').fontSize(8).font('Helvetica');
+            doc.text(new Date(op.date).toLocaleDateString('fr-FR'), 45, y + 5);
+            doc.text(op.label, 130, y + 5);
+            if (op.debit) doc.text(formatPDFNumber(op.debit), 380, y + 5, { width: 80, align: 'right' });
+            if (op.credit) doc.text(formatPDFNumber(op.credit), 465, y + 5, { width: 90, align: 'right' });
+            y += 18;
+            rowIdx++;
+        }
+
+        doc.rect(40, y, 520, 30).fill('#f0f4f8');
+        doc.fillColor('#1a2a3a').fontSize(11).font('Helvetica-Bold')
+           .text('SOLDE ACTUEL :', 300, y + 9);
+        doc.fillColor(balance > 0 ? '#e74c3c' : '#27ae60').fontSize(13)
+           .text(`${formatPDFNumber(Math.abs(balance))} ${company.currency}`, 430, y + 8, { width: 125, align: 'right' });
+        doc.fillColor('#7a8a9a').fontSize(8).font('Helvetica')
+           .text(balance > 0 ? '(Doit payer)' : '(À crédit / Payé)', 430, y + 24);
+
+        doc.end();
+    } catch (err) {
+        console.error('❌ Erreur PDF relevé:', err);
+        if (!res.headersSent) res.status(500).json({ error: err.message });
+    }
+});
 // ========== RAPPORT : TOTAUX GROS / DÉTAIL PAR JOUR ==========
 app.get('/api/reports/daily-sales-by-type', authenticate, async (req, res) => {
     const userId = req.user.id;

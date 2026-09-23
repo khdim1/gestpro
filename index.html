@@ -2329,22 +2329,608 @@ async function renderInvoices() {
     };
     await loadAllInvoices();
 }
-
 // ========================================================================
-// CLIENTS
+// CLIENTS - VERSION PROFESSIONNELLE
 // ========================================================================
 async function renderClients() {
-    const clients = await apiCall('/clients');
-    const html = `<button class="btn btn-primary mb-3" onclick="showClientModal()"><i class="bi bi-plus-circle me-1"></i>+ Client</button>
-    <div class="table-wrapper"><table class="table"><thead><tr><th>Nom</th><th>Email</th><th>Téléphone</th><th>Actions</th></tr></thead><tbody>${clients.map(c=>`<tr><td><strong>${c.name}</strong></td><td>${c.email||''}</td><td>${c.phone||''}</td><td><button class="btn btn-sm btn-warning me-1" onclick="editClient(${c.id})"><i class="bi bi-pencil"></i></button><button class="btn btn-sm btn-danger" onclick="deleteClient(${c.id})"><i class="bi bi-trash"></i></button></td></tr>`).join('')}</tbody></table></div>
-    <div class="modal fade" id="clientModal"><div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5><i class="bi bi-person me-2"></i>Client</h5></div><div class="modal-body"><input type="hidden" id="clientId"><input id="clientName" placeholder="Nom*" class="form-control mb-2"><input id="clientEmail" placeholder="Email" class="form-control mb-2"><input id="clientPhone" placeholder="Téléphone" class="form-control mb-2"><textarea id="clientAddress" placeholder="Adresse" class="form-control"></textarea></div><div class="modal-footer"><button class="btn btn-primary" onclick="saveClient()"><i class="bi bi-save me-1"></i>Sauvegarder</button></div></div></div></div>`;
-    document.getElementById('pageContainer').innerHTML = html;
-    window.showClientModal = () => { document.getElementById('clientId').value=''; document.getElementById('clientName').value=''; document.getElementById('clientEmail').value=''; document.getElementById('clientPhone').value=''; document.getElementById('clientAddress').value=''; new bootstrap.Modal(document.getElementById('clientModal')).show(); };
-    window.editClient = async (id) => { const c = clients.find(x=>x.id==id); document.getElementById('clientId').value=c.id; document.getElementById('clientName').value=c.name; document.getElementById('clientEmail').value=c.email||''; document.getElementById('clientPhone').value=c.phone||''; document.getElementById('clientAddress').value=c.address||''; new bootstrap.Modal(document.getElementById('clientModal')).show(); };
-    window.saveClient = async () => { const data = { name: document.getElementById('clientName').value, email: document.getElementById('clientEmail').value, phone: document.getElementById('clientPhone').value, address: document.getElementById('clientAddress').value }; const id = document.getElementById('clientId').value; if(id) await apiCall(`/clients/${id}`, 'PUT', data); else await apiCall('/clients', 'POST', data); bootstrap.Modal.getInstance(document.getElementById('clientModal')).hide(); renderClients(); };
-    window.deleteClient = async (id) => { if(confirm('Supprimer ?')) { await apiCall(`/clients/${id}`, 'DELETE'); renderClients(); } };
-}
+    try {
+        const clients = await apiCall('/clients');
+        const settings = await apiCall('/settings');
+        const currency = settings.currency || 'FCFA';
 
+        // Charger les stats pour chaque client (en parallèle)
+        const clientsWithStats = await Promise.all(clients.map(async (c) => {
+            try {
+                const account = await apiCall(`/clients/${c.id}/account`);
+                return { ...c, stats: account.stats };
+            } catch (e) {
+                return { ...c, stats: { total_ca: 0, total_impaye: 0, solde_compte: 0, total_orders: 0 } };
+            }
+        }));
+
+        // Totaux globaux
+        const totalCA = clientsWithStats.reduce((s, c) => s + (c.stats?.total_ca || 0), 0);
+        const totalImpaye = clientsWithStats.reduce((s, c) => s + (c.stats?.total_impaye || 0), 0);
+        const totalSolde = clientsWithStats.reduce((s, c) => s + (c.stats?.solde_compte || 0), 0);
+
+        const html = `
+            <!-- STATISTIQUES GLOBALES -->
+            <div class="row g-3 mb-4">
+                <div class="col-md-3">
+                    <div class="stat-card">
+                        <div class="stat-icon"><i class="bi bi-people"></i></div>
+                        <h6>Clients</h6>
+                        <h2>${clientsWithStats.length}</h2>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stat-card green">
+                        <div class="stat-icon"><i class="bi bi-coin"></i></div>
+                        <h6>Chiffre d'affaires</h6>
+                        <h2>${formatNumber(totalCA)} ${currency}</h2>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stat-card red">
+                        <div class="stat-icon"><i class="bi bi-exclamation-circle"></i></div>
+                        <h6>Total impayé</h6>
+                        <h2>${formatNumber(totalImpaye)} ${currency}</h2>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stat-card orange">
+                        <div class="stat-icon"><i class="bi bi-wallet2"></i></div>
+                        <h6>Soldes clients</h6>
+                        <h2>${formatNumber(totalSolde)} ${currency}</h2>
+                    </div>
+                </div>
+            </div>
+
+            <!-- BARRE D'ACTIONS -->
+            <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                <div class="d-flex gap-2 flex-grow-1">
+                    <input type="text" id="searchClientInput" class="form-control" 
+                           placeholder="🔍 Rechercher un client..." 
+                           oninput="filterClientsList()" style="max-width:400px;">
+                </div>
+                <button class="btn btn-primary" onclick="showClientModal()">
+                    <i class="bi bi-plus-circle me-1"></i> Nouveau client
+                </button>
+            </div>
+
+            <!-- TABLEAU CLIENTS -->
+            <div class="table-wrapper">
+                <table class="table align-middle">
+                    <thead>
+                        <tr>
+                            <th>Client</th>
+                            <th>Contact</th>
+                            <th>Commandes</th>
+                            <th>CA Total</th>
+                            <th>Impayé</th>
+                            <th>Solde compte</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="clientsTableBody">
+                        ${clientsWithStats.map(c => {
+                            const impaye = c.stats?.total_impaye || 0;
+                            const solde = c.stats?.solde_compte || 0;
+                            return `
+                                <tr data-name="${(c.name || '').toLowerCase()}">
+                                    <td>
+                                        <strong>${c.name}</strong>
+                                        ${impaye > 0 ? '<span class="badge badge-danger ms-2" style="font-size:0.6rem;">Impayé</span>' : ''}
+                                    </td>
+                                    <td>
+                                        ${c.phone ? `<div><i class="bi bi-telephone me-1"></i>${c.phone}</div>` : ''}
+                                        ${c.email ? `<div class="text-muted" style="font-size:0.75rem;">${c.email}</div>` : ''}
+                                    </td>
+                                    <td><span class="badge bg-primary">${c.stats?.total_orders || 0}</span></td>
+                                    <td><strong>${formatNumber(c.stats?.total_ca || 0)} ${currency}</strong></td>
+                                    <td class="${impaye > 0 ? 'text-danger fw-bold' : 'text-muted'}">
+                                        ${formatNumber(impaye)} ${currency}
+                                    </td>
+                                    <td class="${solde > 0 ? 'text-success' : 'text-muted'}">
+                                        <strong>${formatNumber(solde)} ${currency}</strong>
+                                    </td>
+                                    <td>
+                                        <div class="btn-group btn-group-sm">
+                                            <button class="btn btn-primary" onclick="viewClientAccount(${c.id})" title="Compte client">
+                                                <i class="bi bi-wallet2"></i>
+                                            </button>
+                                            <button class="btn btn-info" onclick="viewClientStatement(${c.id})" title="Relevé de compte">
+                                                <i class="bi bi-file-text"></i>
+                                            </button>
+                                            <button class="btn btn-success" onclick="quickClientDeposit(${c.id}, '${c.name.replace(/'/g, "\\'")}')" title="Dépôt">
+                                                <i class="bi bi-arrow-down-circle"></i>
+                                            </button>
+                                            <button class="btn btn-warning" onclick="editClient(${c.id})" title="Modifier">
+                                                <i class="bi bi-pencil"></i>
+                                            </button>
+                                            <button class="btn btn-danger" onclick="deleteClient(${c.id})" title="Supprimer">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- MODAL CRÉATION/ÉDITION CLIENT -->
+            <div class="modal fade" id="clientModal" tabindex="-1">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5><i class="bi bi-person me-2"></i>Client</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <input type="hidden" id="clientId">
+                            <div class="mb-3">
+                                <label class="form-label">Nom complet *</label>
+                                <input id="clientName" class="form-control" placeholder="Ex: Fatou Ndiaye">
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Téléphone</label>
+                                    <input id="clientPhone" class="form-control" placeholder="Ex: 77 123 45 67">
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Email</label>
+                                    <input id="clientEmail" type="email" class="form-control" placeholder="Ex: client@mail.com">
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Adresse</label>
+                                <textarea id="clientAddress" class="form-control" rows="2" placeholder="Adresse complète"></textarea>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+                            <button class="btn btn-primary" onclick="saveClient()">
+                                <i class="bi bi-save me-1"></i>Enregistrer
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MODAL COMPTE CLIENT -->
+            <div class="modal fade" id="clientAccountModal" tabindex="-1">
+                <div class="modal-dialog modal-xl">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5><i class="bi bi-wallet2 me-2"></i>Compte client : <span id="accountClientName"></span></h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body" id="clientAccountBody">
+                            <div class="text-center py-4">
+                                <div class="spinner-border text-primary"></div>
+                                <p class="mt-2">Chargement du compte...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.getElementById('pageContainer').innerHTML = html;
+
+        // ========== FONCTIONS UTILITAIRES ==========
+        window.filterClientsList = () => {
+            const term = document.getElementById('searchClientInput').value.toLowerCase();
+            document.querySelectorAll('#clientsTableBody tr').forEach(tr => {
+                tr.style.display = tr.dataset.name.includes(term) ? '' : 'none';
+            });
+        };
+
+        // ========== CRUD CLIENT ==========
+        window.showClientModal = () => {
+            document.getElementById('clientId').value = '';
+            document.getElementById('clientName').value = '';
+            document.getElementById('clientEmail').value = '';
+            document.getElementById('clientPhone').value = '';
+            document.getElementById('clientAddress').value = '';
+            new bootstrap.Modal(document.getElementById('clientModal')).show();
+        };
+
+        window.editClient = (id) => {
+            const c = clients.find(x => x.id == id);
+            if (!c) return;
+            document.getElementById('clientId').value = c.id;
+            document.getElementById('clientName').value = c.name || '';
+            document.getElementById('clientEmail').value = c.email || '';
+            document.getElementById('clientPhone').value = c.phone || '';
+            document.getElementById('clientAddress').value = c.address || '';
+            new bootstrap.Modal(document.getElementById('clientModal')).show();
+        };
+
+        window.saveClient = async () => {
+            const data = {
+                name: document.getElementById('clientName').value.trim(),
+                email: document.getElementById('clientEmail').value.trim(),
+                phone: document.getElementById('clientPhone').value.trim(),
+                address: document.getElementById('clientAddress').value.trim()
+            };
+            if (!data.name) return showToast('❌ Nom obligatoire', 'danger');
+            const id = document.getElementById('clientId').value;
+            try {
+                if (id) await apiCall(`/clients/${id}`, 'PUT', data);
+                else await apiCall('/clients', 'POST', data);
+                showToast('✅ Client enregistré', 'success');
+                bootstrap.Modal.getInstance(document.getElementById('clientModal')).hide();
+                renderClients();
+            } catch (err) { showToast('❌ ' + err.message, 'danger'); }
+        };
+
+        window.deleteClient = async (id) => {
+            if (!confirm('⚠️ Supprimer définitivement ce client ?\n\nSes factures seront conservées mais sans client associé.')) return;
+            try {
+                await apiCall(`/clients/${id}`, 'DELETE');
+                showToast('✅ Client supprimé', 'success');
+                renderClients();
+            } catch (err) { showToast('❌ ' + err.message, 'danger'); }
+        };
+
+        // ========== DÉPÔT RAPIDE ==========
+        window.quickClientDeposit = (clientId, clientName) => {
+            const amount = parseFloat(prompt(`💰 Montant du dépôt pour ${clientName} (FCFA) :`, '0'));
+            if (isNaN(amount) || amount <= 0) return;
+            const desc = prompt('Description (facultatif) :', `Dépôt de ${clientName}`);
+            apiCall(`/clients/${clientId}/deposit`, 'POST', { amount, description: desc })
+                .then(() => {
+                    showToast(`✅ Dépôt de ${formatNumber(amount)} FCFA enregistré`, 'success');
+                    renderClients();
+                })
+                .catch(err => showToast('❌ ' + err.message, 'danger'));
+        };
+
+        // ========== COMPTE CLIENT COMPLET ==========
+        window.viewClientAccount = async (id) => {
+            document.getElementById('accountClientName').innerText = '...';
+            document.getElementById('clientAccountBody').innerHTML = `
+                <div class="text-center py-4">
+                    <div class="spinner-border text-primary"></div>
+                    <p class="mt-2">Chargement...</p>
+                </div>
+            `;
+            new bootstrap.Modal(document.getElementById('clientAccountModal')).show();
+
+            try {
+                const data = await apiCall(`/clients/${id}/account`);
+                const c = data.client;
+                const stats = data.stats;
+                const currency = (await apiCall('/settings')).currency || 'FCFA';
+
+                document.getElementById('accountClientName').innerText = c.name;
+
+                const statusLabels = {
+                    completed: { label: '✅ Payée', class: 'badge-success' },
+                    pending:   { label: '⏳ Impayée', class: 'badge-warning' },
+                    cancelled: { label: '❌ Annulée', class: 'badge-danger' }
+                };
+
+                const opIcons = {
+                    deposit: '⬇️', withdrawal: '⬆️', payment: '💳'
+                };
+
+                document.getElementById('clientAccountBody').innerHTML = `
+                    <!-- CARTE D'IDENTITÉ -->
+                    <div class="card-modern mb-3">
+                        <div class="row">
+                            <div class="col-md-8">
+                                <h5 class="mb-1">${c.name}</h5>
+                                <div class="text-muted">
+                                    ${c.phone ? `<i class="bi bi-telephone me-1"></i>${c.phone}` : ''}
+                                    ${c.email ? ` • <i class="bi bi-envelope me-1"></i>${c.email}` : ''}
+                                </div>
+                                ${c.address ? `<div class="text-muted small mt-1"><i class="bi bi-geo-alt me-1"></i>${c.address}</div>` : ''}
+                            </div>
+                            <div class="col-md-4 text-end">
+                                <button class="btn btn-sm btn-info" onclick="viewClientStatement(${id})">
+                                    <i class="bi bi-file-text me-1"></i>Relevé détaillé
+                                </button>
+                                <a class="btn btn-sm btn-danger" href="/api/clients/${id}/statement-pdf?token=${token}" target="_blank">
+                                    <i class="bi bi-file-pdf me-1"></i>PDF
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- STATS -->
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-3">
+                            <div class="stat-card green">
+                                <h6>Chiffre d'affaires</h6>
+                                <h2>${formatNumber(stats.total_ca)} ${currency}</h2>
+                                <small class="text-muted">${stats.total_orders} commande(s)</small>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-card">
+                                <h6>Panier moyen</h6>
+                                <h2>${formatNumber(stats.panier_moyen)} ${currency}</h2>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-card red">
+                                <h6>Impayé</h6>
+                                <h2>${formatNumber(stats.total_impaye)} ${currency}</h2>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-card ${stats.solde_compte >= 0 ? 'green' : 'orange'}">
+                                <h6>Solde compte</h6>
+                                <h2>${formatNumber(stats.solde_compte)} ${currency}</h2>
+                                <small class="text-muted">Dépôts - Retraits</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ACTIONS RAPIDES -->
+                    <div class="card-modern mb-3">
+                        <h6 class="mb-3"><i class="bi bi-lightning-charge me-2"></i>Actions rapides</h6>
+                        <div class="d-flex gap-2 flex-wrap">
+                            <button class="btn btn-success btn-sm" onclick="clientAccountDeposit(${id}, '${c.name.replace(/'/g, "\\'")}')">
+                                <i class="bi bi-arrow-down-circle me-1"></i>Dépôt
+                            </button>
+                            <button class="btn btn-warning btn-sm" onclick="clientAccountWithdrawal(${id}, '${c.name.replace(/'/g, "\\'")}')">
+                                <i class="bi bi-arrow-up-circle me-1"></i>Retrait
+                            </button>
+                            <button class="btn btn-primary btn-sm" onclick="payClientInvoice(${id})">
+                                <i class="bi bi-credit-card me-1"></i>Payer une facture
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- TABS -->
+                    <ul class="nav nav-tabs mb-3" id="clientTabs">
+                        <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-sales">📄 Factures (${data.sales.length})</button></li>
+                        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-ops">💳 Opérations (${data.operations.length})</button></li>
+                        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-top">📦 Top produits</button></li>
+                    </ul>
+                    <div class="tab-content">
+                        <!-- FACTURES -->
+                        <div class="tab-pane fade show active" id="tab-sales">
+                            ${data.sales.length === 0 ? '<div class="alert alert-info">Aucune facture</div>' : `
+                                <div class="table-wrapper">
+                                    <table class="table table-sm">
+                                        <thead>
+                                            <tr>
+                                                <th>N°</th>
+                                                <th>Date</th>
+                                                <th>Montant</th>
+                                                <th>Payé</th>
+                                                <th>Reste</th>
+                                                <th>Statut</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            ${data.sales.map(s => {
+                                                const paid = parseFloat(s.paid) || 0;
+                                                const reste = parseFloat(s.final_amount) - paid;
+                                                const st = statusLabels[s.status] || { label: s.status, class: 'badge-secondary' };
+                                                return `
+                                                    <tr>
+                                                        <td><strong>#${s.id}</strong></td>
+                                                        <td>${new Date(s.sale_date).toLocaleDateString('fr-FR')}</td>
+                                                        <td>${formatNumber(s.final_amount)} ${currency}</td>
+                                                        <td class="text-success">${formatNumber(paid)} ${currency}</td>
+                                                        <td class="${reste > 0 ? 'text-danger fw-bold' : 'text-muted'}">${formatNumber(Math.max(0, reste))} ${currency}</td>
+                                                        <td><span class="badge-status ${st.class}">${st.label}</span></td>
+                                                        <td>
+                                                            <button class="btn btn-sm btn-info" onclick="downloadInvoice(${s.id})" title="PDF">
+                                                                <i class="bi bi-file-pdf"></i>
+                                                            </button>
+                                                            ${reste > 0 ? `
+                                                                <button class="btn btn-sm btn-success" onclick="recordPaymentInvoice(${s.id})" title="Régler">
+                                                                    <i class="bi bi-cash"></i>
+                                                                </button>
+                                                            ` : ''}
+                                                        </td>
+                                                    </tr>
+                                                `;
+                                            }).join('')}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            `}
+                        </div>
+
+                        <!-- OPÉRATIONS -->
+                        <div class="tab-pane fade" id="tab-ops">
+                            ${data.operations.length === 0 ? '<div class="alert alert-info">Aucune opération</div>' : `
+                                <div class="table-wrapper">
+                                    <table class="table table-sm">
+                                        <thead>
+                                            <tr>
+                                                <th>Date</th>
+                                                <th>Type</th>
+                                                <th>Description</th>
+                                                <th class="text-end">Montant</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            ${data.operations.map(o => `
+                                                <tr>
+                                                    <td>${new Date(o.created_at).toLocaleString('fr-FR')}</td>
+                                                    <td>
+                                                        <span class="badge ${o.transaction_type === 'deposit' ? 'badge-success' : 'badge-warning'}">
+                                                            ${opIcons[o.transaction_type] || ''} ${o.transaction_type}
+                                                        </span>
+                                                    </td>
+                                                    <td>${o.description || '-'}</td>
+                                                    <td class="text-end ${o.transaction_type === 'deposit' ? 'text-success' : 'text-danger'}">
+                                                        <strong>${o.transaction_type === 'deposit' ? '+' : '-'} ${formatNumber(o.amount)} ${currency}</strong>
+                                                    </td>
+                                                </tr>
+                                            `).join('')}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            `}
+                        </div>
+
+                        <!-- TOP PRODUITS -->
+                        <div class="tab-pane fade" id="tab-top">
+                            ${data.top_products.length === 0 ? '<div class="alert alert-info">Aucun achat enregistré</div>' : `
+                                <div class="table-wrapper">
+                                    <table class="table table-sm">
+                                        <thead>
+                                            <tr>
+                                                <th>Produit</th>
+                                                <th class="text-end">Quantité totale</th>
+                                                <th class="text-end">Montant total</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            ${data.top_products.map(p => `
+                                                <tr>
+                                                    <td>${p.name}</td>
+                                                    <td class="text-end">${p.qty}</td>
+                                                    <td class="text-end"><strong>${formatNumber(p.total)} ${currency}</strong></td>
+                                                </tr>
+                                            `).join('')}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            `}
+                        </div>
+                    </div>
+                `;
+
+                // Fonctions du modal compte
+                window.clientAccountDeposit = (clientId, name) => {
+                    const amount = parseFloat(prompt(`💰 Montant du dépôt pour ${name} :`, '0'));
+                    if (isNaN(amount) || amount <= 0) return;
+                    apiCall(`/clients/${clientId}/deposit`, 'POST', {
+                        amount,
+                        description: `Dépôt de ${name}`
+                    }).then(() => {
+                        showToast('✅ Dépôt enregistré', 'success');
+                        viewClientAccount(clientId);
+                        renderClients();
+                    }).catch(err => showToast('❌ ' + err.message, 'danger'));
+                };
+
+                window.clientAccountWithdrawal = (clientId, name) => {
+                    const amount = parseFloat(prompt(`💸 Montant du retrait pour ${name} :`, '0'));
+                    if (isNaN(amount) || amount <= 0) return;
+                    apiCall(`/clients/${clientId}/withdrawal`, 'POST', {
+                        amount,
+                        description: `Retrait de ${name}`
+                    }).then(() => {
+                        showToast('✅ Retrait enregistré', 'success');
+                        viewClientAccount(clientId);
+                        renderClients();
+                    }).catch(err => showToast('❌ ' + err.message, 'danger'));
+                };
+
+                window.payClientInvoice = async (clientId) => {
+                    const unpaid = data.sales.filter(s => {
+                        const paid = parseFloat(s.paid) || 0;
+                        return (parseFloat(s.final_amount) - paid) > 0.01;
+                    });
+                    if (unpaid.length === 0) {
+                        return showToast('ℹ️ Aucune facture impayée pour ce client', 'info');
+                    }
+                    const opts = unpaid.map(s => {
+                        const paid = parseFloat(s.paid) || 0;
+                        return `#${s.id} - Reste: ${formatNumber(s.final_amount - paid)} FCFA`;
+                    }).join('\n');
+                    const choice = prompt(`Sélectionnez la facture (numéro d'ID) :\n\n${opts}\n\nEntrez l'ID de la facture :`);
+                    if (!choice) return;
+                    const saleId = parseInt(choice.replace('#', '').trim());
+                    if (!unpaid.find(s => s.id === saleId)) return alert('ID invalide');
+                    try {
+                        await apiCall(`/clients/${clientId}/pay-invoice`, 'POST', { sale_id: saleId });
+                        showToast('✅ Facture payée avec le solde client', 'success');
+                        viewClientAccount(clientId);
+                        renderClients();
+                    } catch (err) { showToast('❌ ' + err.message, 'danger'); }
+                };
+
+            } catch (err) {
+                document.getElementById('clientAccountBody').innerHTML =
+                    `<div class="alert alert-danger">Erreur : ${err.message}</div>`;
+            }
+        };
+
+        // ========== RELEVÉ DE COMPTE ==========
+        window.viewClientStatement = async (id) => {
+            try {
+                const data = await apiCall(`/clients/${id}/statement`);
+                const currency = (await apiCall('/settings')).currency || 'FCFA';
+                let html = `
+                    <div class="modal fade" id="clientStatementModal" tabindex="-1">
+                        <div class="modal-dialog modal-xl">
+                            <div class="modal-content">
+                                <div class="modal-header">
+                                    <h5><i class="bi bi-file-text me-2"></i>Relevé de compte : ${data.client.name}</h5>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                </div>
+                                <div class="modal-body">
+                                    <div class="text-end mb-3">
+                                        <a class="btn btn-danger btn-sm" href="/api/clients/${id}/statement-pdf?token=${token}" target="_blank">
+                                            <i class="bi bi-file-pdf me-1"></i>Télécharger PDF
+                                        </a>
+                                    </div>
+                                    <div class="table-wrapper">
+                                        <table class="table table-sm">
+                                            <thead>
+                                                <tr>
+                                                    <th>Date</th>
+                                                    <th>Type</th>
+                                                    <th>Description</th>
+                                                    <th class="text-end">Débit</th>
+                                                    <th class="text-end">Crédit</th>
+                                                    <th class="text-end">Solde</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                ${data.statement.length === 0 ? '<tr><td colspan="6" class="text-center text-muted py-3">Aucune opération</td></tr>' :
+                                                    data.statement.map(r => `
+                                                        <tr>
+                                                            <td>${new Date(r.date).toLocaleDateString('fr-FR')}</td>
+                                                            <td><span class="badge ${r.type === 'facture' ? 'badge-warning' : 'badge-success'}">${r.type}</span></td>
+                                                            <td>${r.description}</td>
+                                                            <td class="text-end text-danger">${r.debit > 0 ? formatNumber(r.debit) : '-'}</td>
+                                                            <td class="text-end text-success">${r.credit > 0 ? formatNumber(r.credit) : '-'}</td>
+                                                            <td class="text-end"><strong>${formatNumber(r.solde)} ${currency}</strong></td>
+                                                        </tr>
+                                                    `).join('')}
+                                            </tbody>
+                                            <tfoot>
+                                                <tr class="table-primary">
+                                                    <th colspan="5" class="text-end">SOLDE FINAL :</th>
+                                                    <th class="text-end">${formatNumber(data.final_balance)} ${currency}</th>
+                                                </tr>
+                                            </tfoot>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                const old = document.getElementById('clientStatementModal');
+                if (old) old.remove();
+                document.body.insertAdjacentHTML('beforeend', html);
+                new bootstrap.Modal(document.getElementById('clientStatementModal')).show();
+            } catch (err) {
+                showToast('❌ ' + err.message, 'danger');
+            }
+        };
+
+    } catch (err) {
+        console.error('Erreur renderClients:', err);
+        document.getElementById('pageContainer').innerHTML = `<div class="alert alert-danger">Erreur : ${err.message}</div>`;
+    }
+}
 // ========================================================================
 // CASH
 // ========================================================================
