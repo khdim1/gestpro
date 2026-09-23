@@ -1401,7 +1401,7 @@ app.post('/api/sales', authenticate, async (req, res) => {
     console.log('📦 Données reçues:', req.body);
 
     const { client_name = '', client_email = '', client_phone = '', client_address = '', items = [], remise_pct = 0, acompte = 0, payment_method = 'cash', status = 'completed', due_date = null, is_wholesale = false } = req.body;
-
+const sale_type = is_wholesale ? 'gros' : 'detail';
     if (!items || !Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ error: 'Aucun produit dans le panier' });
     }
@@ -1485,6 +1485,12 @@ app.post('/api/sales', authenticate, async (req, res) => {
                  VALUES (?, ?, 'sale', ?, ?, ?, ?, ?)`,
                 [item.product_id, req.user.id, -item.quantity, oldQty, newQty, `VENTE #${sale_id}`, is_wholesale ? 'Vente en gros' : null]
             );
+            const [saleResult] = await connection.query(`
+    INSERT INTO sales 
+    (user_id, sale_type, client_id, total_amount, remise_pct, acompte, tax, final_amount, payment_method, status, due_date, notes, tax_rate)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [req.user.id, sale_type, client_id, subtotal, remise_pct || 0, acompte || 0, tax, final_amount, payment_method || 'cash', finalStatus, due_date || null, is_wholesale ? 'VENTE EN GROS' : null, tax_rate]
+);
         }
 
         if (finalStatus === 'completed') {
@@ -4899,6 +4905,39 @@ app.get('/api/supplier-statement/:supplierId', authenticate, async (req, res) =>
             solde: totalAchats - totalPaye
         });
     } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+// ========== RAPPORT : TOTAUX GROS / DÉTAIL PAR JOUR ==========
+app.get('/api/reports/daily-sales-by-type', authenticate, async (req, res) => {
+    const userId = req.user.id;
+    const { date } = req.query;
+    const targetDate = date || new Date().toISOString().split('T')[0];
+
+    try {
+        const [rows] = await pool.query(
+            `SELECT 
+                COALESCE(SUM(CASE WHEN sale_type = 'detail' THEN final_amount ELSE 0 END), 0) AS total_detail,
+                COALESCE(SUM(CASE WHEN sale_type = 'gros'   THEN final_amount ELSE 0 END), 0) AS total_gros,
+                COALESCE(SUM(final_amount), 0) AS total_general,
+                COUNT(CASE WHEN sale_type = 'detail' THEN 1 END) AS count_detail,
+                COUNT(CASE WHEN sale_type = 'gros'   THEN 1 END) AS count_gros
+             FROM sales
+             WHERE user_id = ?
+               AND DATE(sale_date) = ?
+               AND status = 'completed'`,
+            [userId, targetDate]
+        );
+        res.json({
+            date: targetDate,
+            total_detail: parseFloat(rows[0].total_detail),
+            total_gros:   parseFloat(rows[0].total_gros),
+            total_general: parseFloat(rows[0].total_general),
+            count_detail: rows[0].count_detail,
+            count_gros:   rows[0].count_gros
+        });
+    } catch (err) {
+        console.error('Erreur daily-sales-by-type:', err);
         res.status(500).json({ error: err.message });
     }
 });

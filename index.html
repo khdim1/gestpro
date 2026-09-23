@@ -2447,11 +2447,36 @@ async function renderReports() {
     try {
         const salesData = await apiCall('/reports/sales-by-period?period=month');
         const paymentData = await apiCall('/reports/daily-payments');
+        const typeData = await apiCall('/reports/daily-sales-by-type');
         const settings = await apiCall('/settings');
         const currency = settings.currency || 'FCFA';
         const tvaData = await apiCall('/reports/tva-mensuelle');
 
         const html = `
+        <div class="row g-3 mb-4">
+    <div class="col-md-4">
+        <div class="stat-card">
+            <h6>🛒 Ventes Détail</h6>
+            <h2 id="statVenteDetail">0</h2>
+            <small id="countVenteDetail" class="text-muted">0 ventes</small>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="stat-card orange">
+            <h6>📦 Ventes Gros</h6>
+            <h2 id="statVenteGros">0</h2>
+            <small id="countVenteGros" class="text-muted">0 ventes</small>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="stat-card green">
+            <h6>Total du jour</h6>
+            <h2 id="statVenteTotal">0</h2>
+            <small class="text-muted">détail + gros</small>
+        </div>
+    </div>
+</div>
+
             <div class="card-modern mb-4">
                 <h5><i class="bi bi-cash-stack me-2"></i>Fin de journée</h5>
                 <div class="row g-3">
@@ -2495,28 +2520,45 @@ async function renderReports() {
                 <canvas id="salesChart" height="200"></canvas>
             </div>
         `;
+      
         document.getElementById('pageContainer').innerHTML = html;
-        const ctx = document.getElementById('salesChart').getContext('2d');
-        new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: salesData.map(d => d.date),
-                datasets: [{
-                    label: 'Ventes (FCFA)',
-                    data: salesData.map(d => d.total),
-                    borderColor: '#2c6e9e',
-                    tension: 0.3,
-                    fill: true,
-                    backgroundColor: 'rgba(44,110,158,0.05)'
-                }]
-            },
-            options: {
-                responsive: true,
-                plugins: {
-                    legend: { display: false }
-                }
-            }
-        });
+
+// --- Cartes Gros / Détail ---
+setTimeout(() => {
+    const elD = document.getElementById('statVenteDetail');
+    const elG = document.getElementById('statVenteGros');
+    const elT = document.getElementById('statVenteTotal');
+    const elCD = document.getElementById('countVenteDetail');
+    const elCG = document.getElementById('countVenteGros');
+    if (elD) elD.innerText = formatNumber(typeData.total_detail) + ' ' + currency;
+    if (elG) elG.innerText = formatNumber(typeData.total_gros) + ' ' + currency;
+    if (elT) elT.innerText = formatNumber(typeData.total_general) + ' ' + currency;
+    if (elCD) elCD.innerText = typeData.count_detail + ' ventes';
+    if (elCG) elCG.innerText = typeData.count_gros + ' ventes';
+}, 100);
+
+// --- Graphique ---
+const ctx = document.getElementById('salesChart').getContext('2d');
+new Chart(ctx, {
+    type: 'line',
+    data: {
+        labels: salesData.map(d => d.date),
+        datasets: [{
+            label: 'Ventes (FCFA)',
+            data: salesData.map(d => d.total),
+            borderColor: '#2c6e9e',
+            tension: 0.3,
+            fill: true,
+            backgroundColor: 'rgba(44,110,158,0.05)'
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: {
+            legend: { display: false }
+        }
+    }
+});
     } catch (err) {
         console.error('❌ Erreur renderReports:', err);
         document.getElementById('pageContainer').innerHTML = `<div class="alert alert-danger">Erreur : ${err.message}</div>`;
