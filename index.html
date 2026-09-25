@@ -3026,131 +3026,197 @@ async function renderInventory() {
     };
 }
 
-// ========================================================================
-// REPORTS
-// ========================================================================
 async function renderReports() {
     try {
         const salesData = await apiCall('/reports/sales-by-period?period=month');
-        const paymentData = await apiCall('/reports/daily-payments');
-        const typeData = await apiCall('/reports/daily-sales-by-type');
         const settings = await apiCall('/settings');
         const currency = settings.currency || 'FCFA';
         const tvaData = await apiCall('/reports/tva-mensuelle');
 
-        const html = `
-        <div class="row g-3 mb-4">
-    <div class="col-md-4">
-        <div class="stat-card">
-            <h6>🛒 Ventes Détail</h6>
-            <h2 id="statVenteDetail">0</h2>
-            <small id="countVenteDetail" class="text-muted">0 ventes</small>
-        </div>
-    </div>
-    <div class="col-md-4">
-        <div class="stat-card orange">
-            <h6>📦 Ventes Gros</h6>
-            <h2 id="statVenteGros">0</h2>
-            <small id="countVenteGros" class="text-muted">0 ventes</small>
-        </div>
-    </div>
-    <div class="col-md-4">
-        <div class="stat-card green">
-            <h6>Total du jour</h6>
-            <h2 id="statVenteTotal">0</h2>
-            <small class="text-muted">détail + gros</small>
-        </div>
-    </div>
-</div>
+        // Période sélectionnée
+        let currentPeriod = 'day';
+        const today = new Date().toISOString().split('T')[0];
 
+        // Récupérer toutes les périodes d'un coup
+        const [dayData, weekData, monthData, yearData, weekEvolution, monthEvolution] = await Promise.all([
+            apiCall(`/reports/sales-by-type-period?period=day&date=${today}`),
+            apiCall(`/reports/sales-by-type-period?period=week&date=${today}`),
+            apiCall(`/reports/sales-by-type-period?period=month&date=${today}`),
+            apiCall(`/reports/sales-by-type-period?period=year&date=${today}`),
+            apiCall('/reports/sales-by-week?weeks=12'),
+            apiCall('/reports/sales-by-month?months=12')
+        ]);
+
+        const html = `
+            <!-- SÉLECTEUR DE PÉRIODE -->
             <div class="card-modern mb-4">
-                <h5><i class="bi bi-cash-stack me-2"></i>Fin de journée</h5>
-                <div class="row g-3">
-                    <div class="col-md-3">
-                        <div class="stat-card green">
-                            <h6>💰 Espèces</h6>
-                            <h2>${formatNumber(paymentData.totals.cash)} ${currency}</h2>
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                    <h5 class="mb-0"><i class="bi bi-graph-up text-primary-custom me-2"></i>Analyse des ventes</h5>
+                    <div class="btn-group btn-group-sm" role="group">
+                        <button class="btn btn-outline-primary period-btn active" data-period="day" onclick="switchPeriod('day')">📅 Jour</button>
+                        <button class="btn btn-outline-primary period-btn" data-period="week" onclick="switchPeriod('week')">📆 Semaine</button>
+                        <button class="btn btn-outline-primary period-btn" data-period="month" onclick="switchPeriod('month')">🗓️ Mois</button>
+                        <button class="btn btn-outline-primary period-btn" data-period="year" onclick="switchPeriod('year')">📊 Année</button>
+                    </div>
+                </div>
+
+                <!-- CARTES DÉTAIL / GROS / TOTAL -->
+                <div class="row g-3 mb-3" id="periodCards">
+                    <div class="col-md-4">
+                        <div class="stat-card">
+                            <h6>🛒 Ventes Détail</h6>
+                            <h2 id="cardDetail">0</h2>
+                            <small id="cardDetailCount" class="text-muted">0 ventes</small>
                         </div>
                     </div>
-                    <div class="col-md-3">
+                    <div class="col-md-4">
                         <div class="stat-card orange">
-                            <h6>📱 Wave</h6>
-                            <h2>${formatNumber(paymentData.totals.wave)} ${currency}</h2>
+                            <h6>📦 Ventes Gros</h6>
+                            <h2 id="cardGros">0</h2>
+                            <small id="cardGrosCount" class="text-muted">0 ventes</small>
                         </div>
                     </div>
-                    <div class="col-md-3">
-                        <div class="stat-card" style="border-top-color: #e67e22;">
-                            <h6>📱 Orange Money</h6>
-                            <h2>${formatNumber(paymentData.totals.orange)} ${currency}</h2>
-                        </div>
-                    </div>
-                    <div class="col-md-3">
-                        <div class="stat-card" style="border-top-color: #2c6e9e;">
-                            <h6>💳 Autres</h6>
-                            <h2>${formatNumber(paymentData.totals.card + paymentData.totals.transfer + paymentData.totals.other)} ${currency}</h2>
+                    <div class="col-md-4">
+                        <div class="stat-card green">
+                            <h6>💰 Total</h6>
+                            <h2 id="cardTotal">0</h2>
+                            <small id="cardTotalCount" class="text-muted">0 ventes</small>
                         </div>
                     </div>
                 </div>
-                <div class="mt-2 text-muted">
-                    Total général : <strong>${formatNumber(paymentData.grandTotal)} ${currency}</strong>
-                    (pour la journée du ${new Date(paymentData.date).toLocaleDateString('fr-FR')})
+
+                <!-- DÉTAIL PAR MODE DE PAIEMENT (jour uniquement) -->
+                <div id="dayPaymentsBlock"></div>
+            </div>
+
+            <!-- ÉVOLUTION PAR SEMAINE -->
+            <div class="card-modern mb-4">
+                <h5><i class="bi bi-bar-chart-line me-2"></i>Évolution par semaine (12 dernières)</h5>
+                <div class="table-wrapper">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Semaine</th>
+                                <th>Période</th>
+                                <th class="text-end">🛒 Détail</th>
+                                <th class="text-end">📦 Gros</th>
+                                <th class="text-end">Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${weekEvolution.length === 0 ? '<tr><td colspan="5" class="text-center text-muted py-3">Aucune donnée</td></tr>' :
+                                weekEvolution.map(w => `
+                                    <tr>
+                                        <td><strong>S${String(w.semaine).slice(-2)}</strong></td>
+                                        <td>${new Date(w.debut).toLocaleDateString('fr-FR')} → ${new Date(w.fin).toLocaleDateString('fr-FR')}</td>
+                                        <td class="text-end">${formatNumber(w.total_detail)} ${currency}</td>
+                                        <td class="text-end" style="color: #8e44ad;">${formatNumber(w.total_gros)} ${currency}</td>
+                                        <td class="text-end"><strong>${formatNumber(w.total_general)} ${currency}</strong></td>
+                                    </tr>
+                                `).join('')}
+                        </tbody>
+                    </table>
                 </div>
             </div>
-            <div class="card-modern mt-3">
+
+            <!-- ÉVOLUTION PAR MOIS -->
+            <div class="card-modern mb-4">
+                <h5><i class="bi bi-calendar-month me-2"></i>Évolution par mois (12 derniers)</h5>
+                <div class="table-wrapper">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Mois</th>
+                                <th class="text-end">🛒 Détail</th>
+                                <th class="text-end">📦 Gros</th>
+                                <th class="text-end">Total</th>
+                                <th class="text-end">Nb ventes</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${monthEvolution.length === 0 ? '<tr><td colspan="5" class="text-center text-muted py-3">Aucune donnée</td></tr>' :
+                                monthEvolution.map(m => `
+                                    <tr>
+                                        <td><strong>${new Date(m.mois + '-01').toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}</strong></td>
+                                        <td class="text-end">${formatNumber(m.total_detail)} ${currency}</td>
+                                        <td class="text-end" style="color: #8e44ad;">${formatNumber(m.total_gros)} ${currency}</td>
+                                        <td class="text-end"><strong>${formatNumber(m.total_general)} ${currency}</strong></td>
+                                        <td class="text-end">${(parseInt(m.count_detail) || 0) + (parseInt(m.count_gros) || 0)}</td>
+                                    </tr>
+                                `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- TVA MENSUELLE -->
+            <div class="card-modern mb-4">
                 <h5><i class="bi bi-receipt me-2"></i>TVA collectée (mois en cours)</h5>
                 <p class="display-6 text-primary">${formatNumber(tvaData.total_tva)} ${currency}</p>
                 <p class="text-muted">pour le mois de ${new Date(tvaData.mois + '-01').toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}</p>
             </div>
-            <div class="card-modern mt-3">
-                <h5><i class="bi bi-graph-up me-2"></i>Évolution des ventes</h5>
+
+            <!-- GRAPHIQUE -->
+            <div class="card-modern">
+                <h5><i class="bi bi-graph-up me-2"></i>Évolution des ventes (30 jours)</h5>
                 <canvas id="salesChart" height="200"></canvas>
             </div>
         `;
-      
         document.getElementById('pageContainer').innerHTML = html;
 
-// --- Cartes Gros / Détail ---
-setTimeout(() => {
-    const elD = document.getElementById('statVenteDetail');
-    const elG = document.getElementById('statVenteGros');
-    const elT = document.getElementById('statVenteTotal');
-    const elCD = document.getElementById('countVenteDetail');
-    const elCG = document.getElementById('countVenteGros');
-    if (elD) elD.innerText = formatNumber(typeData.total_detail) + ' ' + currency;
-    if (elG) elG.innerText = formatNumber(typeData.total_gros) + ' ' + currency;
-    if (elT) elT.innerText = formatNumber(typeData.total_general) + ' ' + currency;
-    if (elCD) elCD.innerText = typeData.count_detail + ' ventes';
-    if (elCG) elCG.innerText = typeData.count_gros + ' ventes';
-}, 100);
+        // Stocker les données pour le switch
+        window.periodData = { day: dayData, week: weekData, month: monthData, year: yearData };
+        window.currency = currency;
 
-// --- Graphique ---
-const ctx = document.getElementById('salesChart').getContext('2d');
-new Chart(ctx, {
-    type: 'line',
-    data: {
-        labels: salesData.map(d => d.date),
-        datasets: [{
-            label: 'Ventes (FCFA)',
-            data: salesData.map(d => d.total),
-            borderColor: '#2c6e9e',
-            tension: 0.3,
-            fill: true,
-            backgroundColor: 'rgba(44,110,158,0.05)'
-        }]
-    },
-    options: {
-        responsive: true,
-        plugins: {
-            legend: { display: false }
-        }
-    }
-});
+        // Fonction de remplissage
+        window.fillPeriodCards = (data) => {
+            const d = formatNumber(data.total_detail) + ' ' + currency;
+            const g = formatNumber(data.total_gros) + ' ' + currency;
+            const t = formatNumber(data.total_general) + ' ' + currency;
+            document.getElementById('cardDetail').innerText = d;
+            document.getElementById('cardGros').innerText = g;
+            document.getElementById('cardTotal').innerText = t;
+            document.getElementById('cardDetailCount').innerText = data.count_detail + ' vente(s)';
+            document.getElementById('cardGrosCount').innerText = data.count_gros + ' vente(s)';
+            document.getElementById('cardTotalCount').innerText = data.count_total + ' vente(s)';
+        };
+
+        // Remplir avec le jour par défaut
+        window.fillPeriodCards(dayData);
+
+        // Switch de période
+        window.switchPeriod = (period) => {
+            document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+            document.querySelector(`.period-btn[data-period="${period}"]`).classList.add('active');
+            window.fillPeriodCards(window.periodData[period]);
+        };
+
+        // Graphique
+        const ctx = document.getElementById('salesChart').getContext('2d');
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: salesData.map(d => d.date),
+                datasets: [{
+                    label: 'Ventes (FCFA)',
+                    data: salesData.map(d => d.total),
+                    borderColor: '#2c6e9e',
+                    tension: 0.3,
+                    fill: true,
+                    backgroundColor: 'rgba(44,110,158,0.05)'
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } }
+            }
+        });
+
     } catch (err) {
         console.error('❌ Erreur renderReports:', err);
         document.getElementById('pageContainer').innerHTML = `<div class="alert alert-danger">Erreur : ${err.message}</div>`;
     }
 }
-
 // ========================================================================
 // SETTINGS
 // ========================================================================

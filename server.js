@@ -5211,6 +5211,112 @@ app.get('/api/reports/daily-sales-by-type', authenticate, async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+// ========== RAPPORT : VENTES PAR PÉRIODE AVEC DÉTAIL/GROS ==========
+app.get('/api/reports/sales-by-type-period', authenticate, async (req, res) => {
+    const userId = req.user.id;
+    const { period = 'day', date } = req.query;
+    const targetDate = date || new Date().toISOString().split('T')[0];
+
+    let dateCond = '';
+    const params = [userId];
+    if (period === 'day') {
+        dateCond = ' AND DATE(sale_date) = ?';
+        params.push(targetDate);
+    } else if (period === 'week') {
+        dateCond = ' AND YEARWEEK(sale_date, 1) = YEARWEEK(?, 1)';
+        params.push(targetDate);
+    } else if (period === 'month') {
+        dateCond = ' AND YEAR(sale_date) = YEAR(?) AND MONTH(sale_date) = MONTH(?)';
+        params.push(targetDate, targetDate);
+    } else if (period === 'year') {
+        dateCond = ' AND YEAR(sale_date) = YEAR(?)';
+        params.push(targetDate);
+    }
+
+    try {
+        const [rows] = await pool.query(
+            `SELECT 
+                COALESCE(SUM(CASE WHEN sale_type = 'detail' THEN final_amount ELSE 0 END), 0) AS total_detail,
+                COALESCE(SUM(CASE WHEN sale_type = 'gros'   THEN final_amount ELSE 0 END), 0) AS total_gros,
+                COALESCE(SUM(final_amount), 0) AS total_general,
+                COUNT(CASE WHEN sale_type = 'detail' THEN 1 END) AS count_detail,
+                COUNT(CASE WHEN sale_type = 'gros'   THEN 1 END) AS count_gros,
+                COUNT(*) AS count_total
+             FROM sales
+             WHERE user_id = ? AND status = 'completed' ${dateCond}`,
+            params
+        );
+        res.json({
+            period,
+            date: targetDate,
+            total_detail: parseFloat(rows[0].total_detail),
+            total_gros: parseFloat(rows[0].total_gros),
+            total_general: parseFloat(rows[0].total_general),
+            count_detail: rows[0].count_detail,
+            count_gros: rows[0].count_gros,
+            count_total: rows[0].count_total
+        });
+    } catch (err) {
+        console.error('Erreur sales-by-type-period:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ========== RAPPORT : ÉVOLUTION PAR SEMAINE ==========
+app.get('/api/reports/sales-by-week', authenticate, async (req, res) => {
+    const userId = req.user.id;
+    const { weeks = 12 } = req.query;
+    try {
+        const [rows] = await pool.query(
+            `SELECT 
+                YEARWEEK(sale_date, 1) AS semaine,
+                MIN(DATE(sale_date)) AS debut,
+                MAX(DATE(sale_date)) AS fin,
+                COALESCE(SUM(CASE WHEN sale_type = 'detail' THEN final_amount ELSE 0 END), 0) AS total_detail,
+                COALESCE(SUM(CASE WHEN sale_type = 'gros'   THEN final_amount ELSE 0 END), 0) AS total_gros,
+                COALESCE(SUM(final_amount), 0) AS total_general
+             FROM sales
+             WHERE user_id = ? AND status = 'completed'
+               AND sale_date >= DATE_SUB(CURDATE(), INTERVAL ? WEEK)
+             GROUP BY YEARWEEK(sale_date, 1)
+             ORDER BY semaine DESC
+             LIMIT ?`,
+            [userId, parseInt(weeks), parseInt(weeks)]
+        );
+        res.json(rows.reverse());
+    } catch (err) {
+        console.error('Erreur sales-by-week:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ========== RAPPORT : ÉVOLUTION PAR MOIS ==========
+app.get('/api/reports/sales-by-month', authenticate, async (req, res) => {
+    const userId = req.user.id;
+    const { months = 12 } = req.query;
+    try {
+        const [rows] = await pool.query(
+            `SELECT 
+                DATE_FORMAT(sale_date, '%Y-%m') AS mois,
+                COALESCE(SUM(CASE WHEN sale_type = 'detail' THEN final_amount ELSE 0 END), 0) AS total_detail,
+                COALESCE(SUM(CASE WHEN sale_type = 'gros'   THEN final_amount ELSE 0 END), 0) AS total_gros,
+                COALESCE(SUM(final_amount), 0) AS total_general,
+                COUNT(CASE WHEN sale_type = 'detail' THEN 1 END) AS count_detail,
+                COUNT(CASE WHEN sale_type = 'gros'   THEN 1 END) AS count_gros
+             FROM sales
+             WHERE user_id = ? AND status = 'completed'
+               AND sale_date >= DATE_SUB(CURDATE(), INTERVAL ? MONTH)
+             GROUP BY DATE_FORMAT(sale_date, '%Y-%m')
+             ORDER BY mois DESC
+             LIMIT ?`,
+            [userId, parseInt(months), parseInt(months)]
+        );
+        res.json(rows.reverse());
+    } catch (err) {
+        console.error('Erreur sales-by-month:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
 // ===== ROUTE 404 =====
 app.use((req, res) => {
     if (req.path.startsWith('/api')) {
@@ -5219,6 +5325,7 @@ app.use((req, res) => {
         res.sendFile(path.join(__dirname, 'index.html'));
     }
 });
+
 
 // ===== LANCEMENT =====
 initAndStart();
