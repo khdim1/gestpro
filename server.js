@@ -1461,15 +1461,14 @@ const sale_type = is_wholesale ? 'gros' : 'detail';
             final_amount = 999999999999;
         }
 
-        const finalStatus = status === 'pending' ? 'pending' : 'completed';
+                const finalStatus = status === 'pending' ? 'pending' : 'completed';
         const [saleResult] = await connection.query(`
             INSERT INTO sales 
-            (user_id, client_id, total_amount, remise_pct, acompte, tax, final_amount, payment_method, status, due_date, notes, tax_rate)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [req.user.id, client_id, subtotal, remise_pct || 0, acompte || 0, tax, final_amount, payment_method || 'cash', finalStatus, due_date || null, is_wholesale ? 'VENTE EN GROS' : null, tax_rate]
+            (user_id, sale_type, client_id, total_amount, remise_pct, acompte, tax, final_amount, payment_method, status, due_date, notes, tax_rate)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [req.user.id, sale_type, client_id, subtotal, remise_pct || 0, acompte || 0, tax, final_amount, payment_method || 'cash', finalStatus, due_date || null, is_wholesale ? 'VENTE EN GROS' : null, tax_rate]
         );
         const sale_id = saleResult.insertId;
-
         for (let item of items) {
             await connection.query(
                 `INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, total_price, tax_amount) VALUES (?, ?, ?, ?, ?, ?)`,
@@ -1485,12 +1484,7 @@ const sale_type = is_wholesale ? 'gros' : 'detail';
                  VALUES (?, ?, 'sale', ?, ?, ?, ?, ?)`,
                 [item.product_id, req.user.id, -item.quantity, oldQty, newQty, `VENTE #${sale_id}`, is_wholesale ? 'Vente en gros' : null]
             );
-            const [saleResult] = await connection.query(`
-    INSERT INTO sales 
-    (user_id, sale_type, client_id, total_amount, remise_pct, acompte, tax, final_amount, payment_method, status, due_date, notes, tax_rate)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [req.user.id, sale_type, client_id, subtotal, remise_pct || 0, acompte || 0, tax, final_amount, payment_method || 'cash', finalStatus, due_date || null, is_wholesale ? 'VENTE EN GROS' : null, tax_rate]
-);
+            
         }
 
         if (finalStatus === 'completed') {
