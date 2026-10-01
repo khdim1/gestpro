@@ -613,7 +613,13 @@ function showApp() {
                     'sub-users': 'sub_users_manage',
                     'orders': 'orders_view',
                     'drivers': 'sales_view',
-                    'deliveries': 'sales_view'
+                    'deliveries': 'sales_view',
+                        'suppliers': 'suppliers_view',
+    'supplier-purchases': 'supplier_purchases_view',
+    'supplier-payments': 'supplier_payments_view',
+    'expenses': 'expenses_view',
+    'deliveries': 'deliveries_view',
+    'drivers': 'drivers_view'
                 };
                 const needed = permissionMap[page];
                 if (needed && permissions.includes(needed)) {
@@ -3429,45 +3435,69 @@ async function renderSubUsers() {
         const permissions = await apiCall('/permissions');
 
         const permissionLabels = {
-            'dashboard': '📊 Tableau de bord',
-            'products_view': '📦 Voir les produits',
-            'products_create': '➕ Créer des produits',
-            'products_edit': '✏️ Modifier les produits',
-            'products_delete': '🗑️ Supprimer les produits',
-            'sales_view': '💰 Voir les ventes',
-            'sales_create': '➕ Créer des ventes',
-            'sales_edit': '✏️ Modifier les ventes',
-            'sales_delete': '🗑️ Supprimer les ventes',
-            'clients_view': '👤 Voir les clients',
-            'clients_create': '➕ Créer des clients',
-            'clients_edit': '✏️ Modifier les clients',
-            'clients_delete': '🗑️ Supprimer les clients',
-            'invoices_view': '📄 Voir les factures',
-            'invoices_create': '➕ Créer des factures',
-            'invoices_pay': '💳 Payer les factures',
-            'cash_view': '💵 Voir la caisse',
-            'cash_manage': '💵 Gérer la caisse',
-            'inventory_view': '📦 Voir l\'inventaire',
-            'inventory_manage': '📦 Gérer l\'inventaire',
-            'reports_view': '📊 Voir les rapports',
-            'settings_view': '⚙️ Voir les paramètres',
-            'settings_edit': '⚙️ Modifier les paramètres',
-            'sub_users_manage': '👥 Gérer l\'équipe'
-        };
+    'dashboard': '📊 Tableau de bord',
+    'products_view': '📦 Voir les produits',
+    'products_create': '➕ Créer des produits',
+    'products_edit': '✏️ Modifier les produits',
+    'products_delete': '🗑️ Supprimer les produits',
+    'sales_view': '💰 Voir les ventes',
+    'sales_create': '➕ Créer des ventes',
+    'sales_edit': '✏️ Modifier les ventes',
+    'sales_delete': '🗑️ Supprimer les ventes',
+    'clients_view': '👤 Voir les clients',
+    'clients_create': '➕ Créer des clients',
+    'clients_edit': '✏️ Modifier les clients',
+    'clients_delete': '🗑️ Supprimer les clients',
+    'invoices_view': '📄 Voir les factures',
+    'invoices_create': '➕ Créer des factures',
+    'invoices_pay': '💳 Payer les factures',
+    'cash_view': '💵 Voir la caisse',
+    'cash_manage': '💵 Gérer la caisse',
+    'inventory_view': '📦 Voir l\'inventaire',
+    'inventory_manage': '📦 Gérer l\'inventaire',
+    'reports_view': '📊 Voir les rapports',
+    'settings_view': '⚙️ Voir les paramètres',
+    'settings_edit': '⚙️ Modifier les paramètres',
+    'sub_users_manage': '👥 Gérer l\'équipe',
+    'suppliers_view': '🚚 Voir les fournisseurs',
+    'suppliers_create': '🚚 Créer un fournisseur',
+    'suppliers_edit': '🚚 Modifier un fournisseur',
+    'suppliers_delete': '🚚 Supprimer un fournisseur',
+    'supplier_purchases_view': '🧾 Voir les achats fournisseurs',
+    'supplier_purchases_create': '🧾 Créer un achat fournisseur',
+    'supplier_purchases_edit': '🧾 Modifier un achat',
+    'supplier_purchases_delete': '🧾 Supprimer un achat',
+    'supplier_payments_view': '💸 Voir les paiements fournisseurs',
+    'supplier_payments_create': '💸 Créer un paiement fournisseur',
+    'supplier_payments_delete': '💸 Supprimer un paiement',
+    'expenses_view': '💼 Voir les dépenses',
+    'expenses_create': '💼 Créer une dépense',
+    'expenses_edit': '💼 Modifier une dépense',
+    'expenses_delete': '💼 Supprimer une dépense',
+    'deliveries_view': '🚛 Voir les livraisons',
+    'deliveries_manage': '🚛 Gérer les livraisons',
+    'drivers_view': '🛵 Voir les livreurs',
+    'drivers_manage': '🛵 Gérer les livreurs'
+};
 
-        const permissionGroups = {
-            '📊 Tableau de bord': ['dashboard'],
-            '📦 Produits': ['products_view', 'products_create', 'products_edit', 'products_delete'],
-            '💰 Ventes': ['sales_view', 'sales_create', 'sales_edit', 'sales_delete'],
-            '👤 Clients': ['clients_view', 'clients_create', 'clients_edit', 'clients_delete'],
-            '📄 Factures': ['invoices_view', 'invoices_create', 'invoices_pay'],
-            '💵 Caisse': ['cash_view', 'cash_manage'],
-            '📦 Inventaire': ['inventory_view', 'inventory_manage'],
-            '📊 Rapports': ['reports_view'],
-            '⚙️ Paramètres': ['settings_view', 'settings_edit'],
-            '👥 Équipe': ['sub_users_manage']
-        };
-
+       const permissionGroups = {
+    '📊 Tableau de bord': ['dashboard'],
+    '📦 Produits': ['products_view', 'products_create', 'products_edit', 'products_delete'],
+    '💰 Ventes': ['sales_view', 'sales_create', 'sales_edit', 'sales_delete'],
+    '👤 Clients': ['clients_view', 'clients_create', 'clients_edit', 'clients_delete'],
+    '📄 Factures': ['invoices_view', 'invoices_create', 'invoices_pay'],
+    '💵 Caisse': ['cash_view', 'cash_manage'],
+    '📦 Inventaire': ['inventory_view', 'inventory_manage'],
+    '📊 Rapports': ['reports_view'],
+    '⚙️ Paramètres': ['settings_view', 'settings_edit'],
+    '👥 Équipe': ['sub_users_manage'],
+    '🚚 Fournisseurs': ['suppliers_view', 'suppliers_create', 'suppliers_edit', 'suppliers_delete'],
+    '🧾 Achats fournisseurs': ['supplier_purchases_view', 'supplier_purchases_create', 'supplier_purchases_edit', 'supplier_purchases_delete'],
+    '💸 Paiements fournisseurs': ['supplier_payments_view', 'supplier_payments_create', 'supplier_payments_delete'],
+    '💼 Dépenses': ['expenses_view', 'expenses_create', 'expenses_edit', 'expenses_delete'],
+    '🚛 Livraisons': ['deliveries_view', 'deliveries_manage'],
+    '🛵 Livreurs': ['drivers_view', 'drivers_manage']
+};
         const subUsersWithPerms = await Promise.all(subUsers.map(async (user) => {
             const perms = await apiCall(`/sub-users/${user.id}/permissions`);
             return { ...user, permissions: perms };
