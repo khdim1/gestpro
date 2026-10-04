@@ -5178,6 +5178,114 @@ app.get('/api/clients/:id/statement-pdf', authenticate, async (req, res) => {
         if (!res.headersSent) res.status(500).json({ error: err.message });
     }
 });
+// ========== RAPPORT : MARGES PAR PÉRIODE ==========
+app.get('/api/reports/margins', authenticate, async (req, res) => {
+    const userId = req.user.id;
+    const { period = 'day', date } = req.query;
+    const targetDate = date || new Date().toISOString().split('T')[0];
+
+    let dateCond = '';
+    const params = [userId];
+    if (period === 'day') {
+        dateCond = ' AND DATE(s.sale_date) = ?';
+        params.push(targetDate);
+    } else if (period === 'week') {
+        dateCond = ' AND YEARWEEK(s.sale_date, 1) = YEARWEEK(?, 1)';
+        params.push(targetDate);
+    } else if (period === 'month') {
+        dateCond = ' AND YEAR(s.sale_date) = YEAR(?) AND MONTH(s.sale_date) = MONTH(?)';
+        params.push(targetDate, targetDate);
+    } else if (period === 'year') {
+        dateCond = ' AND YEAR(s.sale_date) = YEAR(?)';
+        params.push(targetDate);
+    }
+
+    try {
+        const [rows] = await pool.query(
+            `SELECT 
+                COALESCE(SUM(si.total_price), 0) AS ca_total,
+                COALESCE(SUM(si.quantity * p.buy_price), 0) AS cout_total,
+                COALESCE(SUM(si.total_price - (si.quantity * p.buy_price)), 0) AS marge_totale,
+                COUNT(DISTINCT s.id) AS nb_ventes,
+                COALESCE(SUM(si.quantity), 0) AS nb_articles
+             FROM sale_items si
+             JOIN sales s ON si.sale_id = s.id
+             JOIN products p ON si.product_id = p.id
+             WHERE s.user_id = ? 
+               AND s.status = 'completed' ${dateCond}`,
+            params
+        );
+
+        const ca = parseFloat(rows[0].ca_total) || 0;
+        const cout = parseFloat(rows[0].cout_total) || 0;
+        const marge = parseFloat(rows[0].marge_totale) || 0;
+        const tauxMarge = ca > 0 ? (marge / ca) * 100 : 0;
+
+        res.json({
+            period,
+            date: targetDate,
+            ca_total: ca,
+            cout_total: cout,
+            marge_totale: marge,
+            taux_marge: tauxMarge,
+            nb_ventes: rows[0].nb_ventes,
+            nb_articles: rows[0].nb_articles
+        });
+    } catch (err) {
+        console.error('Erreur margins:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ========== RAPPORT : MARGES PAR PRODUIT (TOP) ==========
+app.get('/api/reports/margins-by-product', authenticate, async (req, res) => {
+    const userId = req.user.id;
+    const { period = 'month', date } = req.query;
+    const targetDate = date || new Date().toISOString().split('T')[0];
+
+    let dateCond = '';
+    const params = [userId];
+    if (period === 'day') {
+        dateCond = ' AND DATE(s.sale_date) = ?';
+        params.push(targetDate);
+    } else if (period === 'week') {
+        dateCond = ' AND YEARWEEK(s.sale_date, 1) = YEARWEEK(?, 1)';
+        params.push(targetDate);
+    } else if (period === 'month') {
+        dateCond = ' AND YEAR(s.sale_date) = YEAR(?) AND MONTH(s.sale_date) = MONTH(?)';
+        params.push(targetDate, targetDate);
+    } else if (period === 'year') {
+        dateCond = ' AND YEAR(s.sale_date) = YEAR(?)';
+        params.push(targetDate);
+    }
+
+    try {
+        const [rows] = await pool.query(
+            `SELECT 
+                p.name AS produit,
+                SUM(si.quantity) AS qte_vendue,
+                SUM(si.total_price) AS ca,
+                SUM(si.quantity * p.buy_price) AS cout,
+                SUM(si.total_price - (si.quantity * p.buy_price)) AS marge,
+                CASE WHEN SUM(si.total_price) > 0 
+                     THEN (SUM(si.total_price - (si.quantity * p.buy_price)) / SUM(si.total_price)) * 100 
+                     ELSE 0 END AS taux_marge
+             FROM sale_items si
+             JOIN sales s ON si.sale_id = s.id
+             JOIN products p ON si.product_id = p.id
+             WHERE s.user_id = ? 
+               AND s.status = 'completed' ${dateCond}
+             GROUP BY p.id, p.name
+             ORDER BY marge DESC
+             LIMIT 10`,
+            params
+        );
+        res.json(rows);
+    } catch (err) {
+        console.error('Erreur margins-by-product:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
 // ========== RAPPORT : TOTAUX GROS / DÉTAIL PAR JOUR ==========
 app.get('/api/reports/daily-sales-by-type', authenticate, async (req, res) => {
     const userId = req.user.id;

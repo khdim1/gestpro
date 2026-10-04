@@ -3038,7 +3038,8 @@ async function renderReports() {
         const settings = await apiCall('/settings');
         const currency = settings.currency || 'FCFA';
         const tvaData = await apiCall('/reports/tva-mensuelle');
-
+        const marginsData = await apiCall('/reports/margins?period=day');
+const marginsByProduct = await apiCall('/reports/margins-by-product?period=month');
         // Période sélectionnée
         let currentPeriod = 'day';
         const today = new Date().toISOString().split('T')[0];
@@ -3161,7 +3162,80 @@ async function renderReports() {
                 <p class="display-6 text-primary">${formatNumber(tvaData.total_tva)} ${currency}</p>
                 <p class="text-muted">pour le mois de ${new Date(tvaData.mois + '-01').toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}</p>
             </div>
+            <!-- GESTION DES MARGES -->
+<div class="card-modern mb-4">
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <h5 class="mb-0"><i class="bi bi-cash-coin text-success me-2"></i>Gestion des marges</h5>
+        <div class="btn-group btn-group-sm" role="group">
+            <button class="btn btn-outline-success margin-period-btn active" data-period="day" onclick="switchMarginPeriod('day')">📅 Jour</button>
+            <button class="btn btn-outline-success margin-period-btn" data-period="week" onclick="switchMarginPeriod('week')">📆 Semaine</button>
+            <button class="btn btn-outline-success margin-period-btn" data-period="month" onclick="switchMarginPeriod('month')">🗓️ Mois</button>
+            <button class="btn btn-outline-success margin-period-btn" data-period="year" onclick="switchMarginPeriod('year')">📊 Année</button>
+        </div>
+    </div>
 
+    <!-- CARTES MARGES -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div class="stat-card">
+                <h6>💰 Chiffre d'affaires</h6>
+                <h2 id="margeCA">0</h2>
+                <small id="margeNbVentes" class="text-muted">0 vente(s)</small>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stat-card orange">
+                <h6>📦 Coût d'achat</h6>
+                <h2 id="margeCout">0</h2>
+                <small class="text-muted">Prix d'achat × quantités</small>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stat-card green">
+                <h6>✨ Marge brute</h6>
+                <h2 id="margeTotale">0</h2>
+                <small id="margeTaux" class="text-muted">Taux : 0%</small>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stat-card" style="border-top-color: #8e44ad;">
+                <h6>📊 Articles vendus</h6>
+                <h2 id="margeArticles">0</h2>
+                <small class="text-muted">Total quantités</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- TOP PRODUITS PAR MARGE -->
+    <h6 class="border-bottom pb-2 mb-3">🏆 Top 10 produits par marge (mois en cours)</h6>
+    <div class="table-wrapper">
+        <table class="table table-sm">
+            <thead>
+                <tr>
+                    <th>Produit</th>
+                    <th class="text-end">Qté</th>
+                    <th class="text-end">CA</th>
+                    <th class="text-end">Coût</th>
+                    <th class="text-end">Marge</th>
+                    <th class="text-end">Taux</th>
+                </tr>
+            </thead>
+            <tbody id="marginsProductTable">
+                ${marginsByProduct.length === 0 ? '<tr><td colspan="6" class="text-center text-muted py-3">Aucune donnée</td></tr>' :
+                    marginsByProduct.map(p => `
+                        <tr>
+                            <td><strong>${p.produit}</strong></td>
+                            <td class="text-end">${p.qte_vendue}</td>
+                            <td class="text-end">${formatNumber(p.ca)} ${currency}</td>
+                            <td class="text-end">${formatNumber(p.cout)} ${currency}</td>
+                            <td class="text-end text-success"><strong>${formatNumber(p.marge)} ${currency}</strong></td>
+                            <td class="text-end"><span class="badge ${parseFloat(p.taux_marge) >= 30 ? 'badge-success' : parseFloat(p.taux_marge) >= 15 ? 'badge-warning' : 'badge-danger'}">${parseFloat(p.taux_marge).toFixed(1)}%</span></td>
+                        </tr>
+                    `).join('')}
+            </tbody>
+        </table>
+    </div>
+</div>
             <!-- GRAPHIQUE -->
             <div class="card-modern">
                 <h5><i class="bi bi-graph-up me-2"></i>Évolution des ventes (30 jours)</h5>
@@ -3186,6 +3260,34 @@ async function renderReports() {
             document.getElementById('cardGrosCount').innerText = data.count_gros + ' vente(s)';
             document.getElementById('cardTotalCount').innerText = data.count_total + ' vente(s)';
         };
+        // ========== GESTION DES MARGES ==========
+window.marginData = { day: marginsData };
+
+window.fillMarginCards = (data) => {
+    document.getElementById('margeCA').innerText = formatNumber(data.ca_total) + ' ' + currency;
+    document.getElementById('margeCout').innerText = formatNumber(data.cout_total) + ' ' + currency;
+    document.getElementById('margeTotale').innerText = formatNumber(data.marge_totale) + ' ' + currency;
+    document.getElementById('margeTaux').innerText = 'Taux : ' + data.taux_marge.toFixed(1) + '%';
+    document.getElementById('margeNbVentes').innerText = data.nb_ventes + ' vente(s)';
+    document.getElementById('margeArticles').innerText = data.nb_articles;
+};
+
+window.fillMarginCards(marginsData);
+
+window.switchMarginPeriod = async (period) => {
+    document.querySelectorAll('.margin-period-btn').forEach(b => b.classList.remove('active'));
+    document.querySelector(`.margin-period-btn[data-period="${period}"]`).classList.add('active');
+    
+    if (!window.marginData[period]) {
+        try {
+            window.marginData[period] = await apiCall(`/reports/margins?period=${period}`);
+        } catch (e) {
+            console.error('Erreur chargement marges:', e);
+            return;
+        }
+    }
+    window.fillMarginCards(window.marginData[period]);
+};
 
         // Remplir avec le jour par défaut
         window.fillPeriodCards(dayData);
