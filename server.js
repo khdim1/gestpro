@@ -5286,6 +5286,68 @@ app.get('/api/reports/margins-by-product', authenticate, async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+// ========== RAPPORT : TOTAL ACHATS PAR FOURNISSEUR ==========
+app.get('/api/suppliers/:id/purchases-total', authenticate, async (req, res) => {
+    const supplierId = req.params.id;
+    const userId = req.user.id;
+    try {
+        const [rows] = await pool.query(
+            `SELECT 
+                COALESCE(SUM(CASE WHEN DATE(purchase_date) = CURDATE() THEN total_amount ELSE 0 END), 0) AS total_jour,
+                COALESCE(SUM(CASE WHEN YEARWEEK(purchase_date, 1) = YEARWEEK(CURDATE(), 1) AND YEAR(purchase_date) = YEAR(CURDATE()) THEN total_amount ELSE 0 END), 0) AS total_semaine,
+                COALESCE(SUM(CASE WHEN YEAR(purchase_date) = YEAR(CURDATE()) AND MONTH(purchase_date) = MONTH(CURDATE()) THEN total_amount ELSE 0 END), 0) AS total_mois,
+                COALESCE(SUM(CASE WHEN YEAR(purchase_date) = YEAR(CURDATE()) THEN total_amount ELSE 0 END), 0) AS total_annee,
+                COALESCE(SUM(total_amount), 0) AS total_global,
+                COALESCE(SUM(paid_amount), 0) AS total_paye,
+                COUNT(*) AS nb_factures
+             FROM supplier_purchases 
+             WHERE supplier_id = ? AND user_id = ? AND status != 'cancelled'`,
+            [supplierId, userId]
+        );
+        const row = rows[0];
+        res.json({
+            total_jour: parseFloat(row.total_jour),
+            total_semaine: parseFloat(row.total_semaine),
+            total_mois: parseFloat(row.total_mois),
+            total_annee: parseFloat(row.total_annee),
+            total_global: parseFloat(row.total_global),
+            total_paye: parseFloat(row.total_paye),
+            reste_a_payer: parseFloat(row.total_global) - parseFloat(row.total_paye),
+            nb_factures: row.nb_factures
+        });
+    } catch (err) {
+        console.error('Erreur purchases-total:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ========== LISTE FOURNISSEURS AVEC TOTAUX ==========
+app.get('/api/suppliers-with-totals', authenticate, async (req, res) => {
+    const userId = req.user.id;
+    try {
+        const [rows] = await pool.query(
+            `SELECT 
+                s.id, s.name, s.contact_name, s.phone, s.email, s.is_active,
+                COALESCE(SUM(CASE WHEN DATE(sp.purchase_date) = CURDATE() THEN sp.total_amount ELSE 0 END), 0) AS total_jour,
+                COALESCE(SUM(CASE WHEN YEARWEEK(sp.purchase_date, 1) = YEARWEEK(CURDATE(), 1) AND YEAR(sp.purchase_date) = YEAR(CURDATE()) THEN sp.total_amount ELSE 0 END), 0) AS total_semaine,
+                COALESCE(SUM(CASE WHEN YEAR(sp.purchase_date) = YEAR(CURDATE()) AND MONTH(sp.purchase_date) = MONTH(CURDATE()) THEN sp.total_amount ELSE 0 END), 0) AS total_mois,
+                COALESCE(SUM(CASE WHEN YEAR(sp.purchase_date) = YEAR(CURDATE()) THEN sp.total_amount ELSE 0 END), 0) AS total_annee,
+                COALESCE(SUM(sp.total_amount), 0) AS total_global,
+                COALESCE(SUM(sp.paid_amount), 0) AS total_paye
+             FROM suppliers s
+             LEFT JOIN supplier_purchases sp 
+                ON s.id = sp.supplier_id AND sp.status != 'cancelled'
+             WHERE s.user_id = ?
+             GROUP BY s.id, s.name, s.contact_name, s.phone, s.email, s.is_active
+             ORDER BY s.name`,
+            [userId]
+        );
+        res.json(rows);
+    } catch (err) {
+        console.error('Erreur suppliers-with-totals:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
 // ========== RAPPORT : TOTAUX GROS / DÉTAIL PAR JOUR ==========
 app.get('/api/reports/daily-sales-by-type', authenticate, async (req, res) => {
     const userId = req.user.id;
