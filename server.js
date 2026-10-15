@@ -2648,7 +2648,6 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         doc.text('NET À PAYER', 360, currentY + 8);
         doc.text(`${formatPDFNumber(netAPayer)} ${company.currency}`, 440, currentY + 8, { width: 110, align: 'right' });
         currentY += 35;
-
         // ============================================================
         // PIED DE PAGE : CACHET, SIGNATURE, QR CODE
         // ============================================================
@@ -2662,6 +2661,13 @@ app.get('/api/sales/:id/invoice', authenticate, async (req, res) => {
         const qrSize = 60;
         const marginLeft = 50;
         const pageWidth = 500;
+
+        // ✅ FIX : Ajouter une page si le pied de page chevauche le contenu
+        if (currentY > 670) {
+            console.log('📄 Contenu trop bas → nouvelle page pour le pied de page');
+            doc.addPage();
+            currentY = 50;
+        }
 
         const cachetX = marginLeft;
         const signatureX = marginLeft + cachetWidth + 30;
