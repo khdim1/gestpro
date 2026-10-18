@@ -427,6 +427,11 @@ const appCache = {
     settings: { data: null, timestamp: 0 },
     ttl: 300000
 };
+function hasPerm(perm) {
+    if (!window.currentUser) return false;
+    if (window.currentUser.role === 'admin' || window.currentUser.permissions?.includes('*')) return true;
+    return window.currentUser.permissions?.includes(perm);
+}
 async function getCachedData(key, fetchFn) {
     const cached = appCache[key];
     if (cached.data && (Date.now() - cached.timestamp < appCache.ttl)) {
@@ -915,28 +920,78 @@ async function renderDashboard() {
                 </a>
             </div>
         `;
+        
+        // Vérification des permissions granulaires
+        const showStock = hasPerm('dashboard_view_stock');
+        const showSales = hasPerm('dashboard_view_sales');
+        const showRecent = hasPerm('dashboard_view_recent');
+
         const html = `
             ${shopButton}
             <div class="row g-4 fade-in">
+                ${showStock ? `
                 <div class="col-md-3 delay-1"><div class="stat-card"><div class="stat-icon"><i class="bi bi-boxes"></i></div><h6>Produits</h6><h2>${data.totalProducts}</h2><span class="stat-label">dont ${data.lowStock} stock faible</span><br><span class="stat-label">${lowStockLink}</span></div></div>
                 <div class="col-md-3 delay-2"><div class="stat-card green"><div class="stat-icon"><i class="bi bi-coin"></i></div><h6>Valeur stock</h6><h2>${formatNumber(data.inventoryValue)} FCFA</h2></div></div>
+                ` : ''}
+                
+                ${showSales ? `
                 <div class="col-md-3 delay-3"><div class="stat-card orange"><div class="stat-icon"><i class="bi bi-calendar-today"></i></div><h6>Ventes aujourd'hui</h6><h2>${formatNumber(data.todaySales)} FCFA</h2></div></div>
                 <div class="col-md-3 delay-4"><div class="stat-card"><div class="stat-icon"><i class="bi bi-calendar-month"></i></div><h6>Ventes mois</h6><h2>${formatNumber(data.monthSales)} FCFA</h2></div></div>
+                ` : ''}
             </div>
+            
             <div class="row mt-4">
+                ${showStock ? `
                 <div class="col-md-6"><div class="card-modern"><div class="card-title"><i class="bi bi-bar-chart-fill text-primary-custom me-2"></i>Top 5 produits</div><canvas id="topProductsChart" height="200"></canvas></div></div>
-                <div class="col-md-6"><div class="card-modern"><div class="card-title"><i class="bi bi-clock-history text-primary-custom me-2"></i>Dernières ventes</div><div class="table-wrapper"><table class="table"><thead><tr><th>#</th><th>Client</th><th>Total</th><th>Date</th></tr></thead><tbody>
-                    ${(data.recentSales || []).map(s => `<tr><td>#${s.id}</td><td>${s.client_name||'-'}</td><td>${formatNumber(s.final_amount)} FCFA</td><td>${new Date(s.sale_date).toLocaleDateString()}</td></tr>`).join('')}
+                ` : ''}
+                
+                ${showRecent ? `
+                <div class="col-md-${showStock ? '6' : '12'}"><div class="card-modern"><div class="card-title"><i class="bi bi-clock-history text-primary-custom me-2"></i>Dernières ventes</div><div class="table-wrapper"><table class="table"><thead><tr><th>#</th><th>Client</th><th>Total</th><th>Date</th></tr></thead><tbody>
+                    ${(data.recentSales || []).length === 0 ? '<tr><td colspan="4" class="text-center text-muted">Aucune vente</td></tr>' : 
+                    (data.recentSales || []).map(s => `<tr><td>#${s.id}</td><td>${s.client_name||'-'}</td><td>${formatNumber(s.final_amount)} FCFA</td><td>${new Date(s.sale_date).toLocaleDateString()}</td></tr>`).join('')}
                 </tbody></table></div></div></div>
+                ` : ''}
             </div>
         `;
         document.getElementById('pageContainer').innerHTML = html;
+
+        // ==========================================
+        // INITIALISATION DU GRAPHIQUE TOP PRODUITS
+        // ==========================================
+        if (showStock && data.topProducts && data.topProducts.length > 0) {
+            const ctxTop = document.getElementById('topProductsChart');
+            if (ctxTop) {
+                new Chart(ctxTop.getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: data.topProducts.map(p => p.name),
+                        datasets: [{
+                            label: 'Quantité vendue',
+                            data: data.topProducts.map(p => p.qte),
+                            backgroundColor: 'rgba(44,110,158,0.7)',
+                            borderColor: '#2c6e9e',
+                            borderWidth: 1,
+                            borderRadius: 5
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            legend: { display: false }
+                        },
+                        scales: {
+                            y: { beginAtZero: true }
+                        }
+                    }
+                });
+            }
+        }
+
     } catch(err) {
         console.error(err);
         document.getElementById('pageContainer').innerHTML = `<div class="alert alert-danger">Erreur chargement du tableau de bord : ${err.message}</div>`;
     }
 }
-
 // ========================================================================
 // PRODUITS - VERSION CORRIGÉE (avec TVA)
 // ========================================================================
@@ -3040,6 +3095,9 @@ async function renderReports() {
         const tvaData = await apiCall('/reports/tva-mensuelle');
         const marginsData = await apiCall('/reports/margins?period=day');
 const marginsByProduct = await apiCall('/reports/margins-by-product?period=month');
+        const showMargins = hasPerm('reports_view_margins');
+        const showTva = hasPerm('reports_view_tva');
+        const showChart = hasPerm('reports_view_sales');
         // Période sélectionnée
         let currentPeriod = 'day';
         const today = new Date().toISOString().split('T')[0];
@@ -3579,7 +3637,13 @@ async function renderSubUsers() {
     'deliveries_view': '🚛 Voir les livraisons',
     'deliveries_manage': '🚛 Gérer les livraisons',
     'drivers_view': '🛵 Voir les livreurs',
-    'drivers_manage': '🛵 Gérer les livreurs'
+    'drivers_manage': '🛵 Gérer les livreurs',
+        'dashboard_view_stock': '📊 Stock (Dashboard)',
+    'dashboard_view_sales': '📊 Ventes (Dashboard)',
+    'dashboard_view_recent': '📊 Dernières ventes (Dashboard)',
+    'reports_view_sales': '📊 Graphique (Rapports)',
+    'reports_view_margins': '💰 Marges (Rapports)',
+    'reports_view_tva': '🧾 TVA (Rapports)'
 };
 
        const permissionGroups = {
@@ -3598,7 +3662,9 @@ async function renderSubUsers() {
     '💸 Paiements fournisseurs': ['supplier_payments_view', 'supplier_payments_create', 'supplier_payments_delete'],
     '💼 Dépenses': ['expenses_view', 'expenses_create', 'expenses_edit', 'expenses_delete'],
     '🚛 Livraisons': ['deliveries_view', 'deliveries_manage'],
-    '🛵 Livreurs': ['drivers_view', 'drivers_manage']
+    '🛵 Livreurs': ['drivers_view', 'drivers_manage'],
+        '📊 Dashboard (Détails)': ['dashboard_view_stock', 'dashboard_view_sales', 'dashboard_view_recent'],
+    '📈 Rapports (Détails)': ['reports_view_sales', 'reports_view_margins', 'reports_view_tva']
 };
         const subUsersWithPerms = await Promise.all(subUsers.map(async (user) => {
             const perms = await apiCall(`/sub-users/${user.id}/permissions`);
