@@ -729,9 +729,13 @@ window.editSale = async function(saleId) {
             alert('❌ L\'élément #editItemsBody est introuvable dans la modal.');
             return;
         }
+        // ✅ CORRECTION : préserver le sale_type dans data-sale-type et afficher un badge
         tbody.innerHTML = items.map(item => `
-            <tr>
-                <td>${item.product_name}</td>
+            <tr data-sale-type="${item.sale_type || 'detail'}">
+                <td>
+                    ${item.product_name}
+                    ${item.sale_type === 'gros' ? '<span class="badge bg-warning ms-1" style="font-size:0.65rem;">Gros</span>' : ''}
+                </td>
                 <td>
                     <input type="number" class="form-control form-control-sm edit-qty" 
                            value="${item.quantity}" min="1" step="1" data-id="${item.product_id}">
@@ -786,12 +790,14 @@ window.saveSaleModification = async function() {
         return;
     }
     const items = [];
+    // ✅ CORRECTION : récupérer le sale_type depuis data-sale-type
     document.querySelectorAll('#editItemsBody tr').forEach(row => {
         const product_id = row.querySelector('.edit-qty')?.dataset.id;
         const quantity = parseInt(row.querySelector('.edit-qty')?.value) || 0;
         const unit_price = parseFloat(row.querySelector('.edit-price')?.value) || 0;
+        const sale_type = row.dataset.saleType || 'detail';
         if (product_id && quantity > 0 && unit_price > 0) {
-            items.push({ product_id, quantity, unit_price });
+            items.push({ product_id, quantity, unit_price, sale_type });
         }
     });
     if (items.length === 0) {
@@ -826,7 +832,6 @@ window.saveSaleModification = async function() {
         console.error(err);
     }
 };
-
 // ========================================================================
 // LOAD PAGE
 // ========================================================================
@@ -1909,41 +1914,32 @@ async function renderSales() {
         });
         barcodeInput.focus();
     }
-
     window.addProductToCart = (productId, productName, sellPrice, stock, wholesalePrice = 0, wholesaleQty = 5) => {
         const existing = cart.find(i => i.product_id === productId);
+        // ✅ CORRECTION : respecter le mode "Vente en gros" global
         const useWholesale = isWholesaleMode && wholesalePrice > 0;
-        const unitPrice = useWholesale ? wholesalePrice : sellPrice;
+        const initialPrice = useWholesale ? wholesalePrice : sellPrice;
+
         if (existing) {
-            let maxQty = stock;
-            if (useWholesale) {
-                maxQty = Math.floor(stock / wholesaleQty) * wholesaleQty;
-                if (existing.quantity >= maxQty) {
-                    showToast(`Stock insuffisant (${maxQty} disponibles en lots de ${wholesaleQty})`, 'warning');
-                    return;
-                }
-                existing.quantity += wholesaleQty;
-                existing.total_price = existing.quantity * existing.unit_price;
-            } else {
-                if (existing.quantity >= stock) {
-                    showToast(`Stock insuffisant (${stock} disponible)`, 'warning');
-                    return;
-                }
-                existing.quantity += 1;
-                existing.total_price = existing.quantity * existing.unit_price;
+            if (existing.quantity >= stock) {
+                showToast(`Stock insuffisant (${stock} disponible)`, 'warning');
+                return;
             }
+            existing.quantity += 1;
+            existing.total_price = existing.quantity * existing.unit_price;
         } else {
-            let qty = useWholesale ? wholesaleQty : 1;
-            if (qty > stock) {
+            if (1 > stock) {
                 showToast(`Stock insuffisant (${stock} disponible)`, 'warning');
                 return;
             }
             cart.push({
                 product_id: productId,
                 name: productName,
-                quantity: qty,
-                unit_price: unitPrice,
-                total_price: qty * unitPrice,
+                quantity: 1,
+                unit_price: initialPrice,
+                detail_price: sellPrice,
+                wholesale_price: wholesalePrice,
+                total_price: initialPrice,
                 stock: stock,
                 isWholesale: useWholesale
             });
@@ -1981,8 +1977,128 @@ async function renderSales() {
     if (deferredCheck && deferredFields) {
         deferredCheck.addEventListener('change', () => deferredFields.style.display = deferredCheck.checked ? 'block' : 'none');
     }
+        // ========== RECHERCHE PRODUIT (API EN DIRECT) ==========
+    let selectedEditProduct = null;
+    let editSearchTimeout = null;
 
-    window.renderCart = () => {
+    window.filterEditProducts = function() {
+        clearTimeout(editSearchTimeout);
+        editSearchTimeout = setTimeout(async () => {
+            const term = document.getElementById('editProductSearch').value.trim();
+            const suggestions = document.getElementById('editProductSuggestions');
+
+            if (term.length < 2) { suggestions.style.display = 'none'; return; }
+
+            try {
+                const results = await apiCall(`/products/search?q=${encodeURIComponent(term)}&limit=10`);
+
+                if (!results || !results.length) {
+                    suggestions.innerHTML = '<div class="text-muted p-2">Aucun produit trouvé</div>';
+                    suggestions.style.display = 'block';
+                    return;
+                }
+
+                suggestions.innerHTML = results.map(p =>
+                    `<div data-id="${p.id}" data-name="${p.name}" data-price="${p.sell_price}" 
+                          data-wprice="${p.wholesale_price || 0}" 
+                          style="cursor:pointer;padding:8px 12px;border-bottom:1px solid #eee;">
+                        ${p.name} <small class="text-muted">— ${formatNumber(p.sell_price)} FCFA (stock: ${p.quantity})</small>
+                    </div>`
+                ).join('');
+                suggestions.style.display = 'block';
+
+                document.querySelectorAll('#editProductSuggestions div[data-id]').forEach(el => {
+                    el.addEventListener('click', () => {
+                        selectedEditProduct = {
+                            id: parseInt(el.dataset.id),
+                            name: el.dataset.name,
+                            price: parseFloat(el.dataset.price),
+                            wholesale_price: parseFloat(el.dataset.wprice)
+                        };
+                        document.getElementById('editProductSearch').value = el.dataset.name;
+                        suggestions.style.display = 'none';
+                    });
+                });
+            } catch(e) {
+                console.error('Erreur recherche produit:', e);
+                suggestions.style.display = 'none';
+            }
+        }, 300);
+    };
+    window.addSelectedEditProduct = function() {
+        if (!selectedEditProduct) return showToast('Veuillez sélectionner un produit dans la liste', 'warning');
+        addProductToEditTable(selectedEditProduct);
+        selectedEditProduct = null;
+        document.getElementById('editProductSearch').value = '';
+    };
+
+    window.addProductByBarcode = async function(barcode) {
+        if (!barcode) return;
+        try {
+            const prod = await apiCall(`/products/barcode/${encodeURIComponent(barcode)}`);
+            addProductToEditTable({
+                id: prod.id,
+                name: prod.name,
+                price: prod.sell_price,
+                wholesale_price: prod.wholesale_price || 0,
+                barcode: prod.barcode
+            });
+            document.getElementById('editBarcodeScan').value = '';
+        } catch(err) {
+            showToast('❌ Produit non trouvé avec ce code-barres', 'danger');
+        }
+    };
+
+        function addProductToEditTable(prod) {
+        const tbody = document.getElementById('editItemsBody');
+        // Vérifier si le produit est déjà dans la table
+        let existingRow = null;
+        tbody.querySelectorAll('tr').forEach(row => {
+            const input = row.querySelector('.edit-qty');
+            if (input && parseInt(input.dataset.id) === prod.id) existingRow = row;
+        });
+
+        if (existingRow) {
+            const qtyInput = existingRow.querySelector('.edit-qty');
+            qtyInput.value = parseInt(qtyInput.value) + 1;
+            recalcEditTotals();
+        } else {
+            const row = document.createElement('tr');
+            // ✅ CORRECTION : nouveau produit ajouté = 'detail' par défaut
+            row.dataset.saleType = 'detail';
+            row.innerHTML = `
+                <td>${prod.name}</td>
+                <td><input type="number" class="form-control form-control-sm edit-qty" value="1" min="1" step="1" data-id="${prod.id}"></td>
+                <td><input type="number" class="form-control form-control-sm edit-price" value="${prod.price}" min="0" step="10" data-id="${prod.id}"></td>
+                <td class="edit-total">${formatNumber(prod.price)} FCFA</td>
+                <td><button class="btn btn-sm btn-danger remove-item" data-id="${prod.id}"><i class="bi bi-trash"></i></button></td>
+            `;
+            tbody.appendChild(row);
+
+            row.querySelectorAll('.edit-qty, .edit-price').forEach(input => input.addEventListener('input', recalcEditTotals));
+            row.querySelector('.remove-item').addEventListener('click', function() { this.closest('tr').remove(); recalcEditTotals(); });
+            recalcEditTotals();
+        }
+    }
+        // ✅ NOUVELLE FONCTION : Gestion +/- quantité dans le panier
+    window.updateQty = (idx, delta) => {
+        const item = cart[idx];
+        if (!item) return;
+        const newQty = item.quantity + delta;
+        if (newQty <= 0) {
+            cart.splice(idx, 1);
+            renderCart();
+            return;
+        }
+        if (newQty > item.stock) {
+            showToast(`Stock insuffisant (${item.stock} disponible)`, 'warning');
+            return;
+        }
+        item.quantity = newQty;
+        item.total_price = item.unit_price * item.quantity;
+        renderCart();
+    };
+        window.renderCart = () => {
         const container = document.getElementById('cartList');
         const countEl = document.getElementById('cartCount');
         let total = 0;
@@ -1994,6 +2110,9 @@ async function renderSales() {
         }
         container.innerHTML = cart.map((item, idx) => {
             total += item.total_price;
+            const isGros = item.isWholesale;
+            const hasWholesale = item.wholesale_price > 0;
+            
             return `
                 <div class="cart-item">
                     <span class="item-name">${item.name}</span>
@@ -2002,8 +2121,13 @@ async function renderSales() {
                         <span>${item.quantity}</span>
                         <button onclick="updateQty(${idx}, 1)"><i class="bi bi-plus"></i></button>
                     </div>
+                    ${hasWholesale ? `
+                        <button class="btn btn-sm ${isGros ? 'btn-warning' : 'btn-outline-secondary'} ms-1" style="padding:2px 6px; font-size:0.65rem;" onclick="toggleItemWholesale(${idx})">
+                            ${isGros ? 'Gros' : 'Détail'}
+                        </button>
+                    ` : ''}
                     <div class="item-price-edit">
-                        <input type="number" class="form-control form-control-sm" style="width:80px;display:inline-block;"
+                        <input type="number" class="form-control form-control-sm" style="width:70px;display:inline-block;"
                                value="${item.unit_price}" step="10" min="0"
                                onchange="updateUnitPrice(${idx}, this.value)">
                     </div>
@@ -2016,13 +2140,14 @@ async function renderSales() {
         if (countEl) countEl.innerText = cart.length;
     };
 
-    window.updateQty = (idx, delta) => {
+    // ✅ NOUVELLE FONCTION : Bascule Gros/Détail pour un article
+    window.toggleItemWholesale = (idx) => {
         const item = cart[idx];
-        const newQty = item.quantity + delta;
-        if (newQty < 1) return;
-        if (newQty > item.stock) return showToast('Stock insuffisant', 'warning');
-        item.quantity = newQty;
-        item.total_price = item.quantity * item.unit_price;
+        if (!item.wholesale_price || item.wholesale_price <= 0) return;
+        
+        item.isWholesale = !item.isWholesale;
+        item.unit_price = item.isWholesale ? item.wholesale_price : item.detail_price;
+        item.total_price = item.unit_price * item.quantity;
         renderCart();
     };
 
@@ -2042,7 +2167,7 @@ async function renderSales() {
         renderCart();
     };
 
-    window.completeSale = async () => {
+        window.completeSale = async () => {
         if (cart.length === 0) return showToast('Panier vide', 'warning');
         const clientName = clientInput.value.trim();
         let clientData = {};
@@ -2067,10 +2192,12 @@ async function renderSales() {
         const isDeferred = document.getElementById('deferredPayment').checked;
         const due_date = isDeferred ? document.getElementById('dueDate').value : null;
         const status = isDeferred ? 'pending' : 'completed';
+        // ✅ CORRECTION : envoi du sale_type par article
         const items = cart.map(i => ({
             product_id: i.product_id,
             quantity: i.quantity,
-            unit_price: i.unit_price
+            unit_price: i.unit_price,
+            sale_type: i.isWholesale ? 'gros' : 'detail'
         }));
         const requestData = {
             ...clientData,
@@ -2108,7 +2235,6 @@ async function renderSales() {
             showToast('❌ Erreur : ' + err.message, 'danger');
         }
     };
-
     window.loadSalesList = async () => {
         try {
             const sales = await apiCall('/sales');

@@ -444,8 +444,6 @@ await pool.query(`CREATE TABLE IF NOT EXISTS expenses (
             FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
             FOREIGN KEY (driver_id) REFERENCES delivery_drivers(id) ON DELETE SET NULL
         )`);
-
-        // ===== INSERTION PERMISSIONS =====
         try {
             await pool.query(`INSERT IGNORE INTO permissions (name, description) VALUES 
                 ('dashboard', 'Tableau de bord'),
@@ -473,7 +471,34 @@ await pool.query(`CREATE TABLE IF NOT EXISTS expenses (
                 ('settings_edit', 'Modifier les paramètres'),
                 ('sub_users_manage', 'Gérer l''équipe'),
                 ('orders_view', 'Voir les commandes en ligne'),
-                ('orders_validate', 'Valider les commandes en ligne')
+                ('orders_validate', 'Valider les commandes en ligne'),
+                
+                ('suppliers_view', 'Voir les fournisseurs'),
+                ('suppliers_create', 'Créer un fournisseur'),
+                ('suppliers_edit', 'Modifier un fournisseur'),
+                ('suppliers_delete', 'Supprimer un fournisseur'),
+                ('supplier_purchases_view', 'Voir les achats fournisseurs'),
+                ('supplier_purchases_create', 'Créer un achat fournisseur'),
+                ('supplier_purchases_edit', 'Modifier un achat fournisseur'),
+                ('supplier_purchases_delete', 'Supprimer un achat fournisseur'),
+                ('supplier_payments_view', 'Voir les paiements fournisseurs'),
+                ('supplier_payments_create', 'Créer un paiement fournisseur'),
+                ('supplier_payments_delete', 'Supprimer un paiement fournisseur'),
+                ('expenses_view', 'Voir les dépenses'),
+                ('expenses_create', 'Créer une dépense'),
+                ('expenses_edit', 'Modifier une dépense'),
+                ('expenses_delete', 'Supprimer une dépense'),
+                ('deliveries_view', 'Voir les livraisons'),
+                ('deliveries_manage', 'Gérer les livraisons'),
+                ('drivers_view', 'Voir les livreurs'),
+                ('drivers_manage', 'Gérer les livreurs'),
+                
+                ('dashboard_view_stock', 'Voir les stats de stock (Dashboard)'),
+                ('dashboard_view_sales', 'Voir les stats de ventes (Dashboard)'),
+                ('dashboard_view_recent', 'Voir les dernières ventes (Dashboard)'),
+                ('reports_view_sales', 'Voir le graphique (Rapports)'),
+                ('reports_view_margins', 'Voir les marges (Rapports)'),
+                ('reports_view_tva', 'Voir la TVA (Rapports)')
             `);
             console.log('✅ Permissions insérées avec succès');
         } catch (err) {
@@ -548,7 +573,7 @@ await pool.query(`CREATE TABLE IF NOT EXISTS expenses (
         } catch(e) {
             console.log('⚠️ Index FULLTEXT déjà présent ou erreur:', e.message);
         }
-
+try { await pool.query(`ALTER TABLE sale_items ADD COLUMN sale_type ENUM('detail','gros') DEFAULT 'detail'`); } catch(e) {}
         console.log('✅ Tables prêtes avec index');
 
         app.listen(PORT, () => console.log(`🚀 Serveur sur http://localhost:${PORT}`));
@@ -1469,10 +1494,14 @@ const sale_type = is_wholesale ? 'gros' : 'detail';
             [req.user.id, sale_type, client_id, subtotal, remise_pct || 0, acompte || 0, tax, final_amount, payment_method || 'cash', finalStatus, due_date || null, is_wholesale ? 'VENTE EN GROS' : null, tax_rate]
         );
         const sale_id = saleResult.insertId;
+      
         for (let item of items) {
+            // ✅ Récupérer le type (par défaut 'detail' si non fourni)
+            const itemSaleType = item.sale_type || 'detail';
+            
             await connection.query(
-                `INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, total_price, tax_amount) VALUES (?, ?, ?, ?, ?, ?)`,
-                [sale_id, item.product_id, item.quantity, item.unit_price, item.total_price, item.tax_amount || 0]
+                `INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, total_price, tax_amount, sale_type) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                [sale_id, item.product_id, item.quantity, item.unit_price, item.total_price, item.tax_amount || 0, itemSaleType]
             );
 
             const [prodBefore] = await connection.query('SELECT quantity FROM products WHERE id=? FOR UPDATE', [item.product_id]);
@@ -1585,7 +1614,6 @@ app.put('/api/sales/:id', authenticate, async (req, res) => {
         connection.release();
     }
 });
-
 app.put('/api/sales/:id/items', authenticate, async (req, res) => {
     const saleId = req.params.id;
     const { items } = req.body;
@@ -1645,9 +1673,11 @@ app.put('/api/sales/:id/items', authenticate, async (req, res) => {
                 }
 
                 const total_price = item.quantity * item.unit_price;
+                // ✅ CORRECTION : insérer sale_type dans sale_items
+                const itemSaleType = item.sale_type || 'detail';
                 await connection.query(
-                    'INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, total_price) VALUES (?, ?, ?, ?, ?)',
-                    [saleId, item.product_id, item.quantity, item.unit_price, total_price]
+                    'INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, total_price, sale_type) VALUES (?, ?, ?, ?, ?, ?)',
+                    [saleId, item.product_id, item.quantity, item.unit_price, total_price, itemSaleType]
                 );
                 subtotal += total_price;
             }
@@ -1681,7 +1711,6 @@ app.put('/api/sales/:id/items', authenticate, async (req, res) => {
         }
     }
 });
-
 app.post('/api/sales/:id/payment', authenticate, async (req, res) => {
     const { amount, payment_method } = req.body;
     const saleId = req.params.id;
@@ -5363,15 +5392,14 @@ app.get('/api/reports/daily-sales-by-type', authenticate, async (req, res) => {
     try {
         const [rows] = await pool.query(
             `SELECT 
-                COALESCE(SUM(CASE WHEN sale_type = 'detail' THEN final_amount ELSE 0 END), 0) AS total_detail,
-                COALESCE(SUM(CASE WHEN sale_type = 'gros'   THEN final_amount ELSE 0 END), 0) AS total_gros,
-                COALESCE(SUM(final_amount), 0) AS total_general,
-                COUNT(CASE WHEN sale_type = 'detail' THEN 1 END) AS count_detail,
-                COUNT(CASE WHEN sale_type = 'gros'   THEN 1 END) AS count_gros
-             FROM sales
-             WHERE user_id = ?
-               AND DATE(sale_date) = ?
-               AND status = 'completed'`,
+                COALESCE(SUM(CASE WHEN si.sale_type = 'detail' THEN si.total_price ELSE 0 END), 0) AS total_detail,
+                COALESCE(SUM(CASE WHEN si.sale_type = 'gros'   THEN si.total_price ELSE 0 END), 0) AS total_gros,
+                COALESCE(SUM(si.total_price), 0) AS total_general,
+                COUNT(DISTINCT CASE WHEN si.sale_type = 'detail' THEN s.id END) AS count_detail,
+                COUNT(DISTINCT CASE WHEN si.sale_type = 'gros'   THEN s.id END) AS count_gros
+             FROM sales s
+             JOIN sale_items si ON s.id = si.sale_id
+             WHERE s.user_id = ? AND DATE(s.sale_date) = ? AND s.status = 'completed'`,
             [userId, targetDate]
         );
         res.json({
@@ -5395,33 +5423,36 @@ app.get('/api/reports/sales-by-type-period', authenticate, async (req, res) => {
 
     let dateCond = '';
     const params = [userId];
+    
     if (period === 'day') {
-        dateCond = ' AND DATE(sale_date) = ?';
+        dateCond = ' AND DATE(s.sale_date) = ?';
         params.push(targetDate);
     } else if (period === 'week') {
-        dateCond = ' AND YEARWEEK(sale_date, 1) = YEARWEEK(?, 1)';
+        dateCond = ' AND YEARWEEK(s.sale_date, 1) = YEARWEEK(?, 1)';
         params.push(targetDate);
     } else if (period === 'month') {
-        dateCond = ' AND YEAR(sale_date) = YEAR(?) AND MONTH(sale_date) = MONTH(?)';
+        dateCond = ' AND YEAR(s.sale_date) = YEAR(?) AND MONTH(s.sale_date) = MONTH(?)';
         params.push(targetDate, targetDate);
     } else if (period === 'year') {
-        dateCond = ' AND YEAR(sale_date) = YEAR(?)';
+        dateCond = ' AND YEAR(s.sale_date) = YEAR(?)';
         params.push(targetDate);
     }
 
     try {
         const [rows] = await pool.query(
             `SELECT 
-                COALESCE(SUM(CASE WHEN sale_type = 'detail' THEN final_amount ELSE 0 END), 0) AS total_detail,
-                COALESCE(SUM(CASE WHEN sale_type = 'gros'   THEN final_amount ELSE 0 END), 0) AS total_gros,
-                COALESCE(SUM(final_amount), 0) AS total_general,
-                COUNT(CASE WHEN sale_type = 'detail' THEN 1 END) AS count_detail,
-                COUNT(CASE WHEN sale_type = 'gros'   THEN 1 END) AS count_gros,
-                COUNT(*) AS count_total
-             FROM sales
-             WHERE user_id = ? AND status = 'completed' ${dateCond}`,
+                COALESCE(SUM(CASE WHEN si.sale_type = 'detail' THEN si.total_price ELSE 0 END), 0) AS total_detail,
+                COALESCE(SUM(CASE WHEN si.sale_type = 'gros'   THEN si.total_price ELSE 0 END), 0) AS total_gros,
+                COALESCE(SUM(si.total_price), 0) AS total_general,
+                COUNT(DISTINCT CASE WHEN si.sale_type = 'detail' THEN s.id END) AS count_detail,
+                COUNT(DISTINCT CASE WHEN si.sale_type = 'gros'   THEN s.id END) AS count_gros,
+                COUNT(DISTINCT s.id) AS count_total
+             FROM sales s
+             JOIN sale_items si ON s.id = si.sale_id
+             WHERE s.user_id = ? AND s.status = 'completed' ${dateCond}`,
             params
         );
+        
         res.json({
             period,
             date: targetDate,
@@ -5437,7 +5468,6 @@ app.get('/api/reports/sales-by-type-period', authenticate, async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
-
 // ========== RAPPORT : ÉVOLUTION PAR SEMAINE ==========
 app.get('/api/reports/sales-by-week', authenticate, async (req, res) => {
     const userId = req.user.id;
@@ -5445,16 +5475,17 @@ app.get('/api/reports/sales-by-week', authenticate, async (req, res) => {
     try {
         const [rows] = await pool.query(
             `SELECT 
-                YEARWEEK(sale_date, 1) AS semaine,
-                MIN(DATE(sale_date)) AS debut,
-                MAX(DATE(sale_date)) AS fin,
-                COALESCE(SUM(CASE WHEN sale_type = 'detail' THEN final_amount ELSE 0 END), 0) AS total_detail,
-                COALESCE(SUM(CASE WHEN sale_type = 'gros'   THEN final_amount ELSE 0 END), 0) AS total_gros,
-                COALESCE(SUM(final_amount), 0) AS total_general
-             FROM sales
-             WHERE user_id = ? AND status = 'completed'
-               AND sale_date >= DATE_SUB(CURDATE(), INTERVAL ? WEEK)
-             GROUP BY YEARWEEK(sale_date, 1)
+                YEARWEEK(s.sale_date, 1) AS semaine,
+                MIN(DATE(s.sale_date)) AS debut,
+                MAX(DATE(s.sale_date)) AS fin,
+                COALESCE(SUM(CASE WHEN si.sale_type = 'detail' THEN si.total_price ELSE 0 END), 0) AS total_detail,
+                COALESCE(SUM(CASE WHEN si.sale_type = 'gros'   THEN si.total_price ELSE 0 END), 0) AS total_gros,
+                COALESCE(SUM(si.total_price), 0) AS total_general
+             FROM sales s
+             JOIN sale_items si ON s.id = si.sale_id
+             WHERE s.user_id = ? AND s.status = 'completed'
+               AND s.sale_date >= DATE_SUB(CURDATE(), INTERVAL ? WEEK)
+             GROUP BY YEARWEEK(s.sale_date, 1)
              ORDER BY semaine DESC
              LIMIT ?`,
             [userId, parseInt(weeks), parseInt(weeks)]
@@ -5465,7 +5496,6 @@ app.get('/api/reports/sales-by-week', authenticate, async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
-
 // ========== RAPPORT : ÉVOLUTION PAR MOIS ==========
 app.get('/api/reports/sales-by-month', authenticate, async (req, res) => {
     const userId = req.user.id;
@@ -5473,16 +5503,17 @@ app.get('/api/reports/sales-by-month', authenticate, async (req, res) => {
     try {
         const [rows] = await pool.query(
             `SELECT 
-                DATE_FORMAT(sale_date, '%Y-%m') AS mois,
-                COALESCE(SUM(CASE WHEN sale_type = 'detail' THEN final_amount ELSE 0 END), 0) AS total_detail,
-                COALESCE(SUM(CASE WHEN sale_type = 'gros'   THEN final_amount ELSE 0 END), 0) AS total_gros,
-                COALESCE(SUM(final_amount), 0) AS total_general,
-                COUNT(CASE WHEN sale_type = 'detail' THEN 1 END) AS count_detail,
-                COUNT(CASE WHEN sale_type = 'gros'   THEN 1 END) AS count_gros
-             FROM sales
-             WHERE user_id = ? AND status = 'completed'
-               AND sale_date >= DATE_SUB(CURDATE(), INTERVAL ? MONTH)
-             GROUP BY DATE_FORMAT(sale_date, '%Y-%m')
+                DATE_FORMAT(s.sale_date, '%Y-%m') AS mois,
+                COALESCE(SUM(CASE WHEN si.sale_type = 'detail' THEN si.total_price ELSE 0 END), 0) AS total_detail,
+                COALESCE(SUM(CASE WHEN si.sale_type = 'gros'   THEN si.total_price ELSE 0 END), 0) AS total_gros,
+                COALESCE(SUM(si.total_price), 0) AS total_general,
+                COUNT(DISTINCT CASE WHEN si.sale_type = 'detail' THEN s.id END) AS count_detail,
+                COUNT(DISTINCT CASE WHEN si.sale_type = 'gros'   THEN s.id END) AS count_gros
+             FROM sales s
+             JOIN sale_items si ON s.id = si.sale_id
+             WHERE s.user_id = ? AND s.status = 'completed'
+               AND s.sale_date >= DATE_SUB(CURDATE(), INTERVAL ? MONTH)
+             GROUP BY DATE_FORMAT(s.sale_date, '%Y-%m')
              ORDER BY mois DESC
              LIMIT ?`,
             [userId, parseInt(months), parseInt(months)]
